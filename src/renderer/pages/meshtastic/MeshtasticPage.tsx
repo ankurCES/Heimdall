@@ -112,6 +112,13 @@ export function MeshtasticPage() {
             {pulling ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Radio className="h-4 w-4 mr-2" />}
             {pulling ? 'Pulling...' : 'Pull Device Data'}
           </Button>
+          <Button variant="outline" size="sm" onClick={async () => {
+            setPullResult('Scanning network...')
+            const result = await invoke('meshtastic:discover') as { found: string[]; message: string }
+            setPullResult(result.message)
+          }}>
+            <Wifi className="h-4 w-4 mr-2" /> Discover
+          </Button>
           <Button variant="outline" size="sm" onClick={loadData} disabled={loading}>
             <RefreshCw className={cn('h-4 w-4 mr-2', loading && 'animate-spin')} /> Refresh
           </Button>
