@@ -75,14 +75,23 @@ export function createSchema(db: Database.Database): void {
       updated_at INTEGER NOT NULL
     );
 
+    CREATE TABLE IF NOT EXISTS chat_sessions (
+      id TEXT PRIMARY KEY,
+      title TEXT NOT NULL DEFAULT 'New Chat',
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    );
+
     CREATE TABLE IF NOT EXISTS chat_messages (
       id TEXT PRIMARY KEY,
+      session_id TEXT NOT NULL DEFAULT 'default',
       role TEXT NOT NULL CHECK(role IN ('user','assistant','system')),
       content TEXT NOT NULL,
       created_at INTEGER NOT NULL
     );
 
     CREATE INDEX IF NOT EXISTS idx_chat_created ON chat_messages(created_at);
+    CREATE INDEX IF NOT EXISTS idx_chat_session ON chat_messages(session_id);
 
     -- Enrichment: tags assigned to reports
     CREATE TABLE IF NOT EXISTS intel_tags (

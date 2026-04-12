@@ -8,6 +8,7 @@ const testChannels = [
   'obsidian:bulkImport', 'obsidian:manualSync', 'obsidian:needsInitialImport',
   'alerts:getRules', 'alerts:saveRules',
   'chat:send', 'chat:getHistory', 'chat:clearHistory', 'chat:getConnections',
+  'chat:createSession', 'chat:getSessions', 'chat:renameSession', 'chat:deleteSession',
   'chat:generateDailySummary', 'chat:generateWeeklySummary',
   'settings:testLlm', 'settings:listLlmModels',
   'enrichment:getTags', 'enrichment:getEntities', 'enrichment:getLinks',

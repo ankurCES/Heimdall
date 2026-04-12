@@ -12,6 +12,7 @@ import { cronService } from './services/cron/CronService'
 import type { SafetyConfig } from '@common/types/settings'
 import { seedDefaultSources } from './services/seeder/DefaultSourceSeeder'
 import { agentOrchestrator } from './agents/AgentOrchestrator'
+import { intelPipeline } from './services/vectordb/IntelPipeline'
 
 log.transports.file.level = 'info'
 log.transports.console.level = 'debug'
@@ -48,6 +49,9 @@ async function initializeDeferred(): Promise<void> {
 
   // Start agent orchestrator (enrichment, analysis, summaries)
   agentOrchestrator.start()
+
+  // Start vector DB ingestion pipeline
+  await intelPipeline.start()
 
   log.info('Deferred initialization complete')
 }
@@ -120,6 +124,7 @@ if (!gotTheLock) {
   })
 
   app.on('window-all-closed', () => {
+    intelPipeline.stop()
     agentOrchestrator.stop()
     collectorManager.shutdownAll()
     cronService.stopAll()
@@ -130,6 +135,7 @@ if (!gotTheLock) {
   })
 
   app.on('before-quit', () => {
+    intelPipeline.stop()
     agentOrchestrator.stop()
     collectorManager.shutdownAll()
     cronService.stopAll()
