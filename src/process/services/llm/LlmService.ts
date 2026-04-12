@@ -1,6 +1,5 @@
-import { BrowserWindow } from 'electron'
 import { settingsService } from '../settings/SettingsService'
-import type { LlmConfig } from '@common/types/settings'
+import type { LlmConfig, LlmConnection } from '@common/types/settings'
 import log from 'electron-log'
 
 export interface ChatMessage {
@@ -21,43 +20,80 @@ When presented with intelligence reports, you:
 Always cite the discipline and source of information you reference. Be precise and concise.`
 
 export class LlmService {
-  async chat(messages: ChatMessage[], onChunk?: (chunk: string) => void): Promise<string> {
-    const config = settingsService.get<LlmConfig>('llm')
-    if (!config?.baseUrl) throw new Error('LLM not configured — set Base URL in Settings > LLM')
+  getConnections(): LlmConnection[] {
+    const config = this.getConfig()
+    return config?.connections?.filter((c) => c.enabled) || []
+  }
 
-    const model = config.model || config.customModel
-    if (!model) throw new Error('No model selected — configure in Settings > LLM')
+  getConnection(connectionId?: string): LlmConnection | null {
+    const config = this.getConfig()
+    if (!config?.connections?.length) return null
+
+    if (connectionId) {
+      return config.connections.find((c) => c.id === connectionId && c.enabled) || null
+    }
+
+    // Return default or first enabled
+    const defaultConn = config.connections.find((c) => c.id === config.defaultConnectionId && c.enabled)
+    return defaultConn || config.connections.find((c) => c.enabled) || null
+  }
+
+  async chat(
+    messages: ChatMessage[],
+    connectionId?: string,
+    onChunk?: (chunk: string) => void
+  ): Promise<string> {
+    const conn = this.getConnection(connectionId)
+    if (!conn) throw new Error('No LLM connection configured or enabled. Add one in Settings > LLM.')
+
+    const model = conn.model || conn.customModel
+    if (!model) throw new Error(`No model set for connection "${conn.name}". Configure in Settings > LLM.`)
 
     const allMessages: ChatMessage[] = [
       { role: 'system', content: SYSTEM_PROMPT },
       ...messages
     ]
 
-    return this.chatOpenAICompatible(config.baseUrl, config.apiKey, model, allMessages, onChunk)
+    return this.chatOpenAICompatible(conn.baseUrl, conn.apiKey, model, allMessages, onChunk)
   }
 
-  async complete(prompt: string, maxTokens: number = 1024): Promise<string> {
-    const config = settingsService.get<LlmConfig>('llm')
-    if (!config?.baseUrl) throw new Error('LLM not configured')
-    const model = config.model || config.customModel
+  async complete(prompt: string, connectionId?: string, maxTokens: number = 1024): Promise<string> {
+    const conn = this.getConnection(connectionId)
+    if (!conn) throw new Error('No LLM connection configured')
+    const model = conn.model || conn.customModel
     if (!model) throw new Error('No model selected')
 
     return this.chatOpenAICompatible(
-      config.baseUrl, config.apiKey, model,
+      conn.baseUrl, conn.apiKey, model,
       [{ role: 'user', content: prompt }]
     )
   }
 
-  private normalizeBaseUrl(url: string): string {
-    // Strip trailing slashes
-    let base = url.replace(/\/+$/, '')
-    // If URL doesn't end with /v1 or similar API path, try to detect and fix
-    if (!base.match(/\/v\d+$/)) {
-      // Common mistake: using website URL instead of API URL
-      if (base === 'https://ollama.com' || base === 'http://ollama.com') {
-        base = 'http://localhost:11434/v1'
-        log.warn('LLM: Corrected ollama.com to localhost:11434/v1')
+  private getConfig(): LlmConfig | null {
+    const raw = settingsService.get<any>('llm')
+    if (!raw) return null
+    // Handle legacy single-connection format
+    if (raw.baseUrl && !raw.connections) {
+      return {
+        connections: [{
+          id: 'legacy',
+          name: 'Default',
+          baseUrl: raw.baseUrl,
+          apiKey: raw.apiKey || '',
+          model: raw.model || '',
+          customModel: raw.customModel || '',
+          enabled: true
+        }],
+        defaultConnectionId: 'legacy'
       }
+    }
+    return raw as LlmConfig
+  }
+
+  private normalizeBaseUrl(url: string): string {
+    let base = url.replace(/\/+$/, '')
+    if (base === 'https://ollama.com' || base === 'http://ollama.com') {
+      base = 'http://localhost:11434/v1'
     }
     return base
   }
@@ -74,9 +110,8 @@ export class LlmService {
     if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`
 
     const chatUrl = `${baseUrl}/chat/completions`
-    log.info(`LLM chat request: ${chatUrl} model=${model}`)
+    log.info(`LLM chat: ${chatUrl} model=${model}`)
 
-    // Streaming
     if (onChunk) {
       const response = await fetch(chatUrl, {
         method: 'POST',
@@ -90,7 +125,7 @@ export class LlmService {
 
       if (!response.ok) {
         const err = await response.text()
-        throw new Error(`LLM API error ${response.status} at ${chatUrl}: ${err.slice(0, 200)}. Check your Base URL in Settings > LLM.`)
+        throw new Error(`LLM ${response.status} at ${chatUrl}: ${err.slice(0, 200)}`)
       }
 
       let full = ''
@@ -106,7 +141,6 @@ export class LlmService {
           const trimmed = line.trim()
           if (!trimmed || trimmed === 'data: [DONE]') continue
           if (!trimmed.startsWith('data: ')) continue
-
           try {
             const data = JSON.parse(trimmed.slice(6))
             const delta = data.choices?.[0]?.delta?.content
@@ -120,7 +154,6 @@ export class LlmService {
       return full
     }
 
-    // Non-streaming
     const response = await fetch(chatUrl, {
       method: 'POST',
       headers,
@@ -133,7 +166,7 @@ export class LlmService {
 
     if (!response.ok) {
       const err = await response.text()
-      throw new Error(`LLM API error ${response.status}: ${err.slice(0, 200)}`)
+      throw new Error(`LLM ${response.status} at ${chatUrl}: ${err.slice(0, 200)}`)
     }
 
     const data = await response.json() as { choices: Array<{ message: { content: string } }> }

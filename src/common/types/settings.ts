@@ -36,7 +36,26 @@ export const SafetyConfigSchema = z.object({
   retentionDays: z.number().int().min(1).default(90)
 })
 
+export const LlmConnectionSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  baseUrl: z.string(),
+  apiKey: z.string().default(''),
+  model: z.string().default(''),
+  customModel: z.string().default(''),
+  enabled: z.boolean().default(true)
+})
+
 export const LlmConfigSchema = z.object({
+  connections: z.array(LlmConnectionSchema).default([]),
+  defaultConnectionId: z.string().default('')
+})
+
+export type LlmConnection = z.infer<typeof LlmConnectionSchema>
+export type LlmConfig = z.infer<typeof LlmConfigSchema>
+
+// Keep old shape for backward compat
+export const LlmConfigLegacySchema = z.object({
   baseUrl: z.string().default('https://api.openai.com/v1'),
   apiKey: z.string().default(''),
   model: z.string().default('gpt-4o-mini'),

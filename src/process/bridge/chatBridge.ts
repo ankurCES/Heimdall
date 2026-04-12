@@ -1,37 +1,52 @@
 import { ipcMain, BrowserWindow } from 'electron'
 import { llmService, type ChatMessage } from '../services/llm/LlmService'
-import { intelRagService } from '../services/llm/IntelRagService'
+import { agenticChatOrchestrator } from '../services/llm/AgenticChatOrchestrator'
 import { memoryService } from '../services/memory/MemoryService'
 import { getDatabase } from '../services/database'
 import { generateId, timestamp } from '@common/utils/id'
 import log from 'electron-log'
 
 export function registerChatBridge(): void {
-  ipcMain.handle('chat:send', async (event, params: { messages: ChatMessage[]; query: string }) => {
-    const { messages, query } = params
+  ipcMain.handle('chat:send', async (event, params: {
+    messages: ChatMessage[]
+    query: string
+    connectionId?: string
+    useAgentic?: boolean
+  }) => {
+    const { messages, query, connectionId, useAgentic = true } = params
 
-    // Build RAG context from intel reports
-    const contextMessages = intelRagService.buildContextMessages(query)
-    const summary = intelRagService.getRecentSummary(24)
-
-    // Combine: system context + RAG + user conversation
-    const fullMessages: ChatMessage[] = [
-      { role: 'system', content: summary },
-      ...contextMessages,
-      ...messages
-    ]
-
-    // Stream response back
     let fullResponse = ''
     try {
-      fullResponse = await llmService.chat(fullMessages, (chunk) => {
-        // Send chunks to renderer
-        for (const win of BrowserWindow.getAllWindows()) {
-          win.webContents.send('chat:chunk', chunk)
-        }
-      })
+      if (useAgentic) {
+        fullResponse = await agenticChatOrchestrator.process(
+          query,
+          messages,
+          connectionId,
+          (chunk) => {
+            for (const win of BrowserWindow.getAllWindows()) {
+              win.webContents.send('chat:chunk', chunk)
+            }
+          }
+        )
+      } else {
+        // Simple direct chat without agentic decomposition
+        const { intelRagService } = await import('../services/llm/IntelRagService')
+        const contextMessages = intelRagService.buildContextMessages(query)
+        const summary = intelRagService.getRecentSummary(24)
 
-      // Signal stream end
+        const fullMessages: ChatMessage[] = [
+          { role: 'system', content: summary },
+          ...contextMessages,
+          ...messages
+        ]
+
+        fullResponse = await llmService.chat(fullMessages, connectionId, (chunk) => {
+          for (const win of BrowserWindow.getAllWindows()) {
+            win.webContents.send('chat:chunk', chunk)
+          }
+        })
+      }
+
       for (const win of BrowserWindow.getAllWindows()) {
         win.webContents.send('chat:done', fullResponse)
       }
@@ -43,15 +58,11 @@ export function registerChatBridge(): void {
       throw err
     }
 
-    // Persist messages
+    // Persist
     const db = getDatabase()
     const now = timestamp()
-    db.prepare('INSERT INTO chat_messages (id, role, content, created_at) VALUES (?, ?, ?, ?)').run(
-      generateId(), 'user', query, now
-    )
-    db.prepare('INSERT INTO chat_messages (id, role, content, created_at) VALUES (?, ?, ?, ?)').run(
-      generateId(), 'assistant', fullResponse, now
-    )
+    db.prepare('INSERT INTO chat_messages (id, role, content, created_at) VALUES (?, ?, ?, ?)').run(generateId(), 'user', query, now)
+    db.prepare('INSERT INTO chat_messages (id, role, content, created_at) VALUES (?, ?, ?, ?)').run(generateId(), 'assistant', fullResponse, now)
 
     return fullResponse
   })
@@ -72,6 +83,15 @@ export function registerChatBridge(): void {
 
   ipcMain.handle('chat:generateWeeklySummary', () => {
     return memoryService.generateWeeklySummary()
+  })
+
+  ipcMain.handle('chat:getConnections', () => {
+    return llmService.getConnections().map((c) => ({
+      id: c.id,
+      name: c.name,
+      model: c.model || c.customModel,
+      enabled: c.enabled
+    }))
   })
 
   log.info('Chat bridge registered')
