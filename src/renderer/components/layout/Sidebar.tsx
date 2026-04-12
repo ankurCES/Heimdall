@@ -11,7 +11,8 @@ import {
   Activity,
   BookOpen,
   Coins,
-  BarChart3
+  BarChart3,
+  Radio
 } from 'lucide-react'
 import { cn } from '@renderer/lib/utils'
 
@@ -21,6 +22,7 @@ const navItems = [
   { to: '/sources', icon: Database, label: 'Sources' },
   { to: '/alerts', icon: Bell, label: 'Alerts' },
   { to: '/map', icon: Map, label: 'Map' },
+  { to: '/meshtastic', icon: Radio, label: 'Meshtastic' },
   { to: '/vault', icon: BookOpen, label: 'Obsidian Vault' },
   { to: '/chat', icon: MessageSquare, label: 'Chat' },
   { to: '/explore', icon: BarChart3, label: 'Explore' },

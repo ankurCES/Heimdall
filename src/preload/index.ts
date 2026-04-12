@@ -14,7 +14,8 @@ const testChannels = [
   'chat:getSessionData', 'chat:isIngesting', 'explore:getData',
   'settings:testLlm', 'settings:listLlmModels', 'settings:listSerialPorts',
   'enrichment:getTags', 'enrichment:getEntities', 'enrichment:getLinks',
-  'enrichment:getTopTags', 'enrichment:getTopEntities'
+  'enrichment:getTopTags', 'enrichment:getTopEntities',
+  'meshtastic:getNodes', 'meshtastic:getNodeCount', 'meshtastic:getMessages', 'meshtastic:getRecommendedMode'
 ]
 const allowedChannels = [...Object.values(IPC_CHANNELS), ...testChannels]
 const chatEvents = ['chat:chunk', 'chat:done', 'chat:error']

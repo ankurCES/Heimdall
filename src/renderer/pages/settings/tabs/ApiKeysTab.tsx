@@ -17,6 +17,9 @@ interface ApiKeyConfig {
 const API_KEY_CONFIGS: ApiKeyConfig[] = [
   { service: 'openai', label: 'OpenAI API Key', description: 'For LLM analysis (GPT-4o)', category: 'LLM Providers' },
   { service: 'anthropic', label: 'Anthropic API Key', description: 'For LLM analysis (Claude)', category: 'LLM Providers' },
+  { service: 'ollama_cloud', label: 'Ollama Cloud API Key', description: 'For LLM analysis via Ollama Cloud', category: 'LLM Providers' },
+  { service: 'openrouter', label: 'OpenRouter API Key', description: 'Multi-model LLM gateway', category: 'LLM Providers' },
+  { service: 'groq', label: 'Groq API Key', description: 'Fast inference (Llama, Mixtral)', category: 'LLM Providers' },
   { service: 'twitter', label: 'Twitter/X Bearer Token', description: 'SOCMINT — public tweet search', category: 'Social Media' },
   { service: 'reddit_client_id', label: 'Reddit Client ID', description: 'SOCMINT — subreddit monitoring', category: 'Social Media' },
   { service: 'reddit_client_secret', label: 'Reddit Client Secret', description: 'SOCMINT — OAuth2 auth', category: 'Social Media' },
