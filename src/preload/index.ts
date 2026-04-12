@@ -8,7 +8,10 @@ const testChannels = [
   'obsidian:bulkImport', 'obsidian:manualSync', 'obsidian:needsInitialImport',
   'alerts:getRules', 'alerts:saveRules',
   'chat:send', 'chat:getHistory', 'chat:clearHistory',
-  'chat:generateDailySummary', 'chat:generateWeeklySummary'
+  'chat:generateDailySummary', 'chat:generateWeeklySummary',
+  'settings:testLlm', 'settings:listLlmModels',
+  'enrichment:getTags', 'enrichment:getEntities', 'enrichment:getLinks',
+  'enrichment:getTopTags', 'enrichment:getTopEntities'
 ]
 const allowedChannels = [...Object.values(IPC_CHANNELS), ...testChannels]
 const chatEvents = ['chat:chunk', 'chat:done', 'chat:error']

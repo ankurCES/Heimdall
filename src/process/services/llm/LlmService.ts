@@ -23,126 +23,78 @@ Always cite the discipline and source of information you reference. Be precise a
 export class LlmService {
   async chat(messages: ChatMessage[], onChunk?: (chunk: string) => void): Promise<string> {
     const config = settingsService.get<LlmConfig>('llm')
-    if (!config) throw new Error('LLM not configured')
+    if (!config?.baseUrl) throw new Error('LLM not configured — set Base URL in Settings > LLM')
+
+    const model = config.model || config.customModel
+    if (!model) throw new Error('No model selected — configure in Settings > LLM')
 
     const allMessages: ChatMessage[] = [
       { role: 'system', content: SYSTEM_PROMPT },
       ...messages
     ]
 
-    switch (config.provider) {
-      case 'openai':
-        return this.chatOpenAI(config, allMessages, onChunk)
-      case 'anthropic':
-        return this.chatAnthropic(config, allMessages, onChunk)
-      case 'ollama':
-        return this.chatOllama(config, allMessages, onChunk)
-      default:
-        throw new Error(`Unknown LLM provider: ${config.provider}`)
-    }
+    return this.chatOpenAICompatible(config.baseUrl, config.apiKey, model, allMessages, onChunk)
   }
 
-  private async chatOpenAI(config: LlmConfig, messages: ChatMessage[], onChunk?: (chunk: string)=> void): Promise<string> {
-    const apiKey = config.apiKey || settingsService.get<string>('apikeys.openai')
-    if (!apiKey) throw new Error('OpenAI API key not configured')
+  async complete(prompt: string, maxTokens: number = 1024): Promise<string> {
+    const config = settingsService.get<LlmConfig>('llm')
+    if (!config?.baseUrl) throw new Error('LLM not configured')
+    const model = config.model || config.customModel
+    if (!model) throw new Error('No model selected')
 
-    const OpenAI = (await import('openai')).default
-    const client = new OpenAI({ apiKey })
+    return this.chatOpenAICompatible(
+      config.baseUrl, config.apiKey, model,
+      [{ role: 'user', content: prompt }]
+    )
+  }
 
+  private async chatOpenAICompatible(
+    baseUrl: string,
+    apiKey: string,
+    model: string,
+    messages: ChatMessage[],
+    onChunk?: (chunk: string) => void
+  ): Promise<string> {
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+    if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`
+
+    // Streaming
     if (onChunk) {
-      const stream = await client.chat.completions.create({
-        model: config.model || 'gpt-4o-mini',
-        messages: messages.map((m) => ({ role: m.role, content: m.content })),
-        stream: true
+      const response = await fetch(`${baseUrl}/chat/completions`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          model,
+          messages: messages.map((m) => ({ role: m.role, content: m.content })),
+          stream: true
+        })
       })
 
-      let full = ''
-      for await (const chunk of stream) {
-        const delta = chunk.choices[0]?.delta?.content || ''
-        if (delta) {
-          full += delta
-          onChunk(delta)
-        }
+      if (!response.ok) {
+        const err = await response.text()
+        throw new Error(`LLM API error ${response.status}: ${err.slice(0, 200)}`)
       }
-      return full
-    }
-
-    const response = await client.chat.completions.create({
-      model: config.model || 'gpt-4o-mini',
-      messages: messages.map((m) => ({ role: m.role, content: m.content }))
-    })
-    return response.choices[0]?.message?.content || ''
-  }
-
-  private async chatAnthropic(config: LlmConfig, messages: ChatMessage[], onChunk?: (chunk: string) => void): Promise<string> {
-    const apiKey = config.apiKey || settingsService.get<string>('apikeys.anthropic')
-    if (!apiKey) throw new Error('Anthropic API key not configured')
-
-    const Anthropic = (await import('@anthropic-ai/sdk')).default
-    const client = new Anthropic({ apiKey })
-
-    const systemMsg = messages.find((m) => m.role === 'system')?.content || ''
-    const chatMsgs = messages.filter((m) => m.role !== 'system')
-
-    if (onChunk) {
-      const stream = await client.messages.stream({
-        model: config.model || 'claude-sonnet-4-20250514',
-        max_tokens: 4096,
-        system: systemMsg,
-        messages: chatMsgs.map((m) => ({ role: m.role as 'user' | 'assistant', content: m.content }))
-      })
 
       let full = ''
-      for await (const event of stream) {
-        if (event.type === 'content_block_delta' && event.delta.type === 'text_delta') {
-          full += event.delta.text
-          onChunk(event.delta.text)
-        }
-      }
-      return full
-    }
-
-    const response = await client.messages.create({
-      model: config.model || 'claude-sonnet-4-20250514',
-      max_tokens: 4096,
-      system: systemMsg,
-      messages: chatMsgs.map((m) => ({ role: m.role as 'user' | 'assistant', content: m.content }))
-    })
-    const textBlock = response.content.find((b) => b.type === 'text')
-    return textBlock?.type === 'text' ? textBlock.text : ''
-  }
-
-  private async chatOllama(config: LlmConfig, messages: ChatMessage[], onChunk?: (chunk: string) => void): Promise<string> {
-    const baseUrl = config.ollamaUrl || 'http://localhost:11434'
-    const model = config.ollamaModel || 'llama3.2'
-
-    const response = await fetch(`${baseUrl}/api/chat`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model,
-        messages: messages.map((m) => ({ role: m.role, content: m.content })),
-        stream: !!onChunk
-      })
-    })
-
-    if (!response.ok) throw new Error(`Ollama error: ${response.status}`)
-
-    if (onChunk && response.body) {
-      let full = ''
-      const reader = response.body.getReader()
+      const reader = response.body!.getReader()
       const decoder = new TextDecoder()
+
       while (true) {
         const { done, value } = await reader.read()
         if (done) break
         const text = decoder.decode(value, { stream: true })
+
         for (const line of text.split('\n')) {
-          if (!line.trim()) continue
+          const trimmed = line.trim()
+          if (!trimmed || trimmed === 'data: [DONE]') continue
+          if (!trimmed.startsWith('data: ')) continue
+
           try {
-            const data = JSON.parse(line)
-            if (data.message?.content) {
-              full += data.message.content
-              onChunk(data.message.content)
+            const data = JSON.parse(trimmed.slice(6))
+            const delta = data.choices?.[0]?.delta?.content
+            if (delta) {
+              full += delta
+              onChunk(delta)
             }
           } catch {}
         }
@@ -150,8 +102,24 @@ export class LlmService {
       return full
     }
 
-    const data = await response.json() as { message: { content: string } }
-    return data.message?.content || ''
+    // Non-streaming
+    const response = await fetch(`${baseUrl}/chat/completions`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        model,
+        messages: messages.map((m) => ({ role: m.role, content: m.content })),
+        stream: false
+      })
+    })
+
+    if (!response.ok) {
+      const err = await response.text()
+      throw new Error(`LLM API error ${response.status}: ${err.slice(0, 200)}`)
+    }
+
+    const data = await response.json() as { choices: Array<{ message: { content: string } }> }
+    return data.choices?.[0]?.message?.content || ''
   }
 }
 

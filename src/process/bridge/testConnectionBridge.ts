@@ -121,5 +121,73 @@ export function registerTestConnectionBridge(): void {
     }
   })
 
+  // LLM connection test — generic OpenAI-compatible
+  ipcMain.handle('settings:testLlm', async (_event, config) => {
+    try {
+      if (!config?.baseUrl) return { success: false, message: 'Base URL is required' }
+
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+      if (config.apiKey) headers['Authorization'] = `Bearer ${config.apiKey}`
+
+      // Try /models endpoint first
+      const response = await fetch(`${config.baseUrl}/models`, {
+        headers,
+        signal: AbortSignal.timeout(10000)
+      })
+
+      if (response.ok) {
+        return { success: true, message: 'Connected successfully' }
+      }
+
+      // Some endpoints don't have /models — try a minimal chat completion
+      const chatResponse = await fetch(`${config.baseUrl}/chat/completions`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          model: config.model || config.customModel || 'test',
+          messages: [{ role: 'user', content: 'hi' }],
+          max_tokens: 1
+        }),
+        signal: AbortSignal.timeout(10000)
+      })
+
+      if (chatResponse.ok || chatResponse.status === 400) {
+        // 400 = model not found but endpoint works
+        return { success: true, message: 'Connected (chat endpoint available)' }
+      }
+
+      return { success: false, message: `HTTP ${chatResponse.status}: ${chatResponse.statusText}` }
+    } catch (err) {
+      return { success: false, message: String(err) }
+    }
+  })
+
+  // List available models from the LLM endpoint
+  ipcMain.handle('settings:listLlmModels', async (_event, config) => {
+    try {
+      if (!config?.baseUrl) return []
+
+      const headers: Record<string, string> = {}
+      if (config.apiKey) headers['Authorization'] = `Bearer ${config.apiKey}`
+
+      const response = await fetch(`${config.baseUrl}/models`, {
+        headers,
+        signal: AbortSignal.timeout(10000)
+      })
+
+      if (!response.ok) return []
+
+      const data = await response.json() as { data?: Array<{ id: string }> }
+      if (!data.data || !Array.isArray(data.data)) return []
+
+      return data.data
+        .map((m) => m.id)
+        .filter((id) => id && typeof id === 'string')
+        .sort()
+    } catch {
+      return []
+    }
+  })
+
   log.info('Test connection bridge registered')
 }

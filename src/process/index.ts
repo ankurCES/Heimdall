@@ -11,6 +11,7 @@ import { settingsService } from './services/settings/SettingsService'
 import { cronService } from './services/cron/CronService'
 import type { SafetyConfig } from '@common/types/settings'
 import { seedDefaultSources } from './services/seeder/DefaultSourceSeeder'
+import { agentOrchestrator } from './agents/AgentOrchestrator'
 
 log.transports.file.level = 'info'
 log.transports.console.level = 'debug'
@@ -44,6 +45,9 @@ async function initializeDeferred(): Promise<void> {
 
   // Load enabled sources from DB and schedule them
   await collectorManager.loadFromDatabase()
+
+  // Start agent orchestrator (enrichment, analysis, summaries)
+  agentOrchestrator.start()
 
   log.info('Deferred initialization complete')
 }
@@ -116,6 +120,7 @@ if (!gotTheLock) {
   })
 
   app.on('window-all-closed', () => {
+    agentOrchestrator.stop()
     collectorManager.shutdownAll()
     cronService.stopAll()
     closeDatabase()
@@ -125,6 +130,7 @@ if (!gotTheLock) {
   })
 
   app.on('before-quit', () => {
+    agentOrchestrator.stop()
     collectorManager.shutdownAll()
     cronService.stopAll()
     closeDatabase()

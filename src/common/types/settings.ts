@@ -37,11 +37,11 @@ export const SafetyConfigSchema = z.object({
 })
 
 export const LlmConfigSchema = z.object({
-  provider: z.enum(['openai', 'anthropic', 'ollama']).default('openai'),
+  baseUrl: z.string().default('https://api.openai.com/v1'),
   apiKey: z.string().default(''),
   model: z.string().default('gpt-4o-mini'),
-  ollamaUrl: z.string().default('http://localhost:11434'),
-  ollamaModel: z.string().default('llama3.2')
+  customModel: z.string().default(''),
+  connected: z.boolean().default(false)
 })
 
 export type SmtpConfig = z.infer<typeof SmtpConfigSchema>

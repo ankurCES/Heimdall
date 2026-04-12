@@ -73,6 +73,7 @@ export class IntelStorageService {
       this.exportToMarkdown(stored)
       this.syncToObsidian(stored)
       this.evaluateAlerts(stored)
+      this.enrichReports(stored)
     }
 
     return stored
@@ -82,6 +83,18 @@ export class IntelStorageService {
     for (const win of BrowserWindow.getAllWindows()) {
       win.webContents.send(IPC_EVENTS.INTEL_NEW_REPORTS, reports)
     }
+  }
+
+  private enrichReports(reports: IntelReport[]): void {
+    import('../enrichment/IntelEnricher').then(({ intelEnricher }) => {
+      for (const report of reports) {
+        try {
+          intelEnricher.enrichReport(report)
+        } catch (err) {
+          log.debug(`Enrichment failed for ${report.id}: ${err}`)
+        }
+      }
+    }).catch(() => {})
   }
 
   private exportToMarkdown(reports: IntelReport[]): void {

@@ -83,5 +83,50 @@ export function createSchema(db: Database.Database): void {
     );
 
     CREATE INDEX IF NOT EXISTS idx_chat_created ON chat_messages(created_at);
+
+    -- Enrichment: tags assigned to reports
+    CREATE TABLE IF NOT EXISTS intel_tags (
+      report_id TEXT NOT NULL,
+      tag TEXT NOT NULL,
+      confidence REAL NOT NULL DEFAULT 1.0,
+      source TEXT NOT NULL DEFAULT 'auto',
+      created_at INTEGER NOT NULL,
+      PRIMARY KEY (report_id, tag)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_tags_tag ON intel_tags(tag);
+    CREATE INDEX IF NOT EXISTS idx_tags_report ON intel_tags(report_id);
+
+    -- Enrichment: named entities extracted from reports
+    CREATE TABLE IF NOT EXISTS intel_entities (
+      id TEXT PRIMARY KEY,
+      report_id TEXT NOT NULL,
+      entity_type TEXT NOT NULL,
+      entity_value TEXT NOT NULL,
+      confidence REAL NOT NULL DEFAULT 1.0,
+      created_at INTEGER NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_entities_type ON intel_entities(entity_type);
+    CREATE INDEX IF NOT EXISTS idx_entities_value ON intel_entities(entity_value);
+    CREATE INDEX IF NOT EXISTS idx_entities_report ON intel_entities(report_id);
+
+    -- Enrichment: links between reports (shared entities, temporal, causal)
+    CREATE TABLE IF NOT EXISTS intel_links (
+      id TEXT PRIMARY KEY,
+      source_report_id TEXT NOT NULL,
+      target_report_id TEXT NOT NULL,
+      link_type TEXT NOT NULL,
+      strength REAL NOT NULL DEFAULT 0.5,
+      reason TEXT,
+      created_at INTEGER NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_links_source ON intel_links(source_report_id);
+    CREATE INDEX IF NOT EXISTS idx_links_target ON intel_links(target_report_id);
+    CREATE INDEX IF NOT EXISTS idx_links_type ON intel_links(link_type);
+
+    -- Add enriched flag to intel_reports if not exists
+    CREATE INDEX IF NOT EXISTS idx_intel_updated ON intel_reports(updated_at);
   `)
 }
