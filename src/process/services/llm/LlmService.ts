@@ -146,7 +146,7 @@ export class LlmService {
         headers,
         body: requestBody,
         redirect: 'manual',
-        signal: AbortSignal.timeout(120000)
+        signal: AbortSignal.timeout(300000)
       })
 
       // Handle redirects manually to preserve auth header
@@ -158,7 +158,7 @@ export class LlmService {
             method: 'POST',
             headers,
             body: requestBody,
-            signal: AbortSignal.timeout(120000)
+            signal: AbortSignal.timeout(300000)
           })
         }
       }
@@ -199,7 +199,7 @@ export class LlmService {
       headers,
       body: JSON.stringify({ model, messages: messages.map((m) => ({ role: m.role, content: m.content })), stream: false }),
       redirect: 'manual',
-      signal: AbortSignal.timeout(120000)
+      signal: AbortSignal.timeout(300000)
     })
 
     // Handle redirects manually to preserve auth header
@@ -211,7 +211,7 @@ export class LlmService {
           method: 'POST',
           headers,
           body: JSON.stringify({ model, messages: messages.map((m) => ({ role: m.role, content: m.content })), stream: false }),
-          signal: AbortSignal.timeout(120000)
+          signal: AbortSignal.timeout(300000)
         })
       }
     }
