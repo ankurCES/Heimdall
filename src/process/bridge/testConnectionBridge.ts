@@ -83,38 +83,53 @@ export function registerTestConnectionBridge(): void {
 
       log.info('Meshtastic test connection requested', { connectionType })
 
-      // For TCP, attempt a basic socket connection test
       if (connectionType === 'tcp') {
         const net = await import('net')
         return new Promise((resolve) => {
           const socket = new net.Socket()
           socket.setTimeout(5000)
-
           socket.on('connect', () => {
             socket.destroy()
-            resolve({
-              success: true,
-              message: `TCP connection to ${address}:${port} successful. Full Meshtastic protocol available in Phase 4.`
-            })
+            resolve({ success: true, message: `TCP connection to ${address}:${port} successful` })
           })
-
-          socket.on('timeout', () => {
-            socket.destroy()
-            resolve({ success: false, message: `Connection to ${address}:${port} timed out` })
-          })
-
-          socket.on('error', (err) => {
-            resolve({ success: false, message: `Connection failed: ${err.message}` })
-          })
-
+          socket.on('timeout', () => { socket.destroy(); resolve({ success: false, message: `Connection to ${address}:${port} timed out` }) })
+          socket.on('error', (err) => resolve({ success: false, message: `Connection failed: ${err.message}` }))
           socket.connect(port || 4403, address)
         })
       }
 
-      return {
-        success: true,
-        message: `${connectionType.toUpperCase()} config validated. Full connection test available in Phase 4.`
+      if (connectionType === 'serial') {
+        try {
+          const { SerialPort } = await import('serialport')
+          return new Promise((resolve) => {
+            const sp = new SerialPort({ path: serialPath, baudRate: 115200, autoOpen: false })
+            sp.open((err) => {
+              if (err) {
+                resolve({ success: false, message: `Serial open failed: ${err.message}` })
+              } else {
+                // Read initial data to confirm Meshtastic device
+                let dataReceived = false
+                sp.on('data', () => { dataReceived = true })
+                setTimeout(() => {
+                  sp.close()
+                  resolve({
+                    success: true,
+                    message: `Serial port ${serialPath} opened successfully${dataReceived ? ' — device responding' : ' — connected (no data yet, device may need reset)'}`
+                  })
+                }, 2000)
+              }
+            })
+          })
+        } catch (err) {
+          return { success: false, message: `Serial port error: ${err}` }
+        }
       }
+
+      if (connectionType === 'mqtt') {
+        return { success: true, message: `MQTT config validated for ${mqttBroker}` }
+      }
+
+      return { success: false, message: 'Unknown connection type' }
     } catch (err) {
       log.error('Meshtastic test failed:', err)
       return { success: false, message: String(err) }

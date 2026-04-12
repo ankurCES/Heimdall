@@ -29,6 +29,14 @@ export function ObsidianTab() {
     }
   }, [saved])
 
+  // Sync API key from API Keys tab if obsidian config is empty
+  useEffect(() => {
+    if (config.apiKey) return
+    window.heimdall.invoke('settings:get', { key: 'apikeys.obsidian' }).then((key) => {
+      if (key && typeof key === 'string') setConfig((prev) => ({ ...prev, apiKey: key }))
+    }).catch(() => {})
+  }, [config.apiKey])
+
   const update = (field: keyof ObsidianConfig, value: unknown) => {
     setConfig((prev) => ({ ...prev, [field]: value }))
     setDidSave(false)

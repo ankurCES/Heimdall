@@ -63,6 +63,22 @@ export function MeshtasticPage() {
     setLoading(false)
   }
 
+  const [pulling, setPulling] = useState(false)
+  const [pullResult, setPullResult] = useState<string | null>(null)
+
+  const pullDeviceData = async () => {
+    setPulling(true)
+    setPullResult(null)
+    try {
+      const result = await invoke('meshtastic:pullDeviceData') as { success: boolean; message: string; bytesReceived?: number }
+      setPullResult(result.message)
+      if (result.success) loadData()
+    } catch (err) {
+      setPullResult(`Error: ${err}`)
+    }
+    setPulling(false)
+  }
+
   useEffect(() => {
     loadData()
     const interval = setInterval(loadData, 15000)
@@ -85,9 +101,16 @@ export function MeshtasticPage() {
             LoRa mesh node discovery, telemetry, and SIGINT monitoring
           </p>
         </div>
-        <Button variant="outline" size="sm" onClick={loadData} disabled={loading}>
-          <RefreshCw className={cn('h-4 w-4 mr-2', loading && 'animate-spin')} /> Refresh
-        </Button>
+        <div className="flex items-center gap-2">
+          {pullResult && <Badge variant={pullResult.includes('Error') ? 'error' : 'success'} className="text-[9px]">{pullResult.slice(0, 60)}</Badge>}
+          <Button variant="default" size="sm" onClick={pullDeviceData} disabled={pulling}>
+            {pulling ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Radio className="h-4 w-4 mr-2" />}
+            {pulling ? 'Pulling...' : 'Pull Device Data'}
+          </Button>
+          <Button variant="outline" size="sm" onClick={loadData} disabled={loading}>
+            <RefreshCw className={cn('h-4 w-4 mr-2', loading && 'animate-spin')} /> Refresh
+          </Button>
+        </div>
       </div>
 
       {/* Stats + Mode Recommendation */}

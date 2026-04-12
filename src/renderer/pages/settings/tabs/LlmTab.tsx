@@ -67,12 +67,30 @@ export function LlmTab() {
     setTimeout(() => setDidSave(false), 2000)
   }
 
-  const addConnection = (preset?: typeof PRESETS[number]) => {
+  // Map preset labels to apikeys.* service names for auto-fill
+  const PRESET_KEY_MAP: Record<string, string> = {
+    'OpenAI': 'openai', 'Anthropic': 'anthropic', 'Ollama Cloud': 'ollama_cloud',
+    'OpenRouter': 'openrouter', 'Groq': 'groq', 'xAI (Grok)': 'xai'
+  }
+
+  const addConnection = async (preset?: typeof PRESETS[number]) => {
+    // Auto-fill API key from API Keys tab if available
+    let apiKey = ''
+    if (preset?.label) {
+      const keyService = PRESET_KEY_MAP[preset.label]
+      if (keyService) {
+        try {
+          const stored = await window.heimdall.invoke('settings:get', { key: `apikeys.${keyService}` }) as string
+          if (stored) apiKey = stored
+        } catch {}
+      }
+    }
+
     const conn: LlmConnection = {
       id: crypto.randomUUID(),
       name: preset?.label || 'New Connection',
       baseUrl: preset?.url || '',
-      apiKey: '',
+      apiKey,
       model: '',
       customModel: '',
       enabled: true
