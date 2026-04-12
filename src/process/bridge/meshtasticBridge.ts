@@ -100,40 +100,84 @@ export function registerMeshtasticBridge(): void {
               return
             }
 
-            // Extract any readable node-like data and persist
             const hexDump = rawData.toString('hex')
 
-            // Look for Meshtastic node number patterns (4-byte little-endian uint32)
-            // Node numbers are typically in range 0x00000001 - 0xFFFFFFFF
-            const nodeNumbers = new Set<string>()
-            for (let i = 0; i < rawData.length - 4; i++) {
-              // Look for protobuf field tag for 'num' (field 1, wire type 0 = varint)
-              if (rawData[i] === 0x08 && rawData[i + 1] > 0 && rawData[i + 1] < 0x80) {
-                // Simple varint (single byte)
-                const nodeNum = rawData[i + 1]
-                if (nodeNum > 0) nodeNumbers.add(`0x${nodeNum.toString(16)}`)
+            // Separate protobuf frames (start with 0x94 0xc3) from debug text
+            const protoFrames: Buffer[] = []
+            const debugLines: string[] = []
+            let i = 0
+            while (i < rawData.length) {
+              if (rawData[i] === 0x94 && i + 1 < rawData.length && rawData[i + 1] === 0xc3) {
+                // Protobuf frame: [0x94, 0xc3, len_msb, len_lsb, ...payload]
+                if (i + 3 < rawData.length) {
+                  const frameLen = (rawData[i + 2] << 8) | rawData[i + 3]
+                  if (frameLen > 0 && frameLen < 512 && i + 4 + frameLen <= rawData.length) {
+                    protoFrames.push(rawData.slice(i + 4, i + 4 + frameLen))
+                    i += 4 + frameLen
+                    continue
+                  }
+                }
+              }
+              // Debug text — collect until newline
+              const nlIdx = rawData.indexOf(0x0a, i)
+              if (nlIdx > i) {
+                const line = rawData.slice(i, nlIdx).toString('utf-8').replace(/[^\x20-\x7E]/g, '').trim()
+                if (line.length > 3) debugLines.push(line)
+                i = nlIdx + 1
+              } else {
+                i++
               }
             }
 
-            // Extract readable strings as potential node names
-            const textContent = rawData.toString('utf-8').replace(/[^\x20-\x7E]/g, ' ').replace(/\s+/g, ' ').trim()
-            const potentialNames = textContent.match(/[A-Za-z][A-Za-z0-9 _-]{2,20}/g) || []
-            const filteredNames = [...new Set(potentialNames.filter((n) =>
-              n.trim().length >= 3 && !/^(GET|POST|HTTP|Content|Accept|Host|User)/.test(n)
-            ))]
+            // Extract node IDs from debug text (pattern: x[8 hex chars])
+            const nodeIdPattern = /x([0-9a-f]{8})/gi
+            const discoveredNodeIds = new Set<string>()
+            for (const line of debugLines) {
+              let match: RegExpExecArray | null
+              while ((match = nodeIdPattern.exec(line)) !== null) {
+                const nodeId = `!${match[1]}`
+                if (nodeId !== '!ffffffff' && nodeId !== '!00000000') {
+                  discoveredNodeIds.add(nodeId)
+                }
+              }
+            }
+
+            // Extract node names from protobuf frames
+            // In FromRadio NodeInfo, user.long_name is a string field
+            const nodeNames: string[] = []
+            for (const frame of protoFrames) {
+              // Look for printable strings > 3 chars in protobuf payload
+              const text = frame.toString('utf-8').replace(/[^\x20-\x7E]/g, '').trim()
+              const names = text.match(/[A-Za-z][A-Za-z0-9 _.-]{2,24}/g) || []
+              for (const n of names) {
+                if (!['DEBUG', 'INFO', 'WARN', 'ERROR', 'Started', 'transport', 'encrypted', 'packets', 'relay', 'queue', 'priority', 'radio'].some((skip) => n.includes(skip))) {
+                  nodeNames.push(n.trim())
+                }
+              }
+            }
 
             // Store discovered nodes
             let stored = 0
-            for (const name of filteredNames.slice(0, 50)) {
+            for (const nodeId of discoveredNodeIds) {
               try {
                 db.prepare(`
-                  INSERT INTO meshtastic_nodes (node_id, long_name, first_seen, last_seen, seen_count)
-                  VALUES (?, ?, ?, ?, 1)
-                  ON CONFLICT(node_id) DO UPDATE SET long_name = ?, last_seen = ?, seen_count = seen_count + 1
-                `).run(`serial_${stored}`, name.trim(), now, now, name.trim(), now)
+                  INSERT INTO meshtastic_nodes (node_id, first_seen, last_seen, seen_count)
+                  VALUES (?, ?, ?, 1)
+                  ON CONFLICT(node_id) DO UPDATE SET last_seen = ?, seen_count = seen_count + 1
+                `).run(nodeId, now, now, now)
                 stored++
               } catch {}
             }
+
+            // Associate names with nodes
+            const nodeIdArr = Array.from(discoveredNodeIds)
+            for (let ni = 0; ni < Math.min(nodeNames.length, nodeIdArr.length); ni++) {
+              try {
+                db.prepare('UPDATE meshtastic_nodes SET long_name = ? WHERE node_id = ?').run(nodeNames[ni], nodeIdArr[ni])
+              } catch {}
+            }
+
+            log.info(`Meshtastic: ${protoFrames.length} protobuf frames, ${debugLines.length} debug lines, ${discoveredNodeIds.size} node IDs, ${nodeNames.length} names`)
 
             // Store raw dump as intel report
             db.prepare(
@@ -141,14 +185,14 @@ export function registerMeshtasticBridge(): void {
             ).run(
               generateId(), 'sigint',
               `Meshtastic Device Dump: ${rawData.length} bytes, ~${stored} nodes`,
-              `**Device**: ${serialPath}\n**Bytes**: ${rawData.length}\n**Nodes Extracted**: ${stored}\n**Names Found**: ${filteredNames.slice(0, 20).join(', ')}\n\n**Raw Hex (first 512 bytes)**:\n\`\`\`\n${hexDump.slice(0, 1024)}\n\`\`\``,
+              `**Device**: ${serialPath}\n**Bytes**: ${rawData.length}\n**Protobuf Frames**: ${protoFrames.length}\n**Debug Lines**: ${debugLines.length}\n**Node IDs Found**: ${discoveredNodeIds.size}\n**Node Names**: ${nodeNames.slice(0, 20).join(', ') || 'None extracted'}\n\n**Discovered Node IDs**:\n${Array.from(discoveredNodeIds).slice(0, 50).map((id) => '- `' + id + '`').join('\n')}\n\n**Debug Log (last 20 lines)**:\n\`\`\`\n${debugLines.slice(-20).join('\n')}\n\`\`\``,
               'info', 'meshtastic-device', `Meshtastic Device Dump`,
               generateId(), 60, 0, now, now
             )
 
             resolve({
               success: true,
-              message: `${rawData.length} bytes received, ${stored} nodes extracted from device.`,
+              message: `${rawData.length} bytes, ${discoveredNodeIds.size} node IDs, ${protoFrames.length} protobuf frames extracted.`,
               nodesFound: stored,
               bytesReceived: rawData.length
             })
