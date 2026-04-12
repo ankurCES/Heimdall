@@ -48,19 +48,37 @@ export class LlmService {
     )
   }
 
+  private normalizeBaseUrl(url: string): string {
+    // Strip trailing slashes
+    let base = url.replace(/\/+$/, '')
+    // If URL doesn't end with /v1 or similar API path, try to detect and fix
+    if (!base.match(/\/v\d+$/)) {
+      // Common mistake: using website URL instead of API URL
+      if (base === 'https://ollama.com' || base === 'http://ollama.com') {
+        base = 'http://localhost:11434/v1'
+        log.warn('LLM: Corrected ollama.com to localhost:11434/v1')
+      }
+    }
+    return base
+  }
+
   private async chatOpenAICompatible(
-    baseUrl: string,
+    rawBaseUrl: string,
     apiKey: string,
     model: string,
     messages: ChatMessage[],
     onChunk?: (chunk: string) => void
   ): Promise<string> {
+    const baseUrl = this.normalizeBaseUrl(rawBaseUrl)
     const headers: Record<string, string> = { 'Content-Type': 'application/json' }
     if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`
 
+    const chatUrl = `${baseUrl}/chat/completions`
+    log.info(`LLM chat request: ${chatUrl} model=${model}`)
+
     // Streaming
     if (onChunk) {
-      const response = await fetch(`${baseUrl}/chat/completions`, {
+      const response = await fetch(chatUrl, {
         method: 'POST',
         headers,
         body: JSON.stringify({
@@ -72,7 +90,7 @@ export class LlmService {
 
       if (!response.ok) {
         const err = await response.text()
-        throw new Error(`LLM API error ${response.status}: ${err.slice(0, 200)}`)
+        throw new Error(`LLM API error ${response.status} at ${chatUrl}: ${err.slice(0, 200)}. Check your Base URL in Settings > LLM.`)
       }
 
       let full = ''
@@ -103,7 +121,7 @@ export class LlmService {
     }
 
     // Non-streaming
-    const response = await fetch(`${baseUrl}/chat/completions`, {
+    const response = await fetch(chatUrl, {
       method: 'POST',
       headers,
       body: JSON.stringify({
