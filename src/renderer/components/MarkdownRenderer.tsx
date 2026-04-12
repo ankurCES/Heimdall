@@ -133,6 +133,17 @@ export function MarkdownRenderer({ content, className }: MarkdownRendererProps) 
           a: ({ href, children }) => (
             <a href={href} target="_blank" rel="noreferrer" className="text-primary hover:underline">{children}</a>
           ),
+          img: ({ src, alt }) => (
+            <div className="my-3">
+              <img
+                src={src}
+                alt={alt || 'Intelligence image'}
+                className="max-w-full max-h-64 rounded-lg border border-border object-contain"
+                onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }}
+              />
+              {alt && <p className="text-[10px] text-muted-foreground mt-1">{alt}</p>}
+            </div>
+          ),
           hr: () => <hr className="border-border my-4" />
         }}
       >

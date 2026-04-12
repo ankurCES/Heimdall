@@ -46,6 +46,10 @@ export function MapPage() {
   const [selectedReport, setSelectedReport] = useState<GeoReport | null>(null)
   const [filterDiscipline, setFilterDiscipline] = useState<string>('all')
   const [filterSeverity, setFilterSeverity] = useState<string>('all')
+  const [layers, setLayers] = useState<Record<string, boolean>>({
+    osint: true, cybint: true, finint: true, socmint: true,
+    geoint: true, sigint: true, rumint: true, ci: true, agency: true, imint: true
+  })
 
   const loadGeoReports = useCallback(async () => {
     setLoading(true)
@@ -105,6 +109,19 @@ export function MapPage() {
           {stats.high > 0 && <Badge variant="warning" className="text-xs">{stats.high} high</Badge>}
         </div>
         <div className="flex items-center gap-2">
+          {/* Layer toggles */}
+          <div className="flex items-center gap-0.5">
+            {Object.entries({ osint: '🔵', cybint: '🔴', geoint: '🟡', sigint: '🟢', agency: '🟣', imint: '📷' }).map(([disc, emoji]) => (
+              <button
+                key={disc}
+                onClick={() => setLayers((l) => ({ ...l, [disc]: !l[disc] }))}
+                className={`px-1.5 py-0.5 rounded text-[9px] border transition-opacity ${layers[disc] ? 'opacity-100 border-primary' : 'opacity-40 border-border'}`}
+                title={disc.toUpperCase()}
+              >
+                {emoji}
+              </button>
+            ))}
+          </div>
           <Select value={filterDiscipline} onValueChange={setFilterDiscipline}>
             <SelectTrigger className="w-32 h-7 text-xs"><SelectValue /></SelectTrigger>
             <SelectContent>
@@ -144,7 +161,7 @@ export function MapPage() {
             url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
           />
 
-          {reports.map((report) => (
+          {reports.filter((r) => layers[r.discipline] !== false).map((report) => (
             <CircleMarker
               key={report.id}
               center={[report.latitude, report.longitude]}
