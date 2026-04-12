@@ -6,10 +6,13 @@ const testChannels = [
   'obsidian:testConnection', 'obsidian:listFiles', 'obsidian:readFile',
   'obsidian:search', 'obsidian:getTags', 'obsidian:openInObsidian',
   'obsidian:bulkImport', 'obsidian:manualSync', 'obsidian:needsInitialImport',
-  'alerts:getRules', 'alerts:saveRules'
+  'alerts:getRules', 'alerts:saveRules',
+  'chat:send', 'chat:getHistory', 'chat:clearHistory',
+  'chat:generateDailySummary', 'chat:generateWeeklySummary'
 ]
 const allowedChannels = [...Object.values(IPC_CHANNELS), ...testChannels]
-const allowedEvents = Object.values(IPC_EVENTS)
+const chatEvents = ['chat:chunk', 'chat:done', 'chat:error']
+const allowedEvents = [...Object.values(IPC_EVENTS), ...chatEvents]
 
 const api = {
   invoke: (channel: string, ...args: unknown[]): Promise<unknown> => {
