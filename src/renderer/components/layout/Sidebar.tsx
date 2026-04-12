@@ -9,7 +9,8 @@ import {
   Settings,
   Shield,
   Activity,
-  BookOpen
+  BookOpen,
+  Coins
 } from 'lucide-react'
 import { cn } from '@renderer/lib/utils'
 
@@ -21,6 +22,7 @@ const navItems = [
   { to: '/map', icon: Map, label: 'Map' },
   { to: '/vault', icon: BookOpen, label: 'Obsidian Vault' },
   { to: '/chat', icon: MessageSquare, label: 'Chat' },
+  { to: '/tokens', icon: Coins, label: 'Token Usage' },
   { to: '/audit', icon: Activity, label: 'Audit Log' },
   { to: '/settings', icon: Settings, label: 'Settings' }
 ]

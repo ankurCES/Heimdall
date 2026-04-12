@@ -45,7 +45,7 @@ export function ChatPage() {
   const [streamingContent, setStreamingContent] = useState('')
   const [connections, setConnections] = useState<LlmConn[]>([])
   const [selectedConnection, setSelectedConnection] = useState<string>('')
-  const [agenticMode, setAgenticMode] = useState(true)
+  const [chatMode, setChatMode] = useState<'agentic' | 'direct' | 'caveman'>('agentic')
   const [editingTitle, setEditingTitle] = useState<string | null>(null)
   const [editTitle, setEditTitle] = useState('')
   const scrollRef = useRef<HTMLDivElement>(null)
@@ -167,7 +167,8 @@ export function ChatPage() {
       const response = await invoke('chat:send', {
         messages: chatHistory, query: text, sessionId,
         connectionId: selectedConnection || undefined,
-        useAgentic: agenticMode
+        useAgentic: chatMode === 'agentic',
+        mode: chatMode
       }) as string
 
       setMessages((prev) => [...prev, {
@@ -284,12 +285,23 @@ export function ChatPage() {
                 </SelectContent>
               </Select>
             ) : <Badge variant="warning" className="text-[9px]">No LLM</Badge>}
-            <div className="flex items-center gap-1.5">
-              <Switch checked={agenticMode} onCheckedChange={setAgenticMode} />
-              <Label className="text-xs text-muted-foreground">
-                {agenticMode ? <Bot className="h-3 w-3 inline" /> : <Zap className="h-3 w-3 inline" />}
-                {agenticMode ? ' Agent' : ' Direct'}
-              </Label>
+            <div className="flex items-center gap-0.5 bg-muted rounded-md p-0.5">
+              {([
+                { mode: 'agentic' as const, icon: Bot, label: 'Agent' },
+                { mode: 'direct' as const, icon: Zap, label: 'Direct' },
+                { mode: 'caveman' as const, icon: MessageSquare, label: 'Caveman' }
+              ]).map(({ mode, icon: Icon, label }) => (
+                <button
+                  key={mode}
+                  onClick={() => setChatMode(mode)}
+                  className={cn(
+                    'flex items-center gap-1 px-2 py-1 rounded text-[10px] font-medium transition-colors',
+                    chatMode === mode ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground'
+                  )}
+                >
+                  <Icon className="h-3 w-3" />{label}
+                </button>
+              ))}
             </div>
           </div>
           <div className="flex items-center gap-1">
@@ -312,7 +324,7 @@ export function ChatPage() {
             <div className="flex flex-col items-center justify-center h-full text-muted-foreground">
               <Bot className="h-12 w-12 mb-3 opacity-30" />
               <p className="text-sm font-medium">Ask Heimdall about your intelligence data</p>
-              <p className="text-xs mt-1">{agenticMode ? 'Agentic: Plan → Research → Analyze' : 'Direct: Quick RAG + Vector search'}</p>
+              <p className="text-xs mt-1">{chatMode === 'agentic' ? 'Agentic: Plan → Research → Analyze' : 'Direct: Quick RAG + Vector search'}</p>
               <div className="flex flex-wrap gap-2 mt-4 max-w-lg justify-center">
                 {['What are the latest critical threats?', 'Analyze recent cyber intelligence',
                   'Find connections between recent events', 'Summarize geopolitical situation'
@@ -345,7 +357,7 @@ export function ChatPage() {
               <div className="max-w-[80%] rounded-lg px-4 py-3 text-sm bg-card border border-border">
                 {streamingContent
                   ? <MarkdownRenderer content={streamingContent} className="text-sm" />
-                  : <div className="flex items-center gap-2 text-muted-foreground"><Loader2 className="h-4 w-4 animate-spin" />{agenticMode ? 'Planning...' : 'Thinking...'}</div>
+                  : <div className="flex items-center gap-2 text-muted-foreground"><Loader2 className="h-4 w-4 animate-spin" />{chatMode === 'agentic' ? 'Planning...' : 'Thinking...'}</div>
                 }
               </div>
             </div>
@@ -357,7 +369,7 @@ export function ChatPage() {
           <div className="flex gap-2">
             <textarea value={input} onChange={(e) => setInput(e.target.value)}
               onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage() } }}
-              placeholder={agenticMode ? 'Complex query — Plan → Research → Analyze...' : 'Quick question — Vector + RAG...'}
+              placeholder={chatMode === 'agentic' ? 'Complex query — Plan → Research → Analyze...' : 'Quick question — Vector + RAG...'}
               className="flex-1 resize-none rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
               rows={2} disabled={streaming} />
             <Button onClick={sendMessage} disabled={streaming || !input.trim() || connections.length === 0} className="self-end">
@@ -365,7 +377,7 @@ export function ChatPage() {
             </Button>
           </div>
           {activeConn && <p className="text-[10px] text-muted-foreground mt-1">
-            {activeConn.name} ({activeConn.model}) | {agenticMode ? 'Agentic' : 'Direct + Vector'}
+            {activeConn.name} ({activeConn.model}) | {chatMode === 'agentic' ? 'Agentic' : 'Direct + Vector'}
           </p>}
         </div>
       </div>

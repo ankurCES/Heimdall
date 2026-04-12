@@ -1,4 +1,6 @@
 import { settingsService } from '../settings/SettingsService'
+import { getDatabase } from '../database'
+import { generateId, timestamp } from '@common/utils/id'
 import type { LlmConfig, LlmConnection } from '@common/types/settings'
 import log from 'electron-log'
 
@@ -6,6 +8,8 @@ export interface ChatMessage {
   role: 'user' | 'assistant' | 'system'
   content: string
 }
+
+export type ChatMode = 'agentic' | 'direct' | 'caveman'
 
 const SYSTEM_PROMPT = `You are Heimdall, an intelligence analyst AI assistant. You help analyze collected intelligence data from multiple disciplines (OSINT, CYBINT, FININT, SOCMINT, GEOINT, SIGINT, RUMINT, CI, Agency).
 
@@ -18,6 +22,9 @@ When presented with intelligence reports, you:
 - Use proper intelligence analysis tradecraft
 
 Always cite the discipline and source of information you reference. Be precise and concise.`
+
+const CAVEMAN_PROMPT = `U r Heimdall intel analyst. Be ULTRA brief. Use abbrevs. Skip filler words. No intros/outros. Just facts.
+Rules: max 3 sentences per point. Use bullet lists. Skip "I think"/"It appears". Data only. Cite [DISC:SOURCE].`
 
 export class LlmService {
   getConnections(): LlmConnection[] {
@@ -41,7 +48,8 @@ export class LlmService {
   async chat(
     messages: ChatMessage[],
     connectionId?: string,
-    onChunk?: (chunk: string) => void
+    onChunk?: (chunk: string) => void,
+    mode: ChatMode = 'direct'
   ): Promise<string> {
     const conn = this.getConnection(connectionId)
     if (!conn) throw new Error('No LLM connection configured or enabled. Add one in Settings > LLM.')
@@ -49,12 +57,25 @@ export class LlmService {
     const model = conn.model || conn.customModel
     if (!model) throw new Error(`No model set for connection "${conn.name}". Configure in Settings > LLM.`)
 
+    const systemPrompt = mode === 'caveman' ? CAVEMAN_PROMPT : SYSTEM_PROMPT
+    let processedMessages = messages
+
+    // Caveman mode: compress messages to save tokens
+    if (mode === 'caveman') {
+      processedMessages = this.compressMessages(messages)
+    }
+
     const allMessages: ChatMessage[] = [
-      { role: 'system', content: SYSTEM_PROMPT },
-      ...messages
+      { role: 'system', content: systemPrompt },
+      ...processedMessages
     ]
 
-    return this.chatOpenAICompatible(conn.baseUrl, conn.apiKey, model, allMessages, onChunk)
+    const result = await this.chatOpenAICompatible(conn.baseUrl, conn.apiKey, model, allMessages, onChunk)
+
+    // Track token usage (estimate)
+    this.trackUsage(conn.name, model, allMessages, result, mode)
+
+    return result
   }
 
   async complete(prompt: string, connectionId?: string, maxTokens: number = 1024): Promise<string> {
@@ -202,6 +223,86 @@ export class LlmService {
 
     const data = await response.json() as { choices: Array<{ message: { content: string } }> }
     return data.choices?.[0]?.message?.content || ''
+  }
+
+  // Caveman mode: compress messages to reduce token count
+  private compressMessages(messages: ChatMessage[]): ChatMessage[] {
+    return messages.map((m) => {
+      if (m.role === 'system') {
+        // Aggressively shorten system context
+        let content = m.content
+          .replace(/\*\*/g, '')           // strip bold
+          .replace(/#{1,3}\s*/g, '')       // strip headings
+          .replace(/\n{2,}/g, '\n')        // collapse newlines
+          .replace(/\s{2,}/g, ' ')         // collapse spaces
+          .replace(/Discipline:/gi, 'D:')
+          .replace(/Severity:/gi, 'S:')
+          .replace(/Source:/gi, 'Src:')
+          .replace(/Verification:/gi, 'V:')
+          .replace(/verification_score/gi, 'vscore')
+          .replace(/intelligence/gi, 'intel')
+          .replace(/information/gi, 'info')
+          .replace(/approximately/gi, '~')
+          .replace(/organizations?/gi, 'orgs')
+          .replace(/government/gi, 'govt')
+        // Truncate long system messages more aggressively
+        if (content.length > 1000) content = content.slice(0, 1000) + '...[truncated]'
+        return { ...m, content }
+      }
+      return m
+    })
+  }
+
+  // Track token usage (estimate based on char count / 4)
+  private trackUsage(connName: string, model: string, messages: ChatMessage[], response: string, mode: ChatMode): void {
+    try {
+      const promptChars = messages.reduce((sum, m) => sum + m.content.length, 0)
+      const completionChars = response.length
+      const promptTokens = Math.ceil(promptChars / 4)
+      const completionTokens = Math.ceil(completionChars / 4)
+
+      const db = getDatabase()
+      db.prepare(
+        'INSERT INTO token_usage (id, connection_name, model, prompt_tokens, completion_tokens, total_tokens, mode, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
+      ).run(
+        generateId(), connName, model,
+        promptTokens, completionTokens, promptTokens + completionTokens,
+        mode, timestamp()
+      )
+    } catch (err) {
+      log.debug(`Token tracking failed: ${err}`)
+    }
+  }
+
+  // Get token usage stats
+  getUsageStats(): {
+    total: { prompt: number; completion: number; total: number }
+    byModel: Array<{ model: string; total: number }>
+    byMode: Array<{ mode: string; total: number }>
+    recent: Array<{ model: string; mode: string; total: number; createdAt: number }>
+  } {
+    try {
+      const db = getDatabase()
+      const total = db.prepare(
+        'SELECT COALESCE(SUM(prompt_tokens),0) as prompt, COALESCE(SUM(completion_tokens),0) as completion, COALESCE(SUM(total_tokens),0) as total FROM token_usage'
+      ).get() as { prompt: number; completion: number; total: number }
+
+      const byModel = db.prepare(
+        'SELECT model, SUM(total_tokens) as total FROM token_usage GROUP BY model ORDER BY total DESC'
+      ).all() as Array<{ model: string; total: number }>
+
+      const byMode = db.prepare(
+        'SELECT mode, SUM(total_tokens) as total FROM token_usage GROUP BY mode ORDER BY total DESC'
+      ).all() as Array<{ mode: string; total: number }>
+
+      const recent = db.prepare(
+        'SELECT model, mode, total_tokens as total, created_at as createdAt FROM token_usage ORDER BY created_at DESC LIMIT 50'
+      ).all() as Array<{ model: string; mode: string; total: number; createdAt: number }>
+
+      return { total, byModel, byMode, recent }
+    } catch {
+      return { total: { prompt: 0, completion: 0, total: 0 }, byModel: [], byMode: [], recent: [] }
+    }
   }
 }
 

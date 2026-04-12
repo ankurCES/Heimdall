@@ -10,7 +10,7 @@ const testChannels = [
   'chat:send', 'chat:getHistory', 'chat:clearHistory', 'chat:getConnections',
   'chat:createSession', 'chat:getSessions', 'chat:renameSession', 'chat:deleteSession',
   'chat:generateDailySummary', 'chat:generateWeeklySummary',
-  'chat:generateLearnings', 'chat:getVectorStats',
+  'chat:generateLearnings', 'chat:getVectorStats', 'chat:getTokenStats',
   'settings:testLlm', 'settings:listLlmModels',
   'enrichment:getTags', 'enrichment:getEntities', 'enrichment:getLinks',
   'enrichment:getTopTags', 'enrichment:getTopEntities'

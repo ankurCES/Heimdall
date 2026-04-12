@@ -137,5 +137,21 @@ export function createSchema(db: Database.Database): void {
 
     -- Add enriched flag to intel_reports if not exists
     CREATE INDEX IF NOT EXISTS idx_intel_updated ON intel_reports(updated_at);
+
+    -- Token usage tracking
+    CREATE TABLE IF NOT EXISTS token_usage (
+      id TEXT PRIMARY KEY,
+      session_id TEXT,
+      connection_name TEXT NOT NULL,
+      model TEXT NOT NULL,
+      prompt_tokens INTEGER NOT NULL DEFAULT 0,
+      completion_tokens INTEGER NOT NULL DEFAULT 0,
+      total_tokens INTEGER NOT NULL DEFAULT 0,
+      mode TEXT NOT NULL DEFAULT 'direct',
+      created_at INTEGER NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_tokens_created ON token_usage(created_at);
+    CREATE INDEX IF NOT EXISTS idx_tokens_model ON token_usage(model);
   `)
 }

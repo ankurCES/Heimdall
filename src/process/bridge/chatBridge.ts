@@ -58,8 +58,9 @@ export function registerChatBridge(): void {
     sessionId: string
     connectionId?: string
     useAgentic?: boolean
+    mode?: 'agentic' | 'direct' | 'caveman'
   }) => {
-    const { messages, query, sessionId, connectionId, useAgentic = true } = params
+    const { messages, query, sessionId, connectionId, useAgentic = true, mode = 'direct' } = params
 
     let fullResponse = ''
     try {
@@ -96,7 +97,7 @@ export function registerChatBridge(): void {
           for (const win of BrowserWindow.getAllWindows()) {
             win.webContents.send('chat:chunk', chunk)
           }
-        })
+        }, mode)
       }
 
       for (const win of BrowserWindow.getAllWindows()) {
@@ -180,6 +181,10 @@ export function registerChatBridge(): void {
     const db = getDatabase()
     const totalReports = (db.prepare('SELECT COUNT(*) as count FROM intel_reports').get() as { count: number }).count
     return { ...stats, totalReports }
+  })
+
+  ipcMain.handle('chat:getTokenStats', () => {
+    return llmService.getUsageStats()
   })
 
   log.info('Chat bridge registered')
