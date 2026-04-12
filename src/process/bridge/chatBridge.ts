@@ -153,5 +153,34 @@ export function registerChatBridge(): void {
     }))
   })
 
+  // Manual vector DB ingestion trigger
+  ipcMain.handle('chat:generateLearnings', async () => {
+    log.info('Manual vector DB ingestion triggered')
+    const { intelPipeline } = await import('../services/vectordb/IntelPipeline')
+    await intelPipeline.runIngestion()
+
+    const stats = vectorDbService.getStats()
+    const db = getDatabase()
+    const totalReports = (db.prepare('SELECT COUNT(*) as count FROM intel_reports').get() as { count: number }).count
+    const totalTags = (db.prepare('SELECT COUNT(DISTINCT tag) as count FROM intel_tags').get() as { count: number }).count
+    const totalEntities = (db.prepare('SELECT COUNT(*) as count FROM intel_entities').get() as { count: number }).count
+    const totalLinks = (db.prepare('SELECT COUNT(*) as count FROM intel_links').get() as { count: number }).count
+
+    return {
+      totalReports,
+      totalTags,
+      totalEntities,
+      totalLinks,
+      vectorDbInitialized: stats.initialized
+    }
+  })
+
+  ipcMain.handle('chat:getVectorStats', () => {
+    const stats = vectorDbService.getStats()
+    const db = getDatabase()
+    const totalReports = (db.prepare('SELECT COUNT(*) as count FROM intel_reports').get() as { count: number }).count
+    return { ...stats, totalReports }
+  })
+
   log.info('Chat bridge registered')
 }

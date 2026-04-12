@@ -187,6 +187,30 @@ export function ChatPage() {
     } finally { setStreaming(false) }
   }
 
+  const [learningsLoading, setLearningsLoading] = useState(false)
+
+  const generateLearnings = async () => {
+    setLearningsLoading(true)
+    try {
+      const result = await invoke('chat:generateLearnings') as {
+        totalReports: number; totalTags: number; totalEntities: number; totalLinks: number; vectorDbInitialized: boolean
+      }
+      setMessages((prev) => [...prev, {
+        id: crypto.randomUUID(), role: 'assistant', createdAt: Date.now(),
+        content: `## Knowledge Ingestion Complete\n\n` +
+          `| Metric | Count |\n|--------|-------|\n` +
+          `| Reports Processed | ${result.totalReports} |\n` +
+          `| Tags Generated | ${result.totalTags} |\n` +
+          `| Entities Extracted | ${result.totalEntities} |\n` +
+          `| Links Discovered | ${result.totalLinks} |\n` +
+          `| Vector DB | ${result.vectorDbInitialized ? 'Active' : 'Inactive'} |\n\n` +
+          `All intelligence data has been processed, enriched with tags and entities, and ingested into the vector database for semantic search.`
+      }])
+    } catch (err) {
+      setMessages((prev) => [...prev, { id: crypto.randomUUID(), role: 'assistant', content: `Learnings generation failed: ${err}`, createdAt: Date.now() }])
+    } finally { setLearningsLoading(false) }
+  }
+
   const activeConn = connections.find((c) => c.id === selectedConnection)
   const activeSession = sessions.find((s) => s.id === activeSessionId)
 
@@ -269,6 +293,10 @@ export function ChatPage() {
             </div>
           </div>
           <div className="flex items-center gap-1">
+            <Button variant="outline" size="sm" className="h-7 text-xs" onClick={generateLearnings} disabled={learningsLoading}>
+              {learningsLoading ? <Loader2 className="h-3 w-3 mr-1 animate-spin" /> : <Brain className="h-3 w-3 mr-1" />}
+              {learningsLoading ? 'Processing...' : 'Generate Learnings'}
+            </Button>
             <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={() => generateSummary('daily')}>
               <Calendar className="h-3 w-3 mr-1" />Daily
             </Button>
