@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import {
   BarChart3, RefreshCw, Filter, Clock, Loader2,
-  TrendingUp, PieChart, Table2, Globe
+  TrendingUp, PieChart, Table2
 } from 'lucide-react'
 import { Button } from '@renderer/components/ui/button'
 import { Badge } from '@renderer/components/ui/badge'
@@ -13,12 +13,12 @@ import {
   Chart as ChartJS, CategoryScale, LinearScale, BarElement, PointElement,
   LineElement, ArcElement, Title, Tooltip, Legend, Filler
 } from 'chart.js'
-import { Bar, Line, Pie, Doughnut, Scatter } from 'react-chartjs-2'
+import { Bar, Line, Pie, Doughnut } from 'react-chartjs-2'
 import { cn } from '@renderer/lib/utils'
 
 ChartJS.register(CategoryScale, LinearScale, BarElement, PointElement, LineElement, ArcElement, Title, Tooltip, Legend, Filler)
 
-type ChartType = 'bar' | 'line' | 'pie' | 'doughnut' | 'scatter' | 'timeline' | 'table'
+type ChartType = 'bar' | 'line' | 'pie' | 'doughnut' | 'timeline' | 'table'
 
 const METRICS = [
   { value: 'count', label: 'Count' },
@@ -57,6 +57,7 @@ export function ExplorePage() {
   const [filterDiscipline, setFilterDiscipline] = useState('')
   const [filterSeverity, setFilterSeverity] = useState('')
   const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
   const [data, setData] = useState<Array<{ label: string; value: number }>>([])
   const [timeline, setTimeline] = useState<Array<{ date: string; count: number }>>([])
   const [sessionId, setSessionId] = useState('')
@@ -90,9 +91,14 @@ export function ExplorePage() {
         data: Array<{ label: string; value: number }>
         timeline: Array<{ date: string; count: number }>
       }
-      setData(result.data || [])
-      setTimeline(result.timeline || [])
-    } catch {}
+      setData(result?.data || [])
+      setTimeline(result?.timeline || [])
+      setError(null)
+    } catch (err) {
+      setError(String(err))
+      setData([])
+      setTimeline([])
+    }
     setLoading(false)
   }
 
@@ -155,7 +161,7 @@ export function ExplorePage() {
     }
   }
 
-  const ChartComp = { bar: Bar, line: Line, pie: Pie, doughnut: Doughnut, scatter: Scatter }[chartType] || Bar
+  const ChartComp = { bar: Bar, line: Line, pie: Pie, doughnut: Doughnut }[chartType] || Bar
 
   return (
     <div className="flex h-full">
