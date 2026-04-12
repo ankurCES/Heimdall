@@ -5,7 +5,8 @@ const testChannels = [
   'settings:testSmtp', 'settings:testTelegram', 'settings:testMeshtastic', 'settings:testObsidian',
   'obsidian:testConnection', 'obsidian:listFiles', 'obsidian:readFile',
   'obsidian:search', 'obsidian:getTags', 'obsidian:openInObsidian',
-  'obsidian:bulkImport', 'obsidian:manualSync', 'obsidian:needsInitialImport'
+  'obsidian:bulkImport', 'obsidian:manualSync', 'obsidian:needsInitialImport',
+  'alerts:getRules', 'alerts:saveRules'
 ]
 const allowedChannels = [...Object.values(IPC_CHANNELS), ...testChannels]
 const allowedEvents = Object.values(IPC_EVENTS)

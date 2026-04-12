@@ -4,6 +4,7 @@ import { registerAppBridge } from './appBridge'
 import { registerTestConnectionBridge } from './testConnectionBridge'
 import { registerSourcesBridge } from './sourcesBridge'
 import { registerObsidianBridge } from './obsidianBridge'
+import { registerAlertsBridge } from './alertsBridge'
 import log from 'electron-log'
 
 export function registerAllBridges(): void {
@@ -13,5 +14,6 @@ export function registerAllBridges(): void {
   registerTestConnectionBridge()
   registerSourcesBridge()
   registerObsidianBridge()
+  registerAlertsBridge()
   log.info('All IPC bridges registered')
 }

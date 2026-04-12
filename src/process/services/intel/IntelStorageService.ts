@@ -72,6 +72,7 @@ export class IntelStorageService {
       this.emitNewReports(stored)
       this.exportToMarkdown(stored)
       this.syncToObsidian(stored)
+      this.evaluateAlerts(stored)
     }
 
     return stored
@@ -131,6 +132,16 @@ ${report.content}
 
 ${report.summary ? `\n## Summary\n\n${report.summary}\n` : ''}
 `
+  }
+
+  private evaluateAlerts(reports: IntelReport[]): void {
+    import('../alerts/AlertEngine').then(({ alertEngine }) => {
+      for (const report of reports) {
+        alertEngine.evaluate(report).catch((err) => {
+          log.warn(`Alert evaluation failed for ${report.id}: ${err}`)
+        })
+      }
+    }).catch(() => {})
   }
 
   private syncToObsidian(reports: IntelReport[]): void {
