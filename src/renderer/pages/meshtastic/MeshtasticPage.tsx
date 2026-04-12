@@ -65,6 +65,11 @@ export function MeshtasticPage() {
 
   const [pulling, setPulling] = useState(false)
   const [pullResult, setPullResult] = useState<string | null>(null)
+  const [cliStatus, setCliStatus] = useState<{ installed: boolean; version?: string; message?: string } | null>(null)
+
+  useEffect(() => {
+    invoke('meshtastic:checkCli').then((r: any) => setCliStatus(r)).catch(() => {})
+  }, [])
 
   const pullDeviceData = async () => {
     setPulling(true)
@@ -279,6 +284,25 @@ export function MeshtasticPage() {
         </Card>
       )}
 
+      {/* CLI Status */}
+      {cliStatus && !cliStatus.installed && (
+        <Card className="border-red-500/20 bg-red-500/5">
+          <CardContent className="p-4">
+            <div className="flex items-center gap-2 mb-1">
+              <AlertTriangle className="h-4 w-4 text-red-500" />
+              <span className="text-xs font-semibold text-red-500">Meshtastic CLI Not Found</span>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Install the Meshtastic CLI to pull node data from your device:
+            </p>
+            <code className="block mt-2 bg-muted/50 px-3 py-1.5 rounded text-xs font-mono">pip3 install --user meshtastic</code>
+          </CardContent>
+        </Card>
+      )}
+      {cliStatus?.installed && (
+        <Badge variant="success" className="text-[9px]">CLI: {cliStatus.version}</Badge>
+      )}
+
       {/* Monitoring info */}
       <Card className="border-blue-500/20 bg-blue-500/5">
         <CardContent className="p-4">
@@ -287,9 +311,9 @@ export function MeshtasticPage() {
             <span className="text-xs font-semibold text-blue-500">SIGINT Monitoring</span>
           </div>
           <p className="text-xs text-muted-foreground">
-            Heimdall monitors <strong>all 8 Meshtastic channels (0-7)</strong> simultaneously for maximum SIGINT coverage.
-            Node positions, telemetry, and messages are logged automatically.
-            The recommended LoRa mode is calculated based on observed traffic patterns, channel utilization, and node density.
+            Heimdall uses the <strong>meshtastic CLI</strong> to pull node databases from your device.
+            Click "Pull Device Data" to fetch all discovered nodes including positions, battery, and SNR.
+            Set your device to <strong>CLIENT_MUTE</strong> mode for maximum SIGINT capture.
           </p>
         </CardContent>
       </Card>
