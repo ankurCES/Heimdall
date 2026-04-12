@@ -92,8 +92,9 @@ export class LlmService {
 
   private normalizeBaseUrl(url: string): string {
     let base = url.replace(/\/+$/, '')
+    // Common misconfigurations
     if (base === 'https://ollama.com' || base === 'http://ollama.com') {
-      base = 'http://localhost:11434/v1'
+      log.warn('LLM: ollama.com is the website, not API. Use https://api.ollama.com/v1 for cloud or http://localhost:11434/v1 for local')
     }
     return base
   }
@@ -112,16 +113,34 @@ export class LlmService {
     const chatUrl = `${baseUrl}/chat/completions`
     log.info(`LLM chat: ${chatUrl} model=${model}`)
 
+    const requestBody = JSON.stringify({
+      model,
+      messages: messages.map((m) => ({ role: m.role, content: m.content })),
+      stream: !!onChunk
+    })
+
     if (onChunk) {
-      const response = await fetch(chatUrl, {
+      let response = await fetch(chatUrl, {
         method: 'POST',
         headers,
-        body: JSON.stringify({
-          model,
-          messages: messages.map((m) => ({ role: m.role, content: m.content })),
-          stream: true
-        })
+        body: requestBody,
+        redirect: 'manual',
+        signal: AbortSignal.timeout(120000)
       })
+
+      // Handle redirects manually to preserve auth header
+      if (response.status >= 300 && response.status < 400) {
+        const redirectUrl = response.headers.get('location')
+        if (redirectUrl) {
+          log.info(`LLM redirected to: ${redirectUrl}`)
+          response = await fetch(redirectUrl, {
+            method: 'POST',
+            headers,
+            body: requestBody,
+            signal: AbortSignal.timeout(120000)
+          })
+        }
+      }
 
       if (!response.ok) {
         const err = await response.text()
@@ -154,15 +173,27 @@ export class LlmService {
       return full
     }
 
-    const response = await fetch(chatUrl, {
+    let response = await fetch(chatUrl, {
       method: 'POST',
       headers,
-      body: JSON.stringify({
-        model,
-        messages: messages.map((m) => ({ role: m.role, content: m.content })),
-        stream: false
-      })
+      body: JSON.stringify({ model, messages: messages.map((m) => ({ role: m.role, content: m.content })), stream: false }),
+      redirect: 'manual',
+      signal: AbortSignal.timeout(120000)
     })
+
+    // Handle redirects manually to preserve auth header
+    if (response.status >= 300 && response.status < 400) {
+      const redirectUrl = response.headers.get('location')
+      if (redirectUrl) {
+        log.info(`LLM redirected to: ${redirectUrl}`)
+        response = await fetch(redirectUrl, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({ model, messages: messages.map((m) => ({ role: m.role, content: m.content })), stream: false }),
+          signal: AbortSignal.timeout(120000)
+        })
+      }
+    }
 
     if (!response.ok) {
       const err = await response.text()
