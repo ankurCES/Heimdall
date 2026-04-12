@@ -108,8 +108,8 @@ export function MapPage() {
 
   return (
     <div className="flex flex-col h-full">
-      {/* Toolbar — z-50 to stay above Leaflet */}
-      <div className="flex items-center justify-between px-4 py-2 border-b border-border bg-card/50 relative z-[1000]">
+      {/* Toolbar */}
+      <div className="flex items-center justify-between px-4 py-2 border-b border-border bg-card/50 relative z-10">
         <div className="flex items-center gap-2">
           <MapIcon className="h-4 w-4 text-muted-foreground" />
           <span className="text-sm font-semibold">Threat Map</span>

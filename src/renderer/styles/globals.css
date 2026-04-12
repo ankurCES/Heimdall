@@ -35,6 +35,16 @@
     overflow: hidden;
   }
 
+  /* Force Radix portals above Leaflet map */
+  [data-radix-popper-content-wrapper] {
+    z-index: 9999 !important;
+  }
+
+  /* Leaflet map container z-index */
+  .leaflet-container {
+    z-index: 1;
+  }
+
   /* Custom scrollbar */
   ::-webkit-scrollbar {
     width: 6px;
