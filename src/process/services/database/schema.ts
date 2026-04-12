@@ -1,0 +1,87 @@
+import type Database from 'better-sqlite3'
+
+export function createSchema(db: Database.Database): void {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS intel_reports (
+      id TEXT PRIMARY KEY,
+      discipline TEXT NOT NULL,
+      title TEXT NOT NULL,
+      content TEXT NOT NULL,
+      summary TEXT,
+      severity TEXT NOT NULL CHECK(severity IN ('critical','high','medium','low','info')),
+      source_id TEXT NOT NULL,
+      source_url TEXT,
+      source_name TEXT NOT NULL,
+      content_hash TEXT NOT NULL,
+      latitude REAL,
+      longitude REAL,
+      verification_score INTEGER NOT NULL DEFAULT 50,
+      reviewed INTEGER NOT NULL DEFAULT 0,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_intel_discipline ON intel_reports(discipline);
+    CREATE INDEX IF NOT EXISTS idx_intel_severity ON intel_reports(severity);
+    CREATE INDEX IF NOT EXISTS idx_intel_created ON intel_reports(created_at);
+    CREATE INDEX IF NOT EXISTS idx_intel_hash ON intel_reports(content_hash);
+    CREATE INDEX IF NOT EXISTS idx_intel_source ON intel_reports(source_id);
+    CREATE INDEX IF NOT EXISTS idx_intel_reviewed ON intel_reports(reviewed);
+
+    CREATE TABLE IF NOT EXISTS sources (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      discipline TEXT NOT NULL,
+      type TEXT NOT NULL,
+      config TEXT NOT NULL DEFAULT '{}',
+      schedule TEXT,
+      enabled INTEGER NOT NULL DEFAULT 1,
+      last_collected_at INTEGER,
+      last_error TEXT,
+      error_count INTEGER NOT NULL DEFAULT 0,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS alerts (
+      id TEXT PRIMARY KEY,
+      intel_report_id TEXT,
+      channel TEXT NOT NULL CHECK(channel IN ('email','telegram','meshtastic')),
+      recipient TEXT NOT NULL,
+      status TEXT NOT NULL CHECK(status IN ('pending','sent','failed')),
+      error TEXT,
+      sent_at INTEGER,
+      created_at INTEGER NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_alerts_status ON alerts(status);
+    CREATE INDEX IF NOT EXISTS idx_alerts_created ON alerts(created_at);
+
+    CREATE TABLE IF NOT EXISTS audit_log (
+      id TEXT PRIMARY KEY,
+      action TEXT NOT NULL,
+      details TEXT,
+      source_url TEXT,
+      http_status INTEGER,
+      created_at INTEGER NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_audit_action ON audit_log(action);
+    CREATE INDEX IF NOT EXISTS idx_audit_created ON audit_log(created_at);
+
+    CREATE TABLE IF NOT EXISTS settings (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL,
+      updated_at INTEGER NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS chat_messages (
+      id TEXT PRIMARY KEY,
+      role TEXT NOT NULL CHECK(role IN ('user','assistant','system')),
+      content TEXT NOT NULL,
+      created_at INTEGER NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_chat_created ON chat_messages(created_at);
+  `)
+}

@@ -1,0 +1,372 @@
+import { getDatabase } from '../database'
+import { generateId, timestamp } from '@common/utils/id'
+import type { Discipline, SourceType } from '@common/types/intel'
+import log from 'electron-log'
+
+interface SeedSource {
+  name: string
+  discipline: Discipline
+  type: string
+  schedule: string
+  config: Record<string, unknown>
+}
+
+// All publicly available sources that require no API keys
+const FREE_SOURCES: SeedSource[] = [
+  // ── OSINT ──────────────────────────────────────────────────────────
+  {
+    name: 'Global News RSS',
+    discipline: 'osint',
+    type: 'rss',
+    schedule: '*/15 * * * *', // every 15 min
+    config: {
+      feeds: [
+        { url: 'https://feeds.reuters.com/reuters/worldNews', name: 'Reuters World' },
+        { url: 'https://rss.nytimes.com/services/xml/rss/nyt/World.xml', name: 'NYT World' },
+        { url: 'https://feeds.bbci.co.uk/news/world/rss.xml', name: 'BBC World' },
+        { url: 'https://www.aljazeera.com/xml/rss/all.xml', name: 'Al Jazeera' },
+        { url: 'https://news.un.org/feed/subscribe/en/news/all/rss.xml', name: 'UN News' },
+        { url: 'https://www.state.gov/rss-feed/press-releases/feed/', name: 'US State Dept' }
+      ]
+    }
+  },
+  {
+    name: 'Security News RSS',
+    discipline: 'osint',
+    type: 'rss',
+    schedule: '*/30 * * * *', // every 30 min
+    config: {
+      feeds: [
+        { url: 'https://www.darkreading.com/rss.xml', name: 'Dark Reading' },
+        { url: 'https://threatpost.com/feed/', name: 'Threatpost' },
+        { url: 'https://thehackernews.com/feeds/posts/default', name: 'The Hacker News' },
+        { url: 'https://www.securityweek.com/feed', name: 'SecurityWeek' }
+      ]
+    }
+  },
+  {
+    name: 'Court Records (Security)',
+    discipline: 'osint',
+    type: 'public-records',
+    schedule: '0 */6 * * *', // every 6 hours
+    config: {
+      searchTerms: ['terrorism', 'national security', 'cybercrime', 'sanctions violation', 'espionage']
+    }
+  },
+  {
+    name: 'Academic Papers (Security & AI)',
+    discipline: 'osint',
+    type: 'academic',
+    schedule: '0 */4 * * *', // every 4 hours
+    config: {
+      categories: ['cs.CR', 'cs.AI']
+    }
+  },
+  {
+    name: 'GDELT Global Events',
+    discipline: 'osint',
+    type: 'gdelt',
+    schedule: '*/30 * * * *',
+    config: {
+      queries: [
+        { q: 'terrorism attack', category: 'Terrorism', timespan: '24h' },
+        { q: 'military conflict armed', category: 'Conflict', timespan: '24h' },
+        { q: 'cyber attack breach hacking', category: 'Cyber', timespan: '24h' },
+        { q: 'natural disaster earthquake flood', category: 'Disaster', timespan: '24h' },
+        { q: 'sanctions embargo', category: 'Sanctions', timespan: '24h' },
+        { q: 'nuclear weapons proliferation', category: 'WMD', timespan: '48h' },
+        { q: 'refugee crisis humanitarian', category: 'Humanitarian', timespan: '48h' },
+        { q: 'election unrest protest coup', category: 'Political', timespan: '24h' }
+      ]
+    }
+  },
+  {
+    name: 'CIA World Factbook',
+    discipline: 'osint',
+    type: 'factbook',
+    schedule: '0 0 * * 0', // weekly on Sunday midnight
+    config: {
+      regions: ['africa', 'europe', 'middle-east', 'south-asia', 'east-n-southeast-asia',
+        'central-asia', 'north-america', 'south-america']
+    }
+  },
+  {
+    name: 'Government Data (World Bank, WHO, Federal Register, UK Gov)',
+    discipline: 'osint',
+    type: 'government-data',
+    schedule: '0 */6 * * *', // every 6 hours
+    config: {}
+  },
+  {
+    name: 'Asia-Pacific News RSS',
+    discipline: 'osint',
+    type: 'rss',
+    schedule: '*/30 * * * *',
+    config: {
+      feeds: [
+        { url: 'https://www3.nhk.or.jp/nhkworld/en/news/feeds/', name: 'NHK World Japan' },
+        { url: 'https://www.channelnewsasia.com/api/v1/rss-outbound-feed?_format=xml', name: 'CNA Asia' },
+        { url: 'https://timesofindia.indiatimes.com/rssfeedstopstories.cms', name: 'Times of India' },
+        { url: 'https://www.scmp.com/rss/91/feed', name: 'SCMP' }
+      ]
+    }
+  },
+  {
+    name: 'Middle East & Africa News RSS',
+    discipline: 'osint',
+    type: 'rss',
+    schedule: '*/30 * * * *',
+    config: {
+      feeds: [
+        { url: 'https://www.middleeasteye.net/rss', name: 'Middle East Eye' },
+        { url: 'https://www.dailymaverick.co.za/feed/', name: 'Daily Maverick SA' },
+        { url: 'https://www.france24.com/en/rss', name: 'France 24' },
+        { url: 'https://www.dw.com/rss/en/all/rss-en-all/s-9097', name: 'Deutsche Welle' }
+      ]
+    }
+  },
+  {
+    name: 'Americas & Europe News RSS',
+    discipline: 'osint',
+    type: 'rss',
+    schedule: '*/30 * * * *',
+    config: {
+      feeds: [
+        { url: 'https://feeds.washingtonpost.com/rss/world', name: 'Washington Post World' },
+        { url: 'https://rss.cbc.ca/lineup/world.xml', name: 'CBC World Canada' },
+        { url: 'https://www.theguardian.com/world/rss', name: 'The Guardian World' },
+        { url: 'https://www.spiegel.de/international/index.rss', name: 'Der Spiegel International' }
+      ]
+    }
+  },
+  {
+    name: 'Government Gazettes & Notices',
+    discipline: 'osint',
+    type: 'rss',
+    schedule: '0 */4 * * *',
+    config: {
+      feeds: [
+        { url: 'https://www.govinfo.gov/rss/fr.xml', name: 'US Federal Register (GovInfo)' },
+        { url: 'https://www.govinfo.gov/rss/cprt.xml', name: 'US Congressional Reports' },
+        { url: 'https://www.govinfo.gov/rss/cdoc.xml', name: 'US Congressional Documents' },
+        { url: 'https://www.legislation.gov.uk/new/data.feed', name: 'UK Legislation' }
+      ]
+    }
+  },
+  {
+    name: 'Defense & Military News RSS',
+    discipline: 'osint',
+    type: 'rss',
+    schedule: '*/30 * * * *',
+    config: {
+      feeds: [
+        { url: 'https://www.defense.gov/DesktopModules/ArticleCS/RSS.ashx?ContentType=1&Site=945', name: 'US DoD News' },
+        { url: 'https://www.janes.com/feeds/news', name: 'Janes Defense' },
+        { url: 'https://www.defensenews.com/arc/outboundfeeds/rss/?outputType=xml', name: 'Defense News' }
+      ]
+    }
+  },
+
+  // ── CYBINT ─────────────────────────────────────────────────────────
+  {
+    name: 'NVD CVE Monitor',
+    discipline: 'cybint',
+    type: 'cve',
+    schedule: '*/20 * * * *', // every 20 min
+    config: {}
+  },
+  {
+    name: 'abuse.ch Threat Feeds',
+    discipline: 'cybint',
+    type: 'threat-feed',
+    schedule: '*/30 * * * *',
+    config: {} // OTX requires API key, URLhaus is free
+  },
+
+  // ── FININT ─────────────────────────────────────────────────────────
+  {
+    name: 'SEC EDGAR Filings',
+    discipline: 'finint',
+    type: 'edgar',
+    schedule: '0 */3 * * *', // every 3 hours
+    config: {
+      searchTerms: ['sanctions', 'money laundering', 'fraud', 'investigation', 'terrorist financing']
+    }
+  },
+  {
+    name: 'OFAC & UN Sanctions',
+    discipline: 'finint',
+    type: 'sanctions',
+    schedule: '0 */6 * * *', // every 6 hours
+    config: {}
+  },
+
+  // ── SOCMINT ────────────────────────────────────────────────────────
+  {
+    name: 'Reddit Intelligence',
+    discipline: 'socmint',
+    type: 'reddit',
+    schedule: '*/15 * * * *',
+    config: {
+      subreddits: ['worldnews', 'cybersecurity', 'netsec', 'geopolitics', 'intelligence', 'OSINT']
+    }
+  },
+
+  // ── GEOINT ─────────────────────────────────────────────────────────
+  {
+    name: 'USGS Earthquakes (M4.0+)',
+    discipline: 'geoint',
+    type: 'usgs-earthquake',
+    schedule: '*/10 * * * *', // every 10 min
+    config: { minMagnitude: 4.0 }
+  },
+  {
+    name: 'NOAA Weather Alerts',
+    discipline: 'geoint',
+    type: 'noaa-weather',
+    schedule: '*/10 * * * *',
+    config: {}
+  },
+
+  // ── CI ─────────────────────────────────────────────────────────────
+  {
+    name: 'Breach News Feeds',
+    discipline: 'ci',
+    type: 'breach-feed',
+    schedule: '*/30 * * * *',
+    config: {
+      feeds: [
+        { url: 'https://www.databreaches.net/feed/', name: 'DataBreaches.net' },
+        { url: 'https://krebsonsecurity.com/feed/', name: 'Krebs on Security' },
+        { url: 'https://www.bleepingcomputer.com/feed/', name: 'BleepingComputer' }
+      ]
+    }
+  },
+
+  // ── Agency ─────────────────────────────────────────────────────────
+  {
+    name: 'Interpol Notices',
+    discipline: 'agency',
+    type: 'interpol',
+    schedule: '0 */2 * * *', // every 2 hours
+    config: {}
+  },
+  {
+    name: 'FBI Most Wanted',
+    discipline: 'agency',
+    type: 'fbi',
+    schedule: '0 */4 * * *', // every 4 hours
+    config: {}
+  },
+  {
+    name: 'Europol Alerts',
+    discipline: 'agency',
+    type: 'europol',
+    schedule: '0 */3 * * *',
+    config: {}
+  },
+  {
+    name: 'UN Security Council',
+    discipline: 'agency',
+    type: 'unsc',
+    schedule: '0 */3 * * *',
+    config: {}
+  }
+]
+
+// Sources that require API keys — created disabled, enabled once keys are configured
+const API_KEY_SOURCES: SeedSource[] = [
+  {
+    name: 'AlienVault OTX Pulses',
+    discipline: 'cybint',
+    type: 'threat-feed',
+    schedule: '*/30 * * * *',
+    config: { requiresKey: 'otx' }
+  },
+  {
+    name: 'Twitter/X Intelligence',
+    discipline: 'socmint',
+    type: 'twitter',
+    schedule: '*/15 * * * *',
+    config: {
+      queries: [
+        '(terrorism OR attack OR explosion) -"fantasy football"',
+        'cyber attack critical infrastructure',
+        'breaking emergency evacuate'
+      ],
+      requiresKey: 'twitter'
+    }
+  },
+  {
+    name: 'HaveIBeenPwned Breaches',
+    discipline: 'ci',
+    type: 'hibp',
+    schedule: '0 */6 * * *',
+    config: { requiresKey: 'hibp' }
+  },
+  {
+    name: 'GNews Global Intelligence',
+    discipline: 'osint',
+    type: 'gnews',
+    schedule: '0 */2 * * *', // every 2 hours (100 req/day free limit)
+    config: {
+      queries: [
+        { q: 'terrorism attack security threat' },
+        { q: 'cyber attack data breach' },
+        { q: 'military conflict escalation' },
+        { q: 'sanctions enforcement' },
+        { q: 'natural disaster emergency' }
+      ],
+      requiresKey: 'gnews'
+    }
+  }
+]
+
+const SEEDED_FLAG = 'system.seeded'
+
+export function seedDefaultSources(): void {
+  const db = getDatabase()
+
+  // Check if already seeded
+  const flag = db.prepare('SELECT value FROM settings WHERE key = ?').get(SEEDED_FLAG) as
+    | { value: string }
+    | undefined
+  if (flag) {
+    log.info('Sources already seeded — skipping')
+    return
+  }
+
+  const now = timestamp()
+  const insertStmt = db.prepare(`
+    INSERT INTO sources (id, name, discipline, type, config, schedule, enabled, error_count, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?)
+  `)
+
+  const tx = db.transaction(() => {
+    // Free sources — enabled by default
+    for (const src of FREE_SOURCES) {
+      insertStmt.run(
+        generateId(), src.name, src.discipline, src.type,
+        JSON.stringify(src.config), src.schedule, 1, now, now
+      )
+    }
+
+    // API-key sources — disabled by default
+    for (const src of API_KEY_SOURCES) {
+      insertStmt.run(
+        generateId(), src.name, src.discipline, src.type,
+        JSON.stringify(src.config), src.schedule, 0, now, now
+      )
+    }
+
+    // Mark as seeded
+    db.prepare('INSERT INTO settings (key, value, updated_at) VALUES (?, ?, ?)').run(
+      SEEDED_FLAG, '"true"', now
+    )
+  })
+
+  tx()
+
+  const total = FREE_SOURCES.length + API_KEY_SOURCES.length
+  log.info(`Seeded ${FREE_SOURCES.length} free sources + ${API_KEY_SOURCES.length} API-key sources (${total} total)`)
+}
