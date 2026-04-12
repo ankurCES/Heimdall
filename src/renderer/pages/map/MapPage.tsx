@@ -48,8 +48,16 @@ export function MapPage() {
   const [filterSeverity, setFilterSeverity] = useState<string>('all')
   const [layers, setLayers] = useState<Record<string, boolean>>({
     osint: true, cybint: true, finint: true, socmint: true,
-    geoint: true, sigint: true, rumint: true, ci: true, agency: true, imint: true
+    geoint: true, sigint: true, rumint: true, ci: true, agency: true, imint: true, mesh: true
   })
+  const [meshNodes, setMeshNodes] = useState<Array<{ node_id: string; long_name: string | null; latitude: number | null; longitude: number | null; battery_level: number | null; last_seen: number }>>([])
+
+  const loadMeshNodes = useCallback(async () => {
+    try {
+      const nodes = await window.heimdall.invoke('meshtastic:getNodes') as any[]
+      setMeshNodes((nodes || []).filter((n: any) => n.latitude && n.longitude))
+    } catch {}
+  }, [])
 
   const loadGeoReports = useCallback(async () => {
     setLoading(true)
@@ -73,9 +81,10 @@ export function MapPage() {
 
   useEffect(() => {
     loadGeoReports()
-    const interval = setInterval(loadGeoReports, 30000)
+    loadMeshNodes()
+    const interval = setInterval(() => { loadGeoReports(); loadMeshNodes() }, 30000)
     return () => clearInterval(interval)
-  }, [loadGeoReports])
+  }, [loadGeoReports, loadMeshNodes])
 
   // Subscribe to new reports
   useEffect(() => {
@@ -99,8 +108,8 @@ export function MapPage() {
 
   return (
     <div className="flex flex-col h-full">
-      {/* Toolbar */}
-      <div className="flex items-center justify-between px-4 py-2 border-b border-border bg-card/50">
+      {/* Toolbar — z-50 to stay above Leaflet */}
+      <div className="flex items-center justify-between px-4 py-2 border-b border-border bg-card/50 relative z-[1000]">
         <div className="flex items-center gap-2">
           <MapIcon className="h-4 w-4 text-muted-foreground" />
           <span className="text-sm font-semibold">Threat Map</span>
@@ -111,7 +120,7 @@ export function MapPage() {
         <div className="flex items-center gap-2">
           {/* Layer toggles */}
           <div className="flex items-center gap-0.5">
-            {Object.entries({ osint: '🔵', cybint: '🔴', geoint: '🟡', sigint: '🟢', agency: '🟣', imint: '📷' }).map(([disc, emoji]) => (
+            {Object.entries({ osint: '🔵', cybint: '🔴', geoint: '🟡', sigint: '🟢', agency: '🟣', imint: '📷', mesh: '📻' }).map(([disc, emoji]) => (
               <button
                 key={disc}
                 onClick={() => setLayers((l) => ({ ...l, [disc]: !l[disc] }))}
@@ -183,6 +192,27 @@ export function MapPage() {
                     <div>{report.discipline.toUpperCase()} | {report.severity.toUpperCase()}</div>
                     <div>{report.sourceName}</div>
                     <div>{formatRelativeTime(report.createdAt)}</div>
+                  </div>
+                </div>
+              </Popup>
+            </CircleMarker>
+          ))}
+
+          {/* Meshtastic nodes */}
+          {layers.mesh && meshNodes.map((node) => (
+            <CircleMarker
+              key={node.node_id}
+              center={[node.latitude!, node.longitude!]}
+              radius={7}
+              pathOptions={{ color: '#10b981', fillColor: '#10b981', fillOpacity: 0.8, weight: 2 }}
+            >
+              <Popup>
+                <div style={{ minWidth: 150, color: '#e2e8f0', background: '#1e293b', padding: 8, borderRadius: 6, margin: -12 }}>
+                  <div style={{ fontSize: 11, fontWeight: 600 }}>📻 {node.long_name || node.node_id}</div>
+                  <div style={{ fontSize: 10, color: '#94a3b8' }}>
+                    <div>Node: {node.node_id}</div>
+                    {node.battery_level && <div>Battery: {node.battery_level}%</div>}
+                    <div>Last seen: {new Date(node.last_seen).toLocaleString()}</div>
                   </div>
                 </div>
               </Popup>
