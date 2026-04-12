@@ -10,6 +10,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Switch } from '@renderer/components/ui/switch'
 import { Label } from '@renderer/components/ui/label'
 import { MarkdownRenderer } from '@renderer/components/MarkdownRenderer'
+import { TagEntityPicker } from '@renderer/components/TagEntityPicker'
 import { cn } from '@renderer/lib/utils'
 import { formatRelativeTime } from '@renderer/lib/utils'
 
@@ -48,6 +49,8 @@ export function ChatPage() {
   const [chatMode, setChatMode] = useState<'agentic' | 'direct' | 'caveman'>('agentic')
   const [editingTitle, setEditingTitle] = useState<string | null>(null)
   const [editTitle, setEditTitle] = useState('')
+  const [selectedFilters, setSelectedFilters] = useState<Array<{ type: 'tag' | 'entity'; value: string }>>([])
+  const [showExplore, setShowExplore] = useState(false)
   const scrollRef = useRef<HTMLDivElement>(null)
 
   const invoke = useCallback((ch: string, p?: unknown) => window.heimdall.invoke(ch, p), [])
@@ -153,6 +156,13 @@ export function ChatPage() {
       setActiveSessionId(sessionId)
     }
 
+    // Prepend filter context to query
+    let enrichedText = text
+    if (selectedFilters.length > 0) {
+      const filterCtx = selectedFilters.map((f) => `[${f.type}:${f.value}]`).join(' ')
+      enrichedText = `Context filters: ${filterCtx}\n\nQuery: ${text}`
+    }
+
     const userMsg: Message = { id: crypto.randomUUID(), role: 'user', content: text, createdAt: Date.now() }
     setMessages((prev) => [...prev, userMsg])
     setInput('')
@@ -165,7 +175,7 @@ export function ChatPage() {
         .map((m) => ({ role: m.role, content: m.content }))
 
       const response = await invoke('chat:send', {
-        messages: chatHistory, query: text, sessionId,
+        messages: chatHistory, query: enrichedText, sessionId,
         connectionId: selectedConnection || undefined,
         useAgentic: chatMode === 'agentic',
         mode: chatMode
@@ -366,18 +376,22 @@ export function ChatPage() {
 
         {/* Input */}
         <div className="border-t border-border p-3 bg-card/50">
-          <div className="flex gap-2">
-            <textarea value={input} onChange={(e) => setInput(e.target.value)}
-              onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage() } }}
-              placeholder={chatMode === 'agentic' ? 'Complex query — Plan → Research → Analyze...' : 'Quick question — Vector + RAG...'}
-              className="flex-1 resize-none rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-              rows={2} disabled={streaming} />
-            <Button onClick={sendMessage} disabled={streaming || !input.trim() || connections.length === 0} className="self-end">
+          <div className="flex items-end gap-2">
+            <div className="flex-1 space-y-1.5">
+              <TagEntityPicker selected={selectedFilters} onSelectionChange={setSelectedFilters} />
+              <textarea value={input} onChange={(e) => setInput(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage() } }}
+                placeholder={chatMode === 'agentic' ? 'Complex query — Plan → Research → Analyze...' : 'Quick question — Vector + RAG...'}
+                className="w-full resize-none rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                rows={2} disabled={streaming} />
+            </div>
+            <Button onClick={sendMessage} disabled={streaming || !input.trim() || connections.length === 0}>
               {streaming ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
             </Button>
           </div>
           {activeConn && <p className="text-[10px] text-muted-foreground mt-1">
-            {activeConn.name} ({activeConn.model}) | {chatMode === 'agentic' ? 'Agentic' : 'Direct + Vector'}
+            {activeConn.name} ({activeConn.model}) | {chatMode === 'agentic' ? 'Agentic' : chatMode === 'caveman' ? 'Caveman' : 'Direct + Vector'}
+            {selectedFilters.length > 0 && ` | ${selectedFilters.length} filter${selectedFilters.length > 1 ? 's' : ''} active`}
           </p>}
         </div>
       </div>

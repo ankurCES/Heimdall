@@ -187,5 +187,108 @@ export function registerChatBridge(): void {
     return llmService.getUsageStats()
   })
 
+  // Session semantic data for Explore tab
+  ipcMain.handle('chat:getSessionData', (_event, params: { sessionId: string }) => {
+    const db = getDatabase()
+    const messages = db.prepare(
+      "SELECT content FROM chat_messages WHERE session_id = ? AND role = 'assistant' ORDER BY created_at"
+    ).all(params.sessionId) as Array<{ content: string }>
+
+    // Collect mentioned disciplines, severities, and keywords from assistant messages
+    const disciplines = new Set<string>()
+    const severities = new Set<string>()
+    const kw: Record<string, number> = {}
+    const stopWords = new Set(['that','this','with','from','have','been','were','which','their','about','would','could','should','these','those','based','using','other','more','also','into','some','such','most','than','very','only','just','they','will','each','many'])
+
+    for (const msg of messages) {
+      const text = msg.content.toLowerCase()
+      for (const d of ['osint','cybint','finint','socmint','geoint','sigint','rumint','ci','agency']) {
+        if (text.includes(d)) disciplines.add(d)
+      }
+      for (const s of ['critical','high','medium','low']) {
+        if (text.includes(s)) severities.add(s)
+      }
+      for (const w of (text.match(/\b[a-z]{4,}\b/g) || [])) {
+        if (!stopWords.has(w)) kw[w] = (kw[w] || 0) + 1
+      }
+    }
+
+    const topKeywords = Object.entries(kw).sort((a, b) => b[1] - a[1]).slice(0, 15).map(([k]) => k)
+
+    // Get reports matching the session context
+    let reports: Array<Record<string, unknown>> = []
+    if (topKeywords.length > 0) {
+      const clauses = topKeywords.slice(0, 5).map(() => 'LOWER(title) LIKE ?').join(' OR ')
+      const vals = topKeywords.slice(0, 5).map((k) => `%${k}%`)
+      reports = db.prepare(
+        `SELECT id, discipline, title, severity, source_name, verification_score, latitude, longitude, created_at FROM intel_reports WHERE ${clauses} ORDER BY created_at DESC LIMIT 200`
+      ).all(...vals) as Array<Record<string, unknown>>
+    }
+
+    // Aggregate data for charts
+    const bySeverity: Record<string, number> = {}
+    const byDiscipline: Record<string, number> = {}
+    const bySource: Record<string, number> = {}
+    const timeline: Array<{ date: string; count: number }> = {}  as any
+    const timeMap: Record<string, number> = {}
+
+    for (const r of reports) {
+      bySeverity[r.severity as string] = (bySeverity[r.severity as string] || 0) + 1
+      byDiscipline[r.discipline as string] = (byDiscipline[r.discipline as string] || 0) + 1
+      bySource[r.source_name as string] = (bySource[r.source_name as string] || 0) + 1
+      const date = new Date(r.created_at as number).toISOString().split('T')[0]
+      timeMap[date] = (timeMap[date] || 0) + 1
+    }
+
+    return {
+      disciplines: Array.from(disciplines),
+      severities: Array.from(severities),
+      topKeywords,
+      reportCount: reports.length,
+      bySeverity, byDiscipline, bySource,
+      timeline: Object.entries(timeMap).sort().map(([date, count]) => ({ date, count })),
+      reports: reports.slice(0, 100).map((r) => ({
+        id: r.id, discipline: r.discipline, title: r.title, severity: r.severity,
+        source: r.source_name, verification: r.verification_score,
+        lat: r.latitude, lon: r.longitude, createdAt: r.created_at
+      }))
+    }
+  })
+
+  // Explore data — aggregate across all intel
+  ipcMain.handle('explore:getData', (_event, params: {
+    groupBy: string; metric: string; filters?: Record<string, string>
+    timeRange?: string; limit?: number
+  }) => {
+    const db = getDatabase()
+    const { groupBy, metric, filters, timeRange, limit = 50 } = params
+
+    const conditions: string[] = []
+    const vals: unknown[] = []
+
+    if (filters?.discipline) { conditions.push('discipline = ?'); vals.push(filters.discipline) }
+    if (filters?.severity) { conditions.push('severity = ?'); vals.push(filters.severity) }
+    if (filters?.source) { conditions.push('source_name = ?'); vals.push(filters.source) }
+    if (timeRange) {
+      const hours = parseInt(timeRange) || 24
+      conditions.push('created_at >= ?')
+      vals.push(Date.now() - hours * 3600000)
+    }
+
+    const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : ''
+    const metricSql = metric === 'count' ? 'COUNT(*)' : metric === 'avg_verification' ? 'AVG(verification_score)' : 'COUNT(*)'
+
+    const data = db.prepare(
+      `SELECT ${groupBy} as label, ${metricSql} as value FROM intel_reports ${where} GROUP BY ${groupBy} ORDER BY value DESC LIMIT ?`
+    ).all(...vals, limit) as Array<{ label: string; value: number }>
+
+    // Timeline data
+    const timeData = db.prepare(
+      `SELECT DATE(created_at/1000, 'unixepoch') as date, COUNT(*) as count FROM intel_reports ${where} GROUP BY date ORDER BY date`
+    ).all(...vals) as Array<{ date: string; count: number }>
+
+    return { data, timeline: timeData }
+  })
+
   log.info('Chat bridge registered')
 }

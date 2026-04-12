@@ -12,6 +12,7 @@ import { AuditPage } from './pages/audit/AuditPage'
 import { SettingsPage } from './pages/settings/SettingsPage'
 import { VaultPage } from './pages/vault/VaultPage'
 import { TokensPage } from './pages/tokens/TokensPage'
+import { ExplorePage } from './pages/explore/ExplorePage'
 import './styles/globals.css'
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
@@ -26,6 +27,7 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
           <Route path="/map" element={<MapPage />} />
           <Route path="/vault" element={<VaultPage />} />
           <Route path="/chat" element={<ChatPage />} />
+          <Route path="/explore" element={<ExplorePage />} />
           <Route path="/tokens" element={<TokensPage />} />
           <Route path="/audit" element={<AuditPage />} />
           <Route path="/settings" element={<SettingsPage />} />
