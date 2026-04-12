@@ -63,16 +63,7 @@ export function registerMeshtasticBridge(): void {
             return
           }
 
-          log.info(`Meshtastic: connected to ${serialPath}, requesting node DB...`)
-
-          // Send a "want_config_id" request to trigger the device to dump its config + node DB
-          // Meshtastic serial protocol: 4-byte header [0x94, 0xc3, MSB, LSB] + protobuf payload
-          // ToRadio message with want_config_id = 1 triggers full config dump including node DB
-          const wantConfigProto = Buffer.from([
-            0x08, 0x01 // field 1 (want_config_id), varint = 1
-          ])
-          const header = Buffer.from([0x94, 0xc3, 0x00, wantConfigProto.length])
-          sp.write(Buffer.concat([header, wantConfigProto]))
+          log.info(`Meshtastic: connected to ${serialPath}, listening for node data...`)
 
           sp.on('data', (data: Buffer) => {
             allData.push(data)
@@ -97,7 +88,7 @@ export function registerMeshtasticBridge(): void {
             nodesFound = Math.max(uniqueNames.length, hexMatches.length / 2)
           })
 
-          // Wait 8 seconds to collect the full dump
+          // Wait 10 seconds to collect data stream
           setTimeout(() => {
             sp.close()
             const rawData = Buffer.concat(allData)
@@ -161,7 +152,7 @@ export function registerMeshtasticBridge(): void {
               nodesFound: stored,
               bytesReceived: rawData.length
             })
-          }, 8000)
+          }, 10000)
         })
       })
     } catch (err) {
