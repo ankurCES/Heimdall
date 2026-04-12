@@ -285,7 +285,7 @@ export function registerChatBridge(): void {
     if (filters?.discipline) { conditions.push('discipline = ?'); vals.push(filters.discipline) }
     if (filters?.severity) { conditions.push('severity = ?'); vals.push(filters.severity) }
     if (filters?.source) { conditions.push('source_name = ?'); vals.push(filters.source) }
-    if (timeRange && timeRange !== '') {
+    if (timeRange && timeRange !== '' && timeRange !== 'all') {
       const hours = parseInt(timeRange) || 24
       conditions.push('created_at >= ?')
       vals.push(Date.now() - hours * 3600000)

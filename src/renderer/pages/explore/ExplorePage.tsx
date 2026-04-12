@@ -40,7 +40,7 @@ const TIME_RANGES = [
   { value: '72', label: 'Last 3 Days' },
   { value: '168', label: 'Last Week' },
   { value: '720', label: 'Last 30 Days' },
-  { value: '', label: 'All Time' }
+  { value: 'all', label: 'All Time' }
 ]
 
 const COLORS = ['#3b82f6','#ef4444','#10b981','#f59e0b','#8b5cf6','#ec4899','#06b6d4','#f97316','#6366f1','#14b8a6','#e11d48','#84cc16','#a855f7','#0ea5e9','#d946ef']
