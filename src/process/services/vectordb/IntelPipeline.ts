@@ -1,3 +1,5 @@
+import { BrowserWindow } from 'electron'
+import { IPC_EVENTS } from '@common/adapter/ipcBridge'
 import { vectorDbService } from './VectorDbService'
 import { intelEnricher } from '../enrichment/IntelEnricher'
 import { cronService } from '../cron/CronService'
@@ -37,6 +39,16 @@ export class IntelPipeline {
     log.info('Intel pipeline stopped')
   }
 
+  isProcessing(): boolean {
+    return this.processing
+  }
+
+  private notify(title: string, body: string, severity: string): void {
+    for (const win of BrowserWindow.getAllWindows()) {
+      win.webContents.send(IPC_EVENTS.APP_NOTIFICATION, { title, body, severity })
+    }
+  }
+
   async runIngestion(): Promise<void> {
     if (this.processing) return
     this.processing = true
@@ -56,6 +68,7 @@ export class IntelPipeline {
       }
 
       log.info(`Pipeline: processing ${newReports.length} new reports for vector ingestion`)
+      this.notify('Vector Ingestion', `Processing ${newReports.length} reports...`, 'info')
 
       const reports: IntelReport[] = newReports.map((r) => ({
         id: r.id as string,
@@ -102,8 +115,10 @@ export class IntelPipeline {
       }
 
       log.info(`Pipeline: ingested ${reports.length} reports into vector DB`)
+      this.notify('Ingestion Complete', `${reports.length} reports processed into vector DB`, 'success')
     } catch (err) {
       log.error('Pipeline ingestion failed:', err)
+      this.notify('Ingestion Failed', String(err), 'error')
     } finally {
       this.processing = false
     }

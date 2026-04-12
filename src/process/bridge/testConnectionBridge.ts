@@ -189,5 +189,24 @@ export function registerTestConnectionBridge(): void {
     }
   })
 
+  // List serial ports for Meshtastic USB connection
+  ipcMain.handle('settings:listSerialPorts', async () => {
+    try {
+      const { SerialPort } = await import('serialport')
+      const ports = await SerialPort.list()
+      return ports.map((p) => ({
+        path: p.path,
+        manufacturer: p.manufacturer || '',
+        serialNumber: p.serialNumber || '',
+        vendorId: p.vendorId || '',
+        productId: p.productId || '',
+        label: `${p.path}${p.manufacturer ? ` (${p.manufacturer})` : ''}`
+      }))
+    } catch (err) {
+      log.warn('Serial port listing failed:', err)
+      return []
+    }
+  })
+
   log.info('Test connection bridge registered')
 }

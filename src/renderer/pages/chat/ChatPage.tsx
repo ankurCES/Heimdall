@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
+import { toast } from 'sonner'
 import {
   MessageSquare, Send, Trash2, Loader2, Plus,
   Calendar, BookOpen, Brain, Zap, Bot, Edit2, X
@@ -55,10 +56,20 @@ export function ChatPage() {
 
   const invoke = useCallback((ch: string, p?: unknown) => window.heimdall.invoke(ch, p), [])
 
-  // Load sessions on mount
+  // Load sessions on mount + check ingestion status
   useEffect(() => {
     loadSessions()
     loadConnections()
+    // Poll ingestion status
+    const checkIngesting = async () => {
+      try {
+        const ingesting = await invoke('chat:isIngesting') as boolean
+        setLearningsLoading(ingesting)
+      } catch {}
+    }
+    checkIngesting()
+    const interval = setInterval(checkIngesting, 5000)
+    return () => clearInterval(interval)
   }, [])
 
   // Stream events
@@ -206,6 +217,9 @@ export function ChatPage() {
       const result = await invoke('chat:generateLearnings') as {
         totalReports: number; totalTags: number; totalEntities: number; totalLinks: number; vectorDbInitialized: boolean
       }
+      toast.success('Knowledge Ingestion Complete', {
+        description: `${result.totalReports} reports, ${result.totalTags} tags, ${result.totalEntities} entities, ${result.totalLinks} links`
+      })
       setMessages((prev) => [...prev, {
         id: crypto.randomUUID(), role: 'assistant', createdAt: Date.now(),
         content: `## Knowledge Ingestion Complete\n\n` +
@@ -218,6 +232,7 @@ export function ChatPage() {
           `All intelligence data has been processed, enriched with tags and entities, and ingested into the vector database for semantic search.`
       }])
     } catch (err) {
+      toast.error('Learnings generation failed', { description: String(err) })
       setMessages((prev) => [...prev, { id: crypto.randomUUID(), role: 'assistant', content: `Learnings generation failed: ${err}`, createdAt: Date.now() }])
     } finally { setLearningsLoading(false) }
   }

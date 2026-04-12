@@ -1,5 +1,5 @@
-import { useState, useEffect } from 'react'
-import { Radio, Check, Loader2, Wifi, Usb, Cloud } from 'lucide-react'
+import { useState, useEffect, useCallback } from 'react'
+import { Radio, Check, Loader2, Wifi, Usb, Cloud, RefreshCw } from 'lucide-react'
 import { Button } from '@renderer/components/ui/button'
 import { Input } from '@renderer/components/ui/input'
 import { Label } from '@renderer/components/ui/label'
@@ -36,11 +36,27 @@ export function MeshtasticTab() {
   const [didSave, setDidSave] = useState(false)
   const { testing, result, test } = useTestConnection()
 
+  const [serialPorts, setSerialPorts] = useState<Array<{ path: string; label: string }>>([])
+  const [loadingPorts, setLoadingPorts] = useState(false)
+
+  const loadSerialPorts = useCallback(async () => {
+    setLoadingPorts(true)
+    try {
+      const ports = await window.heimdall.invoke('settings:listSerialPorts') as Array<{ path: string; label: string }>
+      setSerialPorts(ports || [])
+    } catch {}
+    setLoadingPorts(false)
+  }, [])
+
   useEffect(() => {
     if (saved && saved.connectionType !== undefined) {
       setConfig(saved)
     }
   }, [saved])
+
+  useEffect(() => {
+    if (config.connectionType === 'serial') loadSerialPorts()
+  }, [config.connectionType, loadSerialPorts])
 
   const update = (field: keyof MeshtasticConfig, value: unknown) => {
     setConfig((prev) => ({ ...prev, [field]: value }))
@@ -122,12 +138,34 @@ export function MeshtasticTab() {
 
           {config.connectionType === 'serial' && (
             <div className="space-y-2">
-              <Label>Serial Port Path</Label>
-              <Input
-                value={config.serialPath}
-                onChange={(e) => update('serialPath', e.target.value)}
-                placeholder="/dev/tty.usbserial-0001 or COM3"
-              />
+              <Label>Serial Port</Label>
+              <div className="flex gap-2">
+                {serialPorts.length > 0 ? (
+                  <Select value={config.serialPath} onValueChange={(v) => update('serialPath', v)}>
+                    <SelectTrigger className="flex-1">
+                      <SelectValue placeholder="Select device..." />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {serialPorts.map((p) => (
+                        <SelectItem key={p.path} value={p.path}>{p.label}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                ) : (
+                  <Input
+                    value={config.serialPath}
+                    onChange={(e) => update('serialPath', e.target.value)}
+                    placeholder="/dev/tty.usbserial-0001 or COM3"
+                    className="flex-1"
+                  />
+                )}
+                <Button variant="outline" size="sm" onClick={loadSerialPorts} disabled={loadingPorts}>
+                  <RefreshCw className={`h-3.5 w-3.5 ${loadingPorts ? 'animate-spin' : ''}`} />
+                </Button>
+              </div>
+              {serialPorts.length === 0 && !loadingPorts && (
+                <p className="text-xs text-muted-foreground">No devices found. Connect a USB radio and click refresh.</p>
+              )}
             </div>
           )}
 

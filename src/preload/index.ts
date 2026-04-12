@@ -11,8 +11,8 @@ const testChannels = [
   'chat:createSession', 'chat:getSessions', 'chat:renameSession', 'chat:deleteSession',
   'chat:generateDailySummary', 'chat:generateWeeklySummary',
   'chat:generateLearnings', 'chat:getVectorStats', 'chat:getTokenStats',
-  'chat:getSessionData', 'explore:getData',
-  'settings:testLlm', 'settings:listLlmModels',
+  'chat:getSessionData', 'chat:isIngesting', 'explore:getData',
+  'settings:testLlm', 'settings:listLlmModels', 'settings:listSerialPorts',
   'enrichment:getTags', 'enrichment:getEntities', 'enrichment:getLinks',
   'enrichment:getTopTags', 'enrichment:getTopEntities'
 ]

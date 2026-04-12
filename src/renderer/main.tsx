@@ -13,11 +13,23 @@ import { SettingsPage } from './pages/settings/SettingsPage'
 import { VaultPage } from './pages/vault/VaultPage'
 import { TokensPage } from './pages/tokens/TokensPage'
 import { ExplorePage } from './pages/explore/ExplorePage'
+import { Toaster } from 'sonner'
+import { NotificationListener } from './components/NotificationListener'
 import './styles/globals.css'
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
     <HashRouter>
+      <Toaster
+        theme="dark"
+        position="bottom-right"
+        richColors
+        closeButton
+        toastOptions={{
+          style: { background: 'hsl(222 47% 8%)', border: '1px solid hsl(217 33% 17%)', color: 'hsl(210 40% 93%)' }
+        }}
+      />
+      <NotificationListener />
       <Routes>
         <Route element={<Layout />}>
           <Route path="/" element={<DashboardPage />} />

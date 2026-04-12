@@ -187,6 +187,11 @@ export function registerChatBridge(): void {
     return llmService.getUsageStats()
   })
 
+  ipcMain.handle('chat:isIngesting', async () => {
+    const { intelPipeline } = await import('../services/vectordb/IntelPipeline')
+    return intelPipeline.isProcessing()
+  })
+
   // Session semantic data for Explore tab
   ipcMain.handle('chat:getSessionData', (_event, params: { sessionId: string }) => {
     const db = getDatabase()
@@ -229,7 +234,6 @@ export function registerChatBridge(): void {
     const bySeverity: Record<string, number> = {}
     const byDiscipline: Record<string, number> = {}
     const bySource: Record<string, number> = {}
-    const timeline: Array<{ date: string; count: number }> = {}  as any
     const timeMap: Record<string, number> = {}
 
     for (const r of reports) {
@@ -256,6 +260,15 @@ export function registerChatBridge(): void {
   })
 
   // Explore data — aggregate across all intel
+  // Explore — safe groupBy whitelist
+  const GROUP_BY_SQL: Record<string, string> = {
+    discipline: 'discipline',
+    severity: 'severity',
+    source: 'source_name',
+    date: "strftime('%Y-%m-%d', created_at/1000, 'unixepoch')",
+    hour: "strftime('%H', created_at/1000, 'unixepoch')"
+  }
+
   ipcMain.handle('explore:getData', (_event, params: {
     groupBy: string; metric: string; filters?: Record<string, string>
     timeRange?: string; limit?: number
@@ -263,28 +276,29 @@ export function registerChatBridge(): void {
     const db = getDatabase()
     const { groupBy, metric, filters, timeRange, limit = 50 } = params
 
+    const groupBySql = GROUP_BY_SQL[groupBy] || 'discipline'
+    const metricSql = metric === 'avg_verification' ? 'ROUND(AVG(verification_score),1)' : 'COUNT(*)'
+
     const conditions: string[] = []
     const vals: unknown[] = []
 
     if (filters?.discipline) { conditions.push('discipline = ?'); vals.push(filters.discipline) }
     if (filters?.severity) { conditions.push('severity = ?'); vals.push(filters.severity) }
     if (filters?.source) { conditions.push('source_name = ?'); vals.push(filters.source) }
-    if (timeRange) {
+    if (timeRange && timeRange !== '') {
       const hours = parseInt(timeRange) || 24
       conditions.push('created_at >= ?')
       vals.push(Date.now() - hours * 3600000)
     }
 
     const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : ''
-    const metricSql = metric === 'count' ? 'COUNT(*)' : metric === 'avg_verification' ? 'AVG(verification_score)' : 'COUNT(*)'
 
     const data = db.prepare(
-      `SELECT ${groupBy} as label, ${metricSql} as value FROM intel_reports ${where} GROUP BY ${groupBy} ORDER BY value DESC LIMIT ?`
+      `SELECT ${groupBySql} as label, ${metricSql} as value FROM intel_reports ${where} GROUP BY ${groupBySql} ORDER BY value DESC LIMIT ?`
     ).all(...vals, limit) as Array<{ label: string; value: number }>
 
-    // Timeline data
     const timeData = db.prepare(
-      `SELECT DATE(created_at/1000, 'unixepoch') as date, COUNT(*) as count FROM intel_reports ${where} GROUP BY date ORDER BY date`
+      `SELECT strftime('%Y-%m-%d', created_at/1000, 'unixepoch') as date, COUNT(*) as count FROM intel_reports ${where} GROUP BY date ORDER BY date`
     ).all(...vals) as Array<{ date: string; count: number }>
 
     return { data, timeline: timeData }

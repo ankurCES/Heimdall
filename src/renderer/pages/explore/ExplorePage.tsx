@@ -28,9 +28,9 @@ const METRICS = [
 const GROUP_BY_OPTIONS = [
   { value: 'discipline', label: 'Discipline' },
   { value: 'severity', label: 'Severity' },
-  { value: 'source_name', label: 'Source' },
-  { value: "strftime('%Y-%m-%d', created_at/1000, 'unixepoch')", label: 'Date' },
-  { value: "strftime('%H', created_at/1000, 'unixepoch')", label: 'Hour of Day' }
+  { value: 'source', label: 'Source' },
+  { value: 'date', label: 'Date' },
+  { value: 'hour', label: 'Hour of Day' }
 ]
 
 const TIME_RANGES = [
