@@ -167,6 +167,38 @@ const FREE_SOURCES: SeedSource[] = [
     }
   },
 
+  // ── CRIME & POLICE ─────────────────────────────────────────────────
+  {
+    name: 'UK Police Street Crime',
+    discipline: 'osint',
+    type: 'uk-police-crime',
+    schedule: '0 */4 * * *',
+    config: {
+      forces: ['metropolitan', 'west-midlands', 'greater-manchester', 'west-yorkshire', 'merseyside'],
+      locations: [
+        { name: 'London', lat: 51.5074, lng: -0.1278 },
+        { name: 'Birmingham', lat: 52.4862, lng: -1.8904 },
+        { name: 'Manchester', lat: 53.4808, lng: -2.2426 }
+      ]
+    }
+  },
+
+  // ── GEOINT (additional) ───────────────────────────────────────────
+  {
+    name: 'NASA FIRMS Fire Detection',
+    discipline: 'geoint',
+    type: 'nasa-firms',
+    schedule: '0 */2 * * *',
+    config: {}
+  },
+  {
+    name: 'NASA EONET Natural Events',
+    discipline: 'geoint',
+    type: 'nasa-eonet',
+    schedule: '0 */3 * * *',
+    config: {}
+  },
+
   // ── CYBINT ─────────────────────────────────────────────────────────
   {
     name: 'NVD CVE Monitor',
@@ -303,6 +335,16 @@ const API_KEY_SOURCES: SeedSource[] = [
     type: 'hibp',
     schedule: '0 */6 * * *',
     config: { requiresKey: 'hibp' }
+  },
+  {
+    name: 'FBI Crime Statistics',
+    discipline: 'osint',
+    type: 'fbi-crime-stats',
+    schedule: '0 */6 * * *',
+    config: {
+      states: ['CA', 'TX', 'FL', 'NY', 'IL', 'PA', 'OH', 'GA', 'NC', 'MI'],
+      requiresKey: 'datagov'
+    }
   },
   {
     name: 'GNews Global Intelligence',

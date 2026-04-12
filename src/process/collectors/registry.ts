@@ -8,6 +8,8 @@ import { FactbookCollector } from './osint/FactbookCollector'
 import { GdeltCollector } from './osint/GdeltCollector'
 import { GovernmentDataCollector } from './osint/GovernmentDataCollector'
 import { GNewsCollector } from './osint/GNewsCollector'
+import { FbiCrimeStatsCollector } from './osint/FbiCrimeStatsCollector'
+import { UkPoliceCrimeCollector } from './osint/UkPoliceCrimeCollector'
 
 // CYBINT
 import { CveCollector } from './cybint/CveCollector'
@@ -27,10 +29,13 @@ import { TelegramChannelCollector } from './socmint/TelegramChannelCollector'
 import { UsgsEarthquakeCollector } from './geoint/UsgsEarthquakeCollector'
 import { NoaaWeatherCollector } from './geoint/NoaaWeatherCollector'
 import { SentinelCollector } from './geoint/SentinelCollector'
+import { NasaFirmsCollector } from './geoint/NasaFirmsCollector'
+import { NasaEonetCollector } from './geoint/NasaEonetCollector'
 
 // SIGINT
 import { AdsbCollector } from './sigint/AdsbCollector'
 import { FccCollector } from './sigint/FccCollector'
+import { AisCollector } from './sigint/AisCollector'
 import { MeshtasticCollector } from './sigint/MeshtasticCollector'
 
 // RUMINT
@@ -55,6 +60,8 @@ export function registerAllCollectors(): void {
   collectorManager.registerFactory('gdelt', () => new GdeltCollector())
   collectorManager.registerFactory('government-data', () => new GovernmentDataCollector())
   collectorManager.registerFactory('gnews', () => new GNewsCollector())
+  collectorManager.registerFactory('fbi-crime-stats', () => new FbiCrimeStatsCollector())
+  collectorManager.registerFactory('uk-police-crime', () => new UkPoliceCrimeCollector())
 
   // CYBINT (3)
   collectorManager.registerFactory('cve', () => new CveCollector())
@@ -74,11 +81,14 @@ export function registerAllCollectors(): void {
   collectorManager.registerFactory('usgs-earthquake', () => new UsgsEarthquakeCollector())
   collectorManager.registerFactory('noaa-weather', () => new NoaaWeatherCollector())
   collectorManager.registerFactory('sentinel', () => new SentinelCollector())
+  collectorManager.registerFactory('nasa-firms', () => new NasaFirmsCollector())
+  collectorManager.registerFactory('nasa-eonet', () => new NasaEonetCollector())
 
-  // SIGINT (3)
+  // SIGINT (4)
   collectorManager.registerFactory('adsb', () => new AdsbCollector())
   collectorManager.registerFactory('fcc', () => new FccCollector())
   collectorManager.registerFactory('meshtastic', () => new MeshtasticCollector())
+  collectorManager.registerFactory('ais-maritime', () => new AisCollector())
 
   // RUMINT (1)
   collectorManager.registerFactory('forum', () => new ForumCollector())

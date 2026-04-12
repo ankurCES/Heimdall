@@ -153,5 +153,40 @@ export function createSchema(db: Database.Database): void {
 
     CREATE INDEX IF NOT EXISTS idx_tokens_created ON token_usage(created_at);
     CREATE INDEX IF NOT EXISTS idx_tokens_model ON token_usage(model);
+
+    -- IMINT frames
+    CREATE TABLE IF NOT EXISTS imint_frames (
+      id TEXT PRIMARY KEY,
+      report_id TEXT,
+      source_name TEXT NOT NULL,
+      frame_path TEXT NOT NULL,
+      analysis TEXT,
+      detected_events TEXT,
+      latitude REAL,
+      longitude REAL,
+      created_at INTEGER NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_imint_report ON imint_frames(report_id);
+    CREATE INDEX IF NOT EXISTS idx_imint_created ON imint_frames(created_at);
+
+    -- Meshtastic node tracking
+    CREATE TABLE IF NOT EXISTS meshtastic_nodes (
+      node_id TEXT PRIMARY KEY,
+      long_name TEXT,
+      short_name TEXT,
+      hardware_model TEXT,
+      last_heard INTEGER,
+      latitude REAL,
+      longitude REAL,
+      battery_level INTEGER,
+      snr REAL,
+      channel INTEGER,
+      first_seen INTEGER NOT NULL,
+      last_seen INTEGER NOT NULL,
+      seen_count INTEGER NOT NULL DEFAULT 1
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_mesh_nodes_seen ON meshtastic_nodes(last_seen);
   `)
 }

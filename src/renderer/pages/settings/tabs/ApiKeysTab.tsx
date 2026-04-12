@@ -25,6 +25,7 @@ const API_KEY_CONFIGS: ApiKeyConfig[] = [
   { service: 'hibp', label: 'HaveIBeenPwned API Key', description: 'CI — breach monitoring', category: 'Threat Intel' },
   { service: 'virustotal', label: 'VirusTotal API Key', description: 'CYBINT — malware analysis', category: 'Threat Intel' },
   { service: 'gnews', label: 'GNews API Key', description: 'OSINT — global news search (100 req/day free)', category: 'News & Data' },
+  { service: 'datagov', label: 'Data.gov API Key', description: 'FBI Crime Data Explorer (free at api.data.gov/signup)', category: 'Government Data' },
   { service: 'obsidian', label: 'Obsidian Local REST API Key', description: 'Connect to Obsidian vault for intel visualization', category: 'Integrations' }
 ]
 
