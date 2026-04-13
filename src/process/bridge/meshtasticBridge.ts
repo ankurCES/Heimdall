@@ -31,12 +31,13 @@ async function pullViaHttp(baseUrl: string): Promise<{ success: boolean; message
         const info = await infoResp.json() as any
         log.info(`Meshtastic device: battery=${info.data?.power?.battery_percent}%, wifi_rssi=${info.data?.wifi?.rssi}, freq=${info.data?.radio?.frequency}MHz, uptime=${info.data?.airtime?.seconds_since_boot}s`)
 
-        // Store device itself as a node
+        // Store device info — will match with actual node ID from protobuf later
         const deviceDb = getDatabase()
         const deviceNow = timestamp()
+        // Mark first node in the dump as "self" (device's own NodeInfo comes first)
         deviceDb.prepare(`
           INSERT INTO meshtastic_nodes (node_id, long_name, battery_level, first_seen, last_seen, seen_count)
-          VALUES ('self', 'This Device', ?, ?, ?, 1)
+          VALUES ('self', 'This Device (Me)', ?, ?, ?, 1)
           ON CONFLICT(node_id) DO UPDATE SET battery_level = ?, last_seen = ?, seen_count = seen_count + 1
         `).run(info.data?.power?.battery_percent || null, deviceNow, deviceNow, info.data?.power?.battery_percent || null, deviceNow)
       }
@@ -86,6 +87,7 @@ async function pullViaHttp(baseUrl: string): Promise<{ success: boolean; message
     const db = getDatabase()
     const now = timestamp()
     let nodesStored = 0
+    let selfUpdated = false
 
     for (const packet of allData) {
       // Extract ALL readable strings (length-delimited protobuf string fields)
@@ -164,6 +166,12 @@ async function pullViaHttp(baseUrl: string): Promise<{ success: boolean; message
               seen_count = seen_count + 1
           `).run(nodeId, nodeName, lat, lon, now, now, nodeName, lat, lon, now)
           nodesStored++
+
+          // First node with GPS in the dump is the local device — update "self"
+          if (!selfUpdated && lat && lon) {
+            db.prepare('UPDATE meshtastic_nodes SET latitude = ?, longitude = ? WHERE node_id = ?').run(lat, lon, 'self')
+            selfUpdated = true
+          }
         } catch {}
       }
     }

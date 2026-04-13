@@ -199,25 +199,33 @@ export function MapPage() {
           ))}
 
           {/* Meshtastic nodes */}
-          {layers.mesh && meshNodes.map((node) => (
-            <CircleMarker
-              key={node.node_id}
-              center={[node.latitude!, node.longitude!]}
-              radius={7}
-              pathOptions={{ color: '#10b981', fillColor: '#10b981', fillOpacity: 0.8, weight: 2 }}
-            >
-              <Popup>
-                <div style={{ minWidth: 150, color: '#e2e8f0', background: '#1e293b', padding: 8, borderRadius: 6, margin: -12 }}>
-                  <div style={{ fontSize: 11, fontWeight: 600 }}>📻 {node.long_name || node.node_id}</div>
-                  <div style={{ fontSize: 10, color: '#94a3b8' }}>
-                    <div>Node: {node.node_id}</div>
-                    {node.battery_level && <div>Battery: {node.battery_level}%</div>}
-                    <div>Last seen: {new Date(node.last_seen).toLocaleString()}</div>
+          {layers.mesh && meshNodes.map((node) => {
+            const isSelf = node.node_id === 'self'
+            return (
+              <CircleMarker
+                key={node.node_id}
+                center={[node.latitude!, node.longitude!]}
+                radius={isSelf ? 10 : 7}
+                pathOptions={{
+                  color: isSelf ? '#f59e0b' : '#10b981',
+                  fillColor: isSelf ? '#f59e0b' : '#10b981',
+                  fillOpacity: isSelf ? 1.0 : 0.8,
+                  weight: isSelf ? 3 : 2
+                }}
+              >
+                <Popup>
+                  <div style={{ minWidth: 150, color: '#e2e8f0', background: '#1e293b', padding: 8, borderRadius: 6, margin: -12 }}>
+                    <div style={{ fontSize: 11, fontWeight: 600 }}>{isSelf ? '📍 You' : '📻'} {node.long_name || node.node_id}</div>
+                    <div style={{ fontSize: 10, color: '#94a3b8' }}>
+                      <div>Node: {node.node_id}</div>
+                      {node.battery_level && <div>Battery: {node.battery_level}%</div>}
+                      <div>Last seen: {new Date(node.last_seen).toLocaleString()}</div>
+                    </div>
                   </div>
-                </div>
-              </Popup>
-            </CircleMarker>
-          ))}
+                </Popup>
+              </CircleMarker>
+            )
+          })}
 
           <MapLegend />
         </MapContainer>
