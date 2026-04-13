@@ -60,10 +60,21 @@ export class IntelEnricher {
 
     // 2. Auto-tag
     const tags = this.extractTags(text)
-    // Add discipline as tag
     tags.push({ tag: report.discipline, confidence: 1.0 })
-    // Add severity as tag
     tags.push({ tag: `severity:${report.severity}`, confidence: 1.0 })
+
+    // Squawk enrichment for ADS-B reports
+    if (report.sourceName.includes('ADS-B') || report.discipline === 'sigint') {
+      const squawkMatch = text.match(/\bSquawk[:\s]*(\d{4})\b/i)
+      if (squawkMatch) {
+        const { squawkClassifier } = require('../sigint/SquawkClassifier')
+        const classification = squawkClassifier.classify(squawkMatch[1])
+        tags.push({ tag: `squawk:${classification.meaning.toLowerCase().replace(/\s+/g, '-')}`, confidence: 0.95 })
+        tags.push({ tag: `squawk-category:${classification.category}`, confidence: 0.95 })
+        if (classification.category === 'emergency') tags.push({ tag: 'emergency-squawk', confidence: 1.0 })
+        if (classification.category === 'military') tags.push({ tag: 'military-aircraft', confidence: 0.9 })
+      }
+    }
 
     if (tags.length > 0) {
       const stmt = db.prepare(

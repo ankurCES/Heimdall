@@ -1,10 +1,10 @@
 import { BaseCollector } from '../BaseCollector'
 import type { IntelReport, ThreatLevel } from '@common/types/intel'
+import { squawkClassifier } from '../../services/sigint/SquawkClassifier'
 import log from 'electron-log'
 
-// ADS-B via adsb.lol — free, no auth, no bounding box required
-// https://api.adsb.lol/v2/
-// LADD = aircraft that have opted into Limited Aircraft Data Display
+// ADS-B via adsb.lol — free, no auth
+// Enriches with squawk code classification
 
 export class AdsbLolCollector extends BaseCollector {
   readonly discipline = 'sigint' as const
@@ -14,7 +14,6 @@ export class AdsbLolCollector extends BaseCollector {
     const reports: IntelReport[] = []
 
     try {
-      // LADD aircraft — these are notable/military/government aircraft
       const data = await this.fetchJson<{
         ac: Array<{
           hex: string; flight: string; t: string; r: string
@@ -22,32 +21,46 @@ export class AdsbLolCollector extends BaseCollector {
           gs: number; track: number; squawk: string
           category: string; emergency: string
         }>
-        total: number
-        now: number
+        total: number; now: number
       }>('https://api.adsb.lol/v2/ladd', { timeout: 15000 })
 
       if (!data?.ac) return reports
 
-      for (const ac of data.ac.slice(0, 30)) {
+      for (const ac of data.ac.slice(0, 50)) {
         if (!ac.lat || !ac.lon) continue
 
+        // Classify squawk
+        const squawk = squawkClassifier.classify(ac.squawk)
         const isEmergency = ac.emergency && ac.emergency !== 'none'
-        const isMilitary = ac.category === 'A7' || (ac.flight && /^RCH|REACH|EVIL|DARK|JAKE/.test(ac.flight.trim()))
-        const severity: ThreatLevel = isEmergency ? 'critical' : isMilitary ? 'high' : 'low'
+        const isMilitary = ac.category === 'A7' || squawk.category === 'military' ||
+          (ac.flight && /^RCH|REACH|EVIL|DARK|JAKE|TOPCAT|DOOM/.test(ac.flight.trim()))
+
+        let severity: ThreatLevel = squawk.severity
+        if (isEmergency) severity = 'critical'
+        else if (isMilitary && severity === 'info') severity = 'high'
+
+        const squawkSection = ac.squawk
+          ? `\n\n## Squawk Analysis\n**Code**: ${squawk.code}\n**Classification**: ${squawk.meaning}\n**Category**: ${squawk.category.toUpperCase()}\n**Description**: ${squawk.description}`
+          : ''
 
         reports.push(this.createReport({
-          title: `ADS-B: ${(ac.flight || ac.hex).trim()} ${ac.t || ''}`,
-          content: `**Callsign**: ${ac.flight?.trim() || 'N/A'}\n**Hex**: ${ac.hex}\n**Type**: ${ac.t || 'Unknown'}\n**Registration**: ${ac.r || 'N/A'}\n**Altitude**: ${ac.alt_baro || 'N/A'} ft\n**Speed**: ${ac.gs || 'N/A'} kts\n**Squawk**: ${ac.squawk || 'N/A'}\n**Category**: ${ac.category || 'N/A'}${isEmergency ? `\n**EMERGENCY**: ${ac.emergency}` : ''}`,
+          title: `ADS-B: ${(ac.flight || ac.hex).trim()} ${ac.t || ''} [${squawk.meaning}]`,
+          content: `**Callsign**: ${ac.flight?.trim() || 'N/A'}\n**Hex**: ${ac.hex}\n**Type**: ${ac.t || 'Unknown'}\n**Registration**: ${ac.r || 'N/A'}\n**Altitude**: ${ac.alt_baro || 'N/A'} ft\n**Speed**: ${ac.gs || 'N/A'} kts\n**Squawk**: ${ac.squawk || 'N/A'}\n**Category**: ${ac.category || 'N/A'}${isEmergency ? `\n\n**EMERGENCY**: ${ac.emergency}` : ''}${squawkSection}`,
           severity,
           sourceUrl: `https://globe.adsb.fi/?icao=${ac.hex}`,
-          sourceName: 'ADS-B (adsb.lol)',
+          sourceName: `ADS-B [${squawk.meaning}]`,
           latitude: ac.lat,
           longitude: ac.lon,
           verificationScore: 90
         }))
       }
 
-      log.info(`ADS-B lol: ${data.ac.length} LADD aircraft, ${reports.length} reported`)
+      const notable = data.ac.filter((ac) => ac.squawk && squawkClassifier.isNotable(ac.squawk))
+      if (notable.length > 0) {
+        log.info(`ADS-B: ${notable.length} notable squawks: ${notable.map((a) => `${a.flight?.trim() || a.hex}=${a.squawk}`).join(', ')}`)
+      }
+
+      log.info(`ADS-B lol: ${data.ac.length} aircraft, ${reports.length} reported, ${notable.length} notable`)
     } catch (err) {
       log.debug(`ADS-B lol failed: ${err}`)
     }
