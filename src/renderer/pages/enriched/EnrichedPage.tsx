@@ -71,8 +71,10 @@ export function EnrichedPage() {
         corroboration: filterCorroboration !== 'all' ? filterCorroboration : undefined,
         limit: 100
       }) as EnrichedReport[]
+      console.log('Enriched reports received:', result?.length)
       setReports(result || [])
-    } catch {
+    } catch (err) {
+      console.error('Enriched reports error:', err)
       setReports([])
     }
     setLoading(false)

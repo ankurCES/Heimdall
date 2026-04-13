@@ -1,5 +1,6 @@
 import { ipcMain } from 'electron'
 import { intelEnricher } from '../services/enrichment/IntelEnricher'
+import { getDatabase } from '../services/database'
 import log from 'electron-log'
 
 export function registerEnrichmentBridge(): void {
@@ -27,7 +28,8 @@ export function registerEnrichmentBridge(): void {
   ipcMain.handle('enrichment:getEnrichedReports', (_event, params: {
     tag?: string; entityType?: string; corroboration?: string; limit?: number
   }) => {
-    const db = require('../services/database').getDatabase()
+    log.info(`getEnrichedReports called with: ${JSON.stringify(params)}`)
+    const db = getDatabase()
     const limit = params?.limit || 50
 
     // Simple approach: get reports that have tags, then filter
