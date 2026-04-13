@@ -14,7 +14,7 @@ const testChannels = [
   'chat:getSessionData', 'chat:isIngesting', 'explore:getData',
   'settings:testLlm', 'settings:listLlmModels', 'settings:listSerialPorts',
   'enrichment:getTags', 'enrichment:getEntities', 'enrichment:getLinks',
-  'enrichment:getTopTags', 'enrichment:getTopEntities', 'enrichment:getEnrichedReports',
+  'enrichment:getTopTags', 'enrichment:getTopEntities', 'enrichment:getEnrichedReports', 'enrichment:getGraph',
   'meshtastic:getNodes', 'meshtastic:getNodeCount', 'meshtastic:getMessages', 'meshtastic:getRecommendedMode', 'meshtastic:pullDeviceData', 'meshtastic:checkCli', 'meshtastic:discover',
   'sync:getJobs', 'sync:runJob', 'sync:runAll', 'sync:isRunning'
 ]

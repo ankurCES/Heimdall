@@ -1,8 +1,9 @@
 import { useState, useEffect, useCallback } from 'react'
 import {
   BarChart3, RefreshCw, Filter, Clock, Loader2,
-  TrendingUp, PieChart, Table2
+  TrendingUp, PieChart, Table2, Network
 } from 'lucide-react'
+import { RelationshipGraph } from './RelationshipGraph'
 import { Button } from '@renderer/components/ui/button'
 import { Badge } from '@renderer/components/ui/badge'
 import { Card, CardContent, CardHeader, CardTitle } from '@renderer/components/ui/card'
@@ -50,6 +51,7 @@ const SEVERITY_COLORS: Record<string, string> = {
 }
 
 export function ExplorePage() {
+  const [viewMode, setViewMode] = useState<'charts' | 'graph'>('charts')
   const [chartType, setChartType] = useState<ChartType>('bar')
   const [groupBy, setGroupBy] = useState('discipline')
   const [metric, setMetric] = useState('count')
@@ -163,10 +165,41 @@ export function ExplorePage() {
 
   const ChartComp = { bar: Bar, line: Line, pie: Pie, doughnut: Doughnut }[chartType] || Bar
 
+  // Graph mode — render full-page RelationshipGraph
+  if (viewMode === 'graph') {
+    return (
+      <div className="flex flex-col h-full">
+        <div className="flex items-center gap-2 px-4 py-2 border-b border-border bg-card/50">
+          <div className="flex items-center gap-0.5 bg-muted rounded-md p-0.5">
+            <button onClick={() => setViewMode('charts')} className={cn('px-3 py-1 rounded text-xs font-medium', viewMode === 'charts' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground')}>
+              <BarChart3 className="h-3 w-3 inline mr-1" />Charts
+            </button>
+            <button onClick={() => setViewMode('graph')} className={cn('px-3 py-1 rounded text-xs font-medium', viewMode === 'graph' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground')}>
+              <Network className="h-3 w-3 inline mr-1" />Relationship Graph
+            </button>
+          </div>
+        </div>
+        <div className="flex-1">
+          <RelationshipGraph />
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div className="flex h-full">
       {/* Control Panel (left) */}
       <div className="w-64 border-r border-border bg-card/50 p-4 space-y-5 overflow-auto">
+        {/* View toggle */}
+        <div className="flex items-center gap-0.5 bg-muted rounded-md p-0.5 mb-2">
+          <button onClick={() => setViewMode('charts')} className={cn('flex-1 px-2 py-1 rounded text-[10px] font-medium', viewMode === 'charts' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground')}>
+            <BarChart3 className="h-3 w-3 inline mr-0.5" />Charts
+          </button>
+          <button onClick={() => setViewMode('graph')} className={cn('flex-1 px-2 py-1 rounded text-[10px] font-medium', viewMode === 'graph' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground')}>
+            <Network className="h-3 w-3 inline mr-0.5" />Graph
+          </button>
+        </div>
+
         <div className="flex items-center gap-2">
           <BarChart3 className="h-5 w-5 text-primary" />
           <span className="text-sm font-bold">Explore</span>

@@ -77,5 +77,84 @@ export function registerEnrichmentBridge(): void {
     }
   })
 
+  // Get graph data for relationship visualization
+  ipcMain.handle('enrichment:getGraph', (_event, params?: {
+    reportId?: string; discipline?: string; linkType?: string; limit?: number
+  }) => {
+    const db = getDatabase()
+    const limit = params?.limit || 200
+
+    let linkQuery = 'SELECT source_report_id, target_report_id, link_type, strength, reason FROM intel_links'
+    const conditions: string[] = []
+    const vals: unknown[] = []
+
+    if (params?.reportId) {
+      conditions.push('(source_report_id = ? OR target_report_id = ?)')
+      vals.push(params.reportId, params.reportId)
+    }
+    if (params?.linkType && params.linkType !== 'all') {
+      conditions.push('link_type = ?')
+      vals.push(params.linkType)
+    }
+
+    if (conditions.length > 0) linkQuery += ` WHERE ${conditions.join(' AND ')}`
+    linkQuery += ` ORDER BY strength DESC LIMIT ?`
+    vals.push(limit)
+
+    const links = db.prepare(linkQuery).all(...vals) as Array<{
+      source_report_id: string; target_report_id: string; link_type: string; strength: number; reason: string
+    }>
+
+    // Collect unique node IDs
+    const nodeIds = new Set<string>()
+    for (const link of links) {
+      nodeIds.add(link.source_report_id)
+      nodeIds.add(link.target_report_id)
+    }
+
+    // Filter by discipline if needed
+    let nodeQuery = `SELECT id, title, discipline, severity, source_name, verification_score FROM intel_reports WHERE id IN (${Array.from(nodeIds).map(() => '?').join(',')})`
+    let nodeVals: unknown[] = Array.from(nodeIds)
+
+    if (params?.discipline && params.discipline !== 'all') {
+      // Re-query with discipline filter
+      const filteredIds = db.prepare(
+        `SELECT id FROM intel_reports WHERE id IN (${Array.from(nodeIds).map(() => '?').join(',')}) AND discipline = ?`
+      ).all(...Array.from(nodeIds), params.discipline) as Array<{ id: string }>
+      const filteredSet = new Set(filteredIds.map((r) => r.id))
+
+      // Filter links to only include filtered nodes
+      const filteredLinks = links.filter((l) => filteredSet.has(l.source_report_id) && filteredSet.has(l.target_report_id))
+
+      const nodes = db.prepare(
+        `SELECT id, title, discipline, severity, source_name, verification_score FROM intel_reports WHERE id IN (${filteredIds.map(() => '?').join(',') || "'none'"})`
+      ).all(...filteredIds.map((r) => r.id)) as Array<Record<string, unknown>>
+
+      return {
+        nodes: nodes.map((n) => ({
+          id: n.id, title: (n.title as string).slice(0, 50), discipline: n.discipline,
+          severity: n.severity, source: n.source_name, verification: n.verification_score
+        })),
+        links: filteredLinks.map((l) => ({
+          source: l.source_report_id, target: l.target_report_id,
+          type: l.link_type, strength: l.strength, reason: l.reason
+        }))
+      }
+    }
+
+    const nodes = nodeIds.size > 0 ? db.prepare(nodeQuery).all(...nodeVals) as Array<Record<string, unknown>> : []
+
+    return {
+      nodes: nodes.map((n) => ({
+        id: n.id, title: (n.title as string).slice(0, 50), discipline: n.discipline,
+        severity: n.severity, source: n.source_name, verification: n.verification_score
+      })),
+      links: links.map((l) => ({
+        source: l.source_report_id, target: l.target_report_id,
+        type: l.link_type, strength: l.strength, reason: l.reason
+      }))
+    }
+  })
+
   log.info('Enrichment bridge registered')
 }
