@@ -1,5 +1,6 @@
 import { getDatabase } from '../database'
 import { generateId, timestamp } from '@common/utils/id'
+import { kuzuService } from '../graphdb/KuzuService'
 import log from 'electron-log'
 
 export interface HumintReport {
@@ -104,6 +105,21 @@ export class HumintService {
           `Cross-session HUMINT connection (${overlap} shared keywords)`, now
         )
       }
+    }
+
+    // Kuzu dual-write (fire-and-forget)
+    if (kuzuService.isReady()) {
+      (async () => {
+        try {
+          await kuzuService.upsertHumintReport({ id, title, confidence, created_at: now })
+          for (const srcId of sourceIds.slice(0, 15)) {
+            await kuzuService.createLink(id, srcId, 'humint_source', 0.85)
+          }
+          for (const prelim of prelimReports) {
+            await kuzuService.createLink(id, prelim.id, 'humint_preliminary', 0.95)
+          }
+        } catch {}
+      })()
     }
 
     // Tag the HUMINT report

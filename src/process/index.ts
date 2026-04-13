@@ -14,6 +14,8 @@ import { seedDefaultSources } from './services/seeder/DefaultSourceSeeder'
 import { agentOrchestrator } from './agents/AgentOrchestrator'
 import { intelPipeline } from './services/vectordb/IntelPipeline'
 import { enrichmentOrchestrator } from './services/enrichment/EnrichmentOrchestrator'
+import { kuzuService } from './services/graphdb/KuzuService'
+import { graphSync } from './services/graphdb/GraphSync'
 
 log.transports.file.level = 'info'
 log.transports.console.level = 'debug'
@@ -56,6 +58,17 @@ async function initializeDeferred(): Promise<void> {
 
   // Start background enrichment orchestrator (Multica-style)
   enrichmentOrchestrator.start()
+
+  // Initialize Kuzu graph database + sync from SQLite
+  try {
+    await kuzuService.initialize()
+    if (kuzuService.isReady()) {
+      const syncResult = await graphSync.fullSync()
+      log.info(`Kuzu graph sync complete: ${syncResult.nodes} nodes, ${syncResult.links} links`)
+    }
+  } catch (err) {
+    log.warn(`Kuzu initialization failed, using SQLite-only graph: ${err}`)
+  }
 
   // Auto-pull Meshtastic data on startup if configured
   try {
@@ -147,6 +160,7 @@ if (!gotTheLock) {
   })
 
   app.on('window-all-closed', () => {
+    kuzuService.close().catch(() => {})
     enrichmentOrchestrator.stop()
     intelPipeline.stop()
     agentOrchestrator.stop()
@@ -159,6 +173,7 @@ if (!gotTheLock) {
   })
 
   app.on('before-quit', () => {
+    kuzuService.close().catch(() => {})
     enrichmentOrchestrator.stop()
     intelPipeline.stop()
     agentOrchestrator.stop()

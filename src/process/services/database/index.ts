@@ -3,6 +3,7 @@ import path from 'path'
 import { app } from 'electron'
 import log from 'electron-log'
 import { createSchema } from './schema'
+import { runMigrations } from './migrations'
 
 let db: Database.Database | null = null
 
@@ -24,6 +25,7 @@ export function initDatabase(): Database.Database {
   db.pragma('busy_timeout = 5000')
 
   createSchema(db)
+  runMigrations(db)
 
   log.info('Database initialized successfully')
   return db

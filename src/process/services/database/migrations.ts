@@ -1,0 +1,121 @@
+import type Database from 'better-sqlite3'
+import { app } from 'electron'
+import { copyFileSync, existsSync } from 'fs'
+import path from 'path'
+import { timestamp } from '@common/utils/id'
+import log from 'electron-log'
+
+interface Migration {
+  version: string
+  name: string
+  up: (db: Database.Database) => void
+}
+
+const migrations: Migration[] = [
+  {
+    version: '001',
+    name: 'baseline_schema_tracking',
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS schema_migrations (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          version TEXT NOT NULL UNIQUE,
+          name TEXT NOT NULL,
+          applied_at INTEGER NOT NULL
+        );
+      `)
+    }
+  },
+  {
+    version: '002',
+    name: 'graph_sync_tracking',
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS graph_sync_log (
+          table_name TEXT NOT NULL,
+          record_id TEXT NOT NULL,
+          synced_at INTEGER NOT NULL,
+          PRIMARY KEY (table_name, record_id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_graph_sync_table ON graph_sync_log(table_name);
+      `)
+    }
+  },
+  {
+    version: '003',
+    name: 'kuzu_metadata',
+    up: (db) => {
+      const now = timestamp()
+      db.prepare(
+        'INSERT OR IGNORE INTO settings (key, value, updated_at) VALUES (?, ?, ?)'
+      ).run('graphSync.lastSynced', '0', now)
+      db.prepare(
+        'INSERT OR IGNORE INTO settings (key, value, updated_at) VALUES (?, ?, ?)'
+      ).run('graphSync.enabled', 'true', now)
+    }
+  }
+]
+
+function backupDatabase(dbPath: string, version: string): void {
+  const backupPath = `${dbPath}.bak-v${version}`
+  if (!existsSync(backupPath)) {
+    try {
+      copyFileSync(dbPath, backupPath)
+      log.info(`Database backup created: ${backupPath}`)
+    } catch (err) {
+      log.warn(`Failed to create DB backup: ${err}`)
+    }
+  }
+}
+
+export function runMigrations(db: Database.Database): void {
+  // Ensure schema_migrations table exists (migration 001 bootstrap)
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS schema_migrations (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      version TEXT NOT NULL UNIQUE,
+      name TEXT NOT NULL,
+      applied_at INTEGER NOT NULL
+    );
+  `)
+
+  const applied = new Set(
+    (db.prepare('SELECT version FROM schema_migrations').all() as Array<{ version: string }>)
+      .map((r) => r.version)
+  )
+
+  const pending = migrations.filter((m) => !applied.has(m.version))
+
+  if (pending.length === 0) {
+    log.debug('No pending database migrations')
+    return
+  }
+
+  log.info(`Running ${pending.length} database migration(s)...`)
+
+  // Backup before first pending migration
+  const dbPath = path.join(app.getPath('userData'), 'heimdall.db')
+  backupDatabase(dbPath, pending[0].version)
+
+  for (const migration of pending) {
+    log.info(`Applying migration ${migration.version}: ${migration.name}`)
+    const now = timestamp()
+
+    const runMigration = db.transaction(() => {
+      migration.up(db)
+      db.prepare(
+        'INSERT INTO schema_migrations (version, name, applied_at) VALUES (?, ?, ?)'
+      ).run(migration.version, migration.name, now)
+    })
+
+    try {
+      runMigration()
+      log.info(`Migration ${migration.version} applied successfully`)
+    } catch (err) {
+      log.error(`Migration ${migration.version} failed: ${err}`)
+      throw err // Stop on failure — the transaction will roll back
+    }
+  }
+
+  log.info('All migrations applied')
+}

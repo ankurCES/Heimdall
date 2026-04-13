@@ -7,6 +7,7 @@ import { syncManager } from '../services/sync/SyncManager'
 import { getDatabase } from '../services/database'
 import { reportExtractor } from '../services/enrichment/ReportExtractor'
 import { watchTermsService } from '../services/watch/WatchTermsService'
+import { kuzuService } from '../services/graphdb/KuzuService'
 import { generateId, timestamp } from '@common/utils/id'
 import log from 'electron-log'
 
@@ -238,6 +239,18 @@ export function registerChatBridge(): void {
       db.prepare('INSERT OR IGNORE INTO intel_links (id, source_report_id, target_report_id, link_type, strength, reason, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)').run(
         generateId(), reportId, srcId, 'preliminary_reference', 0.8, 'Source intel for preliminary report', now
       )
+    }
+
+    // Kuzu dual-write for preliminary report (fire-and-forget)
+    if (kuzuService.isReady()) {
+      (async () => {
+        try {
+          await kuzuService.upsertPreliminaryReport({ id: reportId, title: extracted.title, status: 'preliminary', created_at: now })
+          for (const srcId of sourceIds.slice(0, 10)) {
+            await kuzuService.createLink(reportId, srcId, 'preliminary_reference', 0.8)
+          }
+        } catch {}
+      })()
     }
 
     // Tag the preliminary report
