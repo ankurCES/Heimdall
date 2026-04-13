@@ -466,7 +466,8 @@ export function seedDefaultSources(): void {
     | { value: string }
     | undefined
   if (flag) {
-    log.info('Sources already seeded — skipping')
+    // Already seeded — but check for NEW sources added since last seed
+    addMissingSources(db)
     return
   }
 
@@ -503,4 +504,35 @@ export function seedDefaultSources(): void {
 
   const total = FREE_SOURCES.length + API_KEY_SOURCES.length
   log.info(`Seeded ${FREE_SOURCES.length} free sources + ${API_KEY_SOURCES.length} API-key sources (${total} total)`)
+}
+
+// Add any new sources that don't exist yet (for upgrades)
+function addMissingSources(db: ReturnType<typeof getDatabase>): void {
+  const existing = new Set(
+    (db.prepare('SELECT name FROM sources').all() as Array<{ name: string }>).map((r) => r.name)
+  )
+
+  const now = timestamp()
+  const insertStmt = db.prepare(`
+    INSERT INTO sources (id, name, discipline, type, config, schedule, enabled, error_count, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?)
+  `)
+
+  let added = 0
+  for (const src of FREE_SOURCES) {
+    if (!existing.has(src.name)) {
+      insertStmt.run(generateId(), src.name, src.discipline, src.type, JSON.stringify(src.config), src.schedule, 1, now, now)
+      added++
+    }
+  }
+  for (const src of API_KEY_SOURCES) {
+    if (!existing.has(src.name)) {
+      insertStmt.run(generateId(), src.name, src.discipline, src.type, JSON.stringify(src.config), src.schedule, 0, now, now)
+      added++
+    }
+  }
+
+  if (added > 0) {
+    log.info(`Added ${added} new sources (upgrade migration)`)
+  }
 }
