@@ -101,7 +101,7 @@ export function RelationshipGraph() {
   return (
     <div className="flex h-full">
       {/* Controls */}
-      <div className="w-56 border-r border-border bg-card/50 p-4 space-y-4 overflow-auto">
+      <div className="w-64 shrink-0 border-r border-border bg-card/50 p-4 space-y-4 overflow-auto">
         <div className="flex items-center gap-2">
           <Network className="h-4 w-4 text-primary" />
           <span className="text-sm font-bold">Relationship Graph</span>
@@ -195,9 +195,13 @@ export function RelationshipGraph() {
             onNodeClick={handleNodeClick}
             backgroundColor="#0a0f1a"
             nodeCanvasObject={(node: any, ctx: CanvasRenderingContext2D, globalScale: number) => {
-              const size = SEVERITY_SIZE[node.severity] || 3
+              const size = (SEVERITY_SIZE[node.severity] || 3) * 1.5
               const color = DISCIPLINE_COLORS[node.discipline] || '#6b7280'
               const isSelected = selectedNode?.id === node.id
+
+              // Glow effect
+              ctx.shadowColor = color
+              ctx.shadowBlur = isSelected ? 15 : 8
 
               // Draw node circle
               ctx.beginPath()
@@ -205,18 +209,22 @@ export function RelationshipGraph() {
               ctx.fillStyle = color
               ctx.fill()
 
-              if (isSelected) {
-                ctx.strokeStyle = '#ffffff'
-                ctx.lineWidth = 2
-                ctx.stroke()
-              }
+              // Border
+              ctx.shadowBlur = 0
+              ctx.strokeStyle = isSelected ? '#ffffff' : color
+              ctx.lineWidth = isSelected ? 2.5 : 1
+              ctx.stroke()
 
-              // Draw label if zoomed in enough
-              if (globalScale > 2) {
-                ctx.font = `${Math.max(2, 10 / globalScale)}px sans-serif`
-                ctx.fillStyle = '#94a3b8'
+              // Draw label if zoomed in
+              if (globalScale > 1.5) {
+                ctx.font = `${Math.max(3, 11 / globalScale)}px sans-serif`
+                ctx.fillStyle = '#e2e8f0'
                 ctx.textAlign = 'center'
-                ctx.fillText(node.title?.slice(0, 25) || '', node.x, node.y + size + 4)
+                ctx.fillText(node.title?.slice(0, 30) || '', node.x, node.y + size + 6)
+                // Discipline label
+                ctx.font = `${Math.max(2, 8 / globalScale)}px sans-serif`
+                ctx.fillStyle = '#64748b'
+                ctx.fillText((node.discipline || '').toUpperCase(), node.x, node.y + size + 12)
               }
             }}
           />
