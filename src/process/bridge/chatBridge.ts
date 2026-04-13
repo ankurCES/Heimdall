@@ -154,11 +154,108 @@ export function registerChatBridge(): void {
     }))
   })
 
-  // Manual vector DB ingestion trigger
+  // Manual vector DB ingestion trigger — processes DB records + Obsidian vault files
   ipcMain.handle('chat:generateLearnings', async () => {
     log.info('Manual vector DB ingestion triggered')
+
+    // 1. Ingest from DB (intel_reports)
     const { intelPipeline } = await import('../services/vectordb/IntelPipeline')
     await intelPipeline.runIngestion()
+
+    // 2. Ingest from Obsidian vault markdown files
+    let obsidianFiles = 0
+    try {
+      const { obsidianService } = await import('../services/obsidian/ObsidianService')
+      const testConn = await obsidianService.testConnection()
+      if (testConn.success) {
+        const files = await obsidianService.listFiles()
+        const mdFiles = files.filter((f: string) => f.endsWith('.md'))
+        log.info(`Learnings: found ${mdFiles.length} Obsidian markdown files to process`)
+
+        for (const filePath of mdFiles) {
+          try {
+            const content = await obsidianService.readFile(filePath)
+            if (!content || content.length < 50) continue
+
+            // Ingest into vector DB
+            await vectorDbService.addReport({
+              id: `obsidian_${filePath.replace(/[^a-zA-Z0-9]/g, '_')}`,
+              discipline: 'osint',
+              title: filePath.split('/').pop()?.replace('.md', '') || filePath,
+              content: content.slice(0, 3000),
+              summary: null,
+              severity: 'info',
+              sourceId: 'obsidian',
+              sourceUrl: null,
+              sourceName: `Obsidian: ${filePath}`,
+              contentHash: filePath,
+              latitude: null,
+              longitude: null,
+              verificationScore: 60,
+              reviewed: false,
+              createdAt: Date.now(),
+              updatedAt: Date.now()
+            } as any)
+            obsidianFiles++
+          } catch {}
+
+          // Rate limit
+          if (obsidianFiles % 20 === 0) await new Promise((r) => setTimeout(r, 200))
+        }
+        log.info(`Learnings: ingested ${obsidianFiles} Obsidian files into vector DB`)
+      }
+    } catch (err) {
+      log.debug(`Obsidian ingestion skipped: ${err}`)
+    }
+
+    // 3. Also ingest local ~/.heimdall/memory markdown files
+    let localFiles = 0
+    try {
+      const { app } = await import('electron')
+      const { join } = await import('path')
+      const { readdirSync, readFileSync, statSync } = await import('fs')
+
+      const memoryDir = join(app.getPath('home'), '.heimdall', 'memory')
+
+      const walkDir = (dir: string): void => {
+        let entries: string[]
+        try { entries = readdirSync(dir) } catch { return }
+        for (const entry of entries) {
+          const fullPath = join(dir, entry)
+          try {
+            const stat = statSync(fullPath)
+            if (stat.isDirectory()) { walkDir(fullPath); continue }
+            if (!entry.endsWith('.md')) continue
+
+            const content = readFileSync(fullPath, 'utf-8')
+            if (content.length < 50) continue
+
+            vectorDbService.addReport({
+              id: `local_${fullPath.replace(/[^a-zA-Z0-9]/g, '_').slice(-60)}`,
+              discipline: 'osint',
+              title: entry.replace('.md', ''),
+              content: content.slice(0, 3000),
+              summary: null,
+              severity: 'info',
+              sourceId: 'local-memory',
+              sourceUrl: null,
+              sourceName: `Local: ${entry}`,
+              contentHash: fullPath,
+              latitude: null,
+              longitude: null,
+              verificationScore: 50,
+              reviewed: false,
+              createdAt: Date.now(),
+              updatedAt: Date.now()
+            } as any)
+            localFiles++
+          } catch {}
+        }
+      }
+
+      walkDir(memoryDir)
+      log.info(`Learnings: ingested ${localFiles} local memory files into vector DB`)
+    } catch {}
 
     const stats = vectorDbService.getStats()
     const db = getDatabase()
@@ -172,6 +269,8 @@ export function registerChatBridge(): void {
       totalTags,
       totalEntities,
       totalLinks,
+      obsidianFiles,
+      localFiles,
       vectorDbInitialized: stats.initialized
     }
   })

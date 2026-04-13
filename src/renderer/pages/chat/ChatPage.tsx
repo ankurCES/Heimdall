@@ -215,21 +215,24 @@ export function ChatPage() {
     setLearningsLoading(true)
     try {
       const result = await invoke('chat:generateLearnings') as {
-        totalReports: number; totalTags: number; totalEntities: number; totalLinks: number; vectorDbInitialized: boolean
+        totalReports: number; totalTags: number; totalEntities: number; totalLinks: number;
+        obsidianFiles?: number; localFiles?: number; vectorDbInitialized: boolean
       }
       toast.success('Knowledge Ingestion Complete', {
-        description: `${result.totalReports} reports, ${result.totalTags} tags, ${result.totalEntities} entities, ${result.totalLinks} links`
+        description: `${result.totalReports} reports, ${result.obsidianFiles || 0} Obsidian files, ${result.localFiles || 0} local files`
       })
       setMessages((prev) => [...prev, {
         id: crypto.randomUUID(), role: 'assistant', createdAt: Date.now(),
         content: `## Knowledge Ingestion Complete\n\n` +
           `| Metric | Count |\n|--------|-------|\n` +
           `| Reports Processed | ${result.totalReports} |\n` +
+          `| Obsidian Vault Files | ${result.obsidianFiles || 0} |\n` +
+          `| Local Memory Files | ${result.localFiles || 0} |\n` +
           `| Tags Generated | ${result.totalTags} |\n` +
           `| Entities Extracted | ${result.totalEntities} |\n` +
           `| Links Discovered | ${result.totalLinks} |\n` +
           `| Vector DB | ${result.vectorDbInitialized ? 'Active' : 'Inactive'} |\n\n` +
-          `All intelligence data has been processed, enriched with tags and entities, and ingested into the vector database for semantic search.`
+          `All intelligence data including Obsidian vault and local memory files has been processed and ingested into the vector database.`
       }])
     } catch (err) {
       toast.error('Learnings generation failed', { description: String(err) })
