@@ -6,6 +6,10 @@ import type { MeshtasticConfig } from '@common/types/settings'
 import log from 'electron-log'
 
 // Pull nodes via Meshtastic HTTP API
+export async function pullMeshtasticHttp(baseUrl: string): Promise<{ success: boolean; message: string; nodesFound?: number }> {
+  return pullViaHttp(baseUrl)
+}
+
 async function pullViaHttp(baseUrl: string): Promise<{ success: boolean; message: string; nodesFound?: number }> {
   try {
     const url = baseUrl.replace(/\/+$/, '')

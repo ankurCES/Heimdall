@@ -53,6 +53,25 @@ async function initializeDeferred(): Promise<void> {
   // Start vector DB ingestion pipeline
   await intelPipeline.start()
 
+  // Auto-pull Meshtastic data on startup if configured
+  try {
+    const meshConfig = settingsService.get<any>('meshtastic')
+    if (meshConfig?.address) {
+      let addr = meshConfig.address
+      if (!addr.startsWith('http')) addr = `http://${addr}`
+      log.info(`Auto-pulling Meshtastic from ${addr}...`)
+      setTimeout(async () => {
+        try {
+          const { pullMeshtasticHttp } = await import('./bridge/meshtasticBridge')
+          const result = await pullMeshtasticHttp(addr)
+          log.info(`Meshtastic auto-pull: ${result.message}`)
+        } catch (err) {
+          log.debug(`Meshtastic auto-pull failed: ${err}`)
+        }
+      }, 10000)
+    }
+  } catch {}
+
   log.info('Deferred initialization complete')
 }
 
