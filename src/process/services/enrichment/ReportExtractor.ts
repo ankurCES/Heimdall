@@ -33,10 +33,14 @@ export class ReportExtractor {
   }
 
   private extractSection(content: string, sectionName: string): string[] {
-    // Match ## Section Name or **Section Name**
+    // Match various heading formats:
+    // ## Recommended Actions
+    // ### 4. Recommended Actions
+    // **Recommended Actions**
+    // # Recommended Actions
     const patterns = [
-      new RegExp(`##\\s*\\*?\\*?${sectionName}\\*?\\*?[\\s\\S]*?(?=##|$)`, 'i'),
-      new RegExp(`\\*\\*${sectionName}\\*\\*[\\s\\S]*?(?=\\*\\*[A-Z]|##|$)`, 'i')
+      new RegExp(`#{1,4}\\s*(?:\\d+\\.?\\s*)?\\*?\\*?${sectionName}\\*?\\*?[\\s\\S]*?(?=#{1,4}\\s|$)`, 'i'),
+      new RegExp(`\\*\\*(?:\\d+\\.?\\s*)?${sectionName}\\*\\*[\\s\\S]*?(?=\\*\\*[A-Z\\d]|#{1,4}\\s|$)`, 'i')
     ]
 
     for (const pattern of patterns) {
@@ -82,11 +86,15 @@ export class ReportExtractor {
 
     for (const line of lines) {
       const trimmed = line.trim()
-      // Match: - item, * item, 1. item, • item
-      const bulletMatch = trimmed.match(/^[-*•]\s+(.+)$/) || trimmed.match(/^\d+\.\s+(.+)$/)
+      // Skip heading lines
+      if (trimmed.startsWith('#')) continue
+      // Match: - item, * item, *   item, 1. item, • item, **item**
+      const bulletMatch = trimmed.match(/^[-*•]\s+(.+)$/) ||
+        trimmed.match(/^\d+\.\s+(.+)$/) ||
+        trimmed.match(/^\*\s{2,}(.+)$/)
       if (bulletMatch) {
-        const clean = bulletMatch[1].replace(/\*\*/g, '').trim()
-        if (clean.length > 5) items.push(clean)
+        const clean = bulletMatch[1].replace(/\*\*/g, '').replace(/\[.*?\]/g, '').trim()
+        if (clean.length > 10) items.push(clean)
       }
     }
     return items

@@ -158,16 +158,28 @@ export function registerChatBridge(): void {
     const extracted = reportExtractor.extract(content)
     const reportId = generateId()
 
-    // Find source intel IDs from session context
-    const sessionMessages = db.prepare(
-      "SELECT content FROM chat_messages WHERE session_id = ? AND role = 'system' ORDER BY created_at"
-    ).all(sessionId) as Array<{ content: string }>
+    // Find source intel reports by matching keywords from the briefing
+    const keywords = content.toLowerCase()
+      .match(/\b[a-z]{5,}\b/g)?.filter((w) => !['about','which','their','would','could','should','these','those','based','using','other','there','after','before','between'].includes(w)) || []
+    const topKeywords = [...new Set(keywords)].slice(0, 5)
 
-    // Extract report IDs mentioned in system context
     const sourceIds: string[] = []
-    for (const msg of sessionMessages) {
-      const idMatches = msg.content.match(/[0-9a-f]{8}-[0-9a-f]{4}/g) || []
-      sourceIds.push(...idMatches.slice(0, 20))
+    if (topKeywords.length > 0) {
+      const clauses = topKeywords.map(() => 'LOWER(title) LIKE ?').join(' OR ')
+      const vals = topKeywords.map((k) => `%${k}%`)
+      const matches = db.prepare(
+        `SELECT id FROM intel_reports WHERE ${clauses} ORDER BY created_at DESC LIMIT 20`
+      ).all(...vals) as Array<{ id: string }>
+      sourceIds.push(...matches.map((m) => m.id))
+    }
+
+    // Also check session chat messages for referenced UUIDs
+    const sessionMsgs = db.prepare(
+      "SELECT content FROM chat_messages WHERE session_id = ? AND role = 'assistant' ORDER BY created_at"
+    ).all(sessionId) as Array<{ content: string }>
+    for (const msg of sessionMsgs) {
+      const uuidMatches = msg.content.match(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}/g) || []
+      sourceIds.push(...uuidMatches)
     }
 
     // Insert preliminary report
