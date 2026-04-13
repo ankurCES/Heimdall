@@ -14,6 +14,7 @@ import { VaultPage } from './pages/vault/VaultPage'
 import { TokensPage } from './pages/tokens/TokensPage'
 import { ExplorePage } from './pages/explore/ExplorePage'
 import { MeshtasticPage } from './pages/meshtastic/MeshtasticPage'
+import { BrowsePage } from './pages/browse/BrowsePage'
 import { Toaster } from 'sonner'
 import { NotificationListener } from './components/NotificationListener'
 import './styles/globals.css'
@@ -35,6 +36,7 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
         <Route element={<Layout />}>
           <Route path="/" element={<DashboardPage />} />
           <Route path="/feed" element={<FeedPage />} />
+          <Route path="/browse" element={<BrowsePage />} />
           <Route path="/sources" element={<SourcesPage />} />
           <Route path="/alerts" element={<AlertsPage />} />
           <Route path="/map" element={<MapPage />} />

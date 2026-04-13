@@ -12,13 +12,15 @@ import {
   BookOpen,
   Coins,
   BarChart3,
-  Radio
+  Radio,
+  Layers
 } from 'lucide-react'
 import { cn } from '@renderer/lib/utils'
 
 const navItems = [
   { to: '/', icon: LayoutDashboard, label: 'Dashboard' },
   { to: '/feed', icon: FileText, label: 'Intel Feed' },
+  { to: '/browse', icon: Layers, label: 'Browse Intel' },
   { to: '/sources', icon: Database, label: 'Sources' },
   { to: '/alerts', icon: Bell, label: 'Alerts' },
   { to: '/map', icon: Map, label: 'Map' },
