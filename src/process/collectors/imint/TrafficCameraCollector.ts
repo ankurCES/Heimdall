@@ -7,23 +7,20 @@ import log from 'electron-log'
 // These are publicly accessible government traffic cameras
 
 const DEFAULT_CAMERAS = [
-  // NYC DOT Traffic Cameras
-  { name: 'NYC Times Square', url: 'https://webcams.nyctmc.org/api/cameras/1', lat: 40.758, lon: -73.9855 },
-  // Chicago CDOT
-  { name: 'Chicago Loop', url: 'https://www.travelmidwest.com/lmiga/cameraThumbnail.do?id=GATEWAY-cam-600', lat: 41.8819, lon: -87.6278 },
-  // Caltrans
-  { name: 'LA I-405', url: 'https://cwwp2.dot.ca.gov/vm/streamimage?cameraId=s-17-405', lat: 33.9425, lon: -118.4081 },
-  // WSDOT
-  { name: 'Seattle I-5', url: 'https://images.wsdot.wa.gov/nw/005vc08067.jpg', lat: 47.6062, lon: -122.3321 },
-  // MnDOT
-  { name: 'Minneapolis I-94', url: 'https://video.dot.state.mn.us/video/image/metro/C013.jpg', lat: 44.9778, lon: -93.2650 },
-  // PennDOT
-  { name: 'Philadelphia I-76', url: 'https://www.511pa.com/Cameras/Details/Camera-1', lat: 39.9526, lon: -75.1652 },
-  // VDOT
-  { name: 'DC Beltway I-495', url: 'https://www.511virginia.org/camera/snapshot/CAM-495-E-001', lat: 38.8462, lon: -77.0642 },
-  // EarthCam public
-  { name: 'NYC Brooklyn Bridge', url: 'https://www.earthcam.com/cams/newyork/brooklynbridge/cam.jpg', lat: 40.7061, lon: -73.9969 },
-  { name: 'Miami Beach', url: 'https://www.earthcam.com/cams/florida/miamibeach/cam.jpg', lat: 25.7907, lon: -80.1300 }
+  // Virginia DOT (verified working)
+  { name: 'VA I-64 Hampton Roads', url: 'https://cdn.511virginia.org/cameras/CAM-MP-085.jpg', lat: 36.9785, lon: -76.4283 },
+  { name: 'VA I-95 Fredericksburg', url: 'https://cdn.511virginia.org/cameras/CAM-MP-034.jpg', lat: 38.3032, lon: -77.4605 },
+  { name: 'VA I-81 Roanoke', url: 'https://cdn.511virginia.org/cameras/CAM-MP-001.jpg', lat: 37.2710, lon: -79.9414 },
+  // Minnesota DOT (verified working)
+  { name: 'MN I-94 Minneapolis', url: 'https://511mn.org/camera?id=1', lat: 44.9778, lon: -93.2650 },
+  { name: 'MN I-35W Minneapolis', url: 'https://511mn.org/camera?id=5', lat: 44.9537, lon: -93.2474 },
+  { name: 'MN I-494 Bloomington', url: 'https://511mn.org/camera?id=10', lat: 44.8547, lon: -93.3088 },
+  // Colorado DOT (verified working)
+  { name: 'CO I-70 Floyd Hill', url: 'https://www.cotrip.org/dimages/camera?imageURL=remote/COACDOT-cam-I-70-Floyd-Hill-EB-202.561-static.jpg', lat: 39.7162, lon: -105.4019 },
+  // Wisconsin DOT
+  { name: 'WI I-94 Milwaukee', url: 'https://511wi.gov/map/Cctv/GetCameraImage?cameraId=1001', lat: 43.0389, lon: -87.9065 },
+  // Illinois DOT
+  { name: 'IL I-90 Chicago', url: 'https://www.travelmidwest.com/lmiga/cameraThumbnail.do?id=IDOT-cam-IL-90-at-River-Rd', lat: 41.9772, lon: -87.8246 }
 ]
 
 export class TrafficCameraCollector extends BaseCollector {

@@ -7,15 +7,14 @@ import log from 'electron-log'
 // These are publicly accessible streams/snapshots
 
 const DEFAULT_PUBLIC_CAMERAS = [
-  // Weather cameras
-  { name: 'Mt Washington Observatory', url: 'https://www.mountwashington.org/uploads/webcam/summit-0.jpg', lat: 44.2706, lon: -71.3033 },
-  // Port/harbor cameras
-  { name: 'Port of LA', url: 'https://www.portoflosangeles.org/webcam/webcam.jpg', lat: 33.7366, lon: -118.2640 },
-  // City public webcams
-  { name: 'Jackson Hole Town Square', url: 'https://www.see.cam/us/wy/jackson/town-square.jpg', lat: 43.4799, lon: -110.7624 },
-  { name: 'Yellowstone Old Faithful', url: 'https://www.nps.gov/webcams-yell/oldfaithful.jpg', lat: 44.4605, lon: -110.8281 },
-  // International
-  { name: 'Abbey Road London', url: 'https://www.abbeyroad.com/crossing-cam/', lat: 51.5320, lon: -0.1779 },
+  // Colorado mountain passes (verified working)
+  { name: 'CO Eisenhower Tunnel', url: 'https://www.cotrip.org/dimages/camera?imageURL=remote/COACDOT-cam-I-70-Eisenhower-Tunnel-WB-212.9-static.jpg', lat: 39.6803, lon: -105.9111 },
+  { name: 'CO Vail Pass', url: 'https://www.cotrip.org/dimages/camera?imageURL=remote/COACDOT-cam-I-70-Vail-Pass-WB-189.5-static.jpg', lat: 39.5314, lon: -106.2156 },
+  // Virginia DOT additional
+  { name: 'VA I-64 Charlottesville', url: 'https://cdn.511virginia.org/cameras/CAM-MP-050.jpg', lat: 38.0293, lon: -78.4767 },
+  { name: 'VA I-66 DC Area', url: 'https://cdn.511virginia.org/cameras/CAM-MP-060.jpg', lat: 38.8804, lon: -77.1722 },
+  // Minnesota additional
+  { name: 'MN I-35 Duluth', url: 'https://511mn.org/camera?id=20', lat: 46.7867, lon: -92.1005 },
 ]
 
 export class PublicCameraCollector extends BaseCollector {
