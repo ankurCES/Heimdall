@@ -40,33 +40,58 @@ export class ImageIntelService {
       })
 
       if (!response.ok) {
-        log.debug(`IMINT: Failed to fetch frame from ${sourceName}: ${response.status}`)
+        log.info(`IMINT: Failed to fetch frame from ${sourceName}: HTTP ${response.status}`)
         return null
       }
 
       const imageBuffer = Buffer.from(await response.arrayBuffer())
+      if (imageBuffer.length < 1000) {
+        log.info(`IMINT: Frame too small from ${sourceName}: ${imageBuffer.length} bytes (likely error page)`)
+        return null
+      }
+
       const contentType = response.headers.get('content-type') || 'image/jpeg'
+      log.info(`IMINT: Captured frame from ${sourceName}: ${imageBuffer.length} bytes, ${contentType}`)
 
       // Send to LLM with vision
       const conn = llmService.getConnection()
       if (!conn) {
-        log.debug('IMINT: No LLM connection for vision analysis')
-        return null
+        log.info('IMINT: No LLM connection for vision analysis — storing frame without analysis')
+        // Store frame even without LLM analysis
+        const now = new Date()
+        const dateStr = now.toISOString().split('T')[0]
+        const timeStr = now.toISOString().replace(/[:.]/g, '-')
+        const dir = join(this.imintDir, sourceName.replace(/[^a-zA-Z0-9]/g, '_'), dateStr)
+        mkdirSync(dir, { recursive: true })
+        const ext = contentType.includes('png') ? 'png' : 'jpg'
+        const framePath = join(dir, `${timeStr}.${ext}`)
+        writeFileSync(framePath, imageBuffer)
+
+        return this.createReport({
+          title: `IMINT Capture: ${sourceName}`,
+          content: `**Source**: ${sourceName}\n**Frame Size**: ${imageBuffer.length} bytes\n**Frame**: ${framePath}\n\n_No LLM configured for vision analysis. Frame saved for manual review._`,
+          severity: 'info',
+          sourceUrl: imageUrl,
+          sourceName: `IMINT: ${sourceName}`,
+          latitude: latitude,
+          longitude: longitude,
+          verificationScore: 50
+        })
       }
 
       const base64Image = imageBuffer.toString('base64')
+      log.info(`IMINT: Sending ${sourceName} frame to LLM for vision analysis...`)
       const analysis = await this.analyzeWithVision(conn, base64Image, contentType)
 
-      if (!analysis) return null
+      if (!analysis) {
+        log.info(`IMINT: LLM returned no analysis for ${sourceName}`)
+        return null
+      }
+
+      log.info(`IMINT: LLM analysis for ${sourceName}: ${analysis.slice(0, 100)}...`)
 
       const isEvent = analysis.startsWith('[EVENT DETECTED]')
       const cleanAnalysis = analysis.replace(/^\[(EVENT DETECTED|NORMAL)\]\s*/i, '')
-
-      // Only store if event detected (saves storage)
-      if (!isEvent && !this.shouldAlwaysStore()) {
-        log.debug(`IMINT: Normal scene at ${sourceName}, skipping`)
-        return null
-      }
 
       // Save frame to disk
       const now = new Date()
@@ -115,7 +140,7 @@ export class ImageIntelService {
       log.info(`IMINT: ${isEvent ? 'EVENT' : 'observation'} at ${sourceName}`)
       return report
     } catch (err) {
-      log.debug(`IMINT analysis failed for ${sourceName}: ${err}`)
+      log.info(`IMINT analysis failed for ${sourceName}: ${err}`)
       return null
     }
   }
