@@ -15,6 +15,7 @@ import { TokensPage } from './pages/tokens/TokensPage'
 import { ExplorePage } from './pages/explore/ExplorePage'
 import { MeshtasticPage } from './pages/meshtastic/MeshtasticPage'
 import { BrowsePage } from './pages/browse/BrowsePage'
+import { SyncPage } from './pages/sync/SyncPage'
 import { Toaster } from 'sonner'
 import { NotificationListener } from './components/NotificationListener'
 import './styles/globals.css'
@@ -44,6 +45,7 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
           <Route path="/vault" element={<VaultPage />} />
           <Route path="/chat" element={<ChatPage />} />
           <Route path="/explore" element={<ExplorePage />} />
+          <Route path="/sync" element={<SyncPage />} />
           <Route path="/tokens" element={<TokensPage />} />
           <Route path="/audit" element={<AuditPage />} />
           <Route path="/settings" element={<SettingsPage />} />

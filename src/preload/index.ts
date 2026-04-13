@@ -15,11 +15,13 @@ const testChannels = [
   'settings:testLlm', 'settings:listLlmModels', 'settings:listSerialPorts',
   'enrichment:getTags', 'enrichment:getEntities', 'enrichment:getLinks',
   'enrichment:getTopTags', 'enrichment:getTopEntities',
-  'meshtastic:getNodes', 'meshtastic:getNodeCount', 'meshtastic:getMessages', 'meshtastic:getRecommendedMode', 'meshtastic:pullDeviceData', 'meshtastic:checkCli', 'meshtastic:discover'
+  'meshtastic:getNodes', 'meshtastic:getNodeCount', 'meshtastic:getMessages', 'meshtastic:getRecommendedMode', 'meshtastic:pullDeviceData', 'meshtastic:checkCli', 'meshtastic:discover',
+  'sync:getJobs', 'sync:runJob', 'sync:runAll', 'sync:isRunning'
 ]
 const allowedChannels = [...Object.values(IPC_CHANNELS), ...testChannels]
 const chatEvents = ['chat:chunk', 'chat:done', 'chat:error']
-const allowedEvents = [...Object.values(IPC_EVENTS), ...chatEvents]
+const syncEvents = ['sync:progress']
+const allowedEvents = [...Object.values(IPC_EVENTS), ...chatEvents, ...syncEvents]
 
 const api = {
   invoke: (channel: string, ...args: unknown[]): Promise<unknown> => {
