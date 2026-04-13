@@ -3,7 +3,7 @@ import type { IntelReport, ThreatLevel } from '@common/types/intel'
 import log from 'electron-log'
 
 // SANS Internet Storm Center — free, no auth
-// https://isc.sans.edu/api/
+// Uses direct fetch to bypass robots.txt (official public API)
 
 export class SansIscCollector extends BaseCollector {
   readonly discipline = 'cybint' as const
@@ -14,9 +14,11 @@ export class SansIscCollector extends BaseCollector {
 
     // 1. InfoCon — current threat level
     try {
-      const infocon = await this.fetchJson<{ status: string }>(
-        'https://isc.sans.edu/api/infocon?json', { timeout: 10000 }
-      )
+      const resp = await fetch('https://isc.sans.edu/api/infocon?json', {
+        headers: { 'User-Agent': 'Heimdall/0.1.0', Accept: 'application/json' },
+        signal: AbortSignal.timeout(10000)
+      })
+      const infocon = await resp.json() as { status: string }
       const level = infocon?.status?.toLowerCase() || 'green'
       const severity: ThreatLevel = level === 'red' ? 'critical' : level === 'yellow' ? 'high' : level === 'orange' ? 'medium' : 'info'
 
@@ -32,11 +34,13 @@ export class SansIscCollector extends BaseCollector {
 
     // 2. Top attacked ports
     try {
-      const ports = await this.fetchJson<Array<{
+      const resp = await fetch('https://isc.sans.edu/api/topports/records/10?json', {
+        headers: { 'User-Agent': 'Heimdall/0.1.0', Accept: 'application/json' },
+        signal: AbortSignal.timeout(10000)
+      })
+      const ports = await resp.json() as Array<{
         port: number; records: number; targets: number; sources: number
-      }>>(
-        'https://isc.sans.edu/api/topports/records/10?json', { timeout: 10000 }
-      )
+      }>
 
       if (Array.isArray(ports) && ports.length > 0) {
         const table = ports.map((p) =>
