@@ -84,40 +84,59 @@ async function pullViaHttp(baseUrl: string): Promise<{ success: boolean; message
     let nodesStored = 0
 
     for (const packet of allData) {
-      // Extract readable strings from protobuf — node names, IDs
-      const text = packet.toString('utf-8').replace(/[^\x20-\x7E]/g, ' ').trim()
-      const names = text.match(/[A-Za-z][A-Za-z0-9 _.-]{2,24}/g) || []
-
-      // Extract node IDs (4-byte hex patterns)
-      const hex = packet.toString('hex')
-      const nodeIdMatches = hex.match(/([0-9a-f]{8})/gi) || []
-
-      // Look for lat/lon patterns in protobuf (field tags for position)
-      // Position fields: latitude_i (field 1, sint32), longitude_i (field 2, sint32)
-      let lat: number | null = null
-      let lon: number | null = null
-
-      // Simple protobuf int32 extraction for known field patterns
-      for (let i = 0; i < packet.length - 5; i++) {
-        // Latitude field tag (0x08 = field 1, varint) followed by large value
-        if (packet[i] === 0x0d && i + 4 < packet.length) {
-          // Fixed32 (little-endian)
-          const val = packet.readInt32LE(i + 1)
-          if (Math.abs(val) > 1000000 && Math.abs(val) < 900000000) {
-            if (!lat) lat = val / 10000000
-            else if (!lon) lon = val / 10000000
+      // Extract ALL readable strings (length-delimited protobuf string fields)
+      // Protobuf strings: tag byte (field<<3 | 2), length varint, then UTF-8 bytes
+      const strings: string[] = []
+      for (let i = 0; i < packet.length - 2; i++) {
+        const wireType = packet[i] & 0x07
+        if (wireType === 2) { // length-delimited (string, bytes, submessage)
+          const len = packet[i + 1]
+          if (len > 2 && len < 50 && i + 2 + len <= packet.length) {
+            const candidate = packet.slice(i + 2, i + 2 + len).toString('utf-8')
+            // Check if it's printable ASCII
+            if (/^[\x20-\x7E]+$/.test(candidate) && /[a-zA-Z]/.test(candidate)) {
+              strings.push(candidate.trim())
+            }
           }
         }
       }
 
-      // Store first meaningful name found per packet
-      const validNames = names.filter((n) =>
-        !['DEBUG', 'INFO', 'WARN', 'ERROR', 'config', 'radio', 'module', 'channel', 'position'].some((skip) => n.toLowerCase().includes(skip.toLowerCase()))
+      // Extract sfixed32 pairs for lat/lon
+      // In Position message: field 1 = latitude_i (sfixed32, tag 0x0d), field 2 = longitude_i (sfixed32, tag 0x15)
+      let lat: number | null = null
+      let lon: number | null = null
+
+      for (let i = 0; i < packet.length - 5; i++) {
+        if (packet[i] === 0x0d && i + 4 < packet.length) {
+          const val = packet.readInt32LE(i + 1)
+          // Valid latitude: -90 to 90 degrees → -900000000 to 900000000
+          if (Math.abs(val) > 1000000 && Math.abs(val) < 900000000) {
+            lat = val / 10000000
+          }
+        }
+        if (packet[i] === 0x15 && i + 4 < packet.length) {
+          const val = packet.readInt32LE(i + 1)
+          // Valid longitude: -180 to 180 degrees → -1800000000 to 1800000000
+          if (Math.abs(val) > 1000000 && Math.abs(val) < 1800000000) {
+            lon = val / 10000000
+          }
+        }
+      }
+
+      // Filter strings for valid node names
+      const validNames = strings.filter((s) =>
+        s.length >= 3 && s.length <= 30 &&
+        !['meshtastic.pool', 'mqtt.meshtastic', 'ntp.org'].some((skip) => s.includes(skip))
       )
 
-      if (validNames.length > 0 || nodeIdMatches.length > 0) {
-        const nodeId = nodeIdMatches.length > 0 ? `!${nodeIdMatches[0].toLowerCase()}` : `http_${nodesStored}`
-        const nodeName = validNames[0] || null
+      // Get the first hex-like node ID from the packet
+      const hex = packet.toString('hex')
+      const nodeIdMatch = hex.match(/([0-9a-f]{8})/i)
+
+      if (validNames.length > 0 || lat || nodeIdMatch) {
+        const nodeId = nodeIdMatch ? `!${nodeIdMatch[1].toLowerCase()}` : `http_${nodesStored}`
+        // Use the longest valid name (usually the long_name)
+        const nodeName = validNames.sort((a, b) => b.length - a.length)[0] || null
 
         try {
           db.prepare(`
