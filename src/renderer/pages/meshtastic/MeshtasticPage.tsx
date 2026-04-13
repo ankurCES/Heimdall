@@ -92,6 +92,9 @@ export function MeshtasticPage() {
     return () => clearInterval(interval)
   }, [])
 
+  const [page, setPage] = useState(1)
+  const pageSize = 25
+
   const onlineNodes = nodes.filter((n) => n.last_seen > Date.now() - 3600000)
   const offlineNodes = nodes.filter((n) => n.last_seen <= Date.now() - 3600000)
 
@@ -209,7 +212,7 @@ export function MeshtasticPage() {
                     </tr>
                   </thead>
                   <tbody>
-                    {nodes.map((node) => {
+                    {nodes.slice((page - 1) * pageSize, page * pageSize).map((node) => {
                       const isOnline = node.last_seen > Date.now() - 3600000
                       return (
                         <tr key={node.node_id} className="border-b border-border/50 hover:bg-accent/30 cursor-pointer" onClick={() => setSelectedNodeDetail(node)}>
@@ -250,6 +253,23 @@ export function MeshtasticPage() {
                   </tbody>
                 </table>
               </div>
+              {/* Pagination */}
+              {nodes.length > pageSize && (
+                <div className="flex items-center justify-between mt-3 text-xs">
+                  <span className="text-muted-foreground">
+                    Showing {(page - 1) * pageSize + 1}–{Math.min(page * pageSize, nodes.length)} of {nodes.length}
+                  </span>
+                  <div className="flex items-center gap-1">
+                    <Button variant="outline" size="sm" className="h-7 px-2 text-xs" onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={page === 1}>
+                      Previous
+                    </Button>
+                    <span className="px-2 text-muted-foreground">Page {page} of {Math.ceil(nodes.length / pageSize)}</span>
+                    <Button variant="outline" size="sm" className="h-7 px-2 text-xs" onClick={() => setPage((p) => Math.min(Math.ceil(nodes.length / pageSize), p + 1))} disabled={page >= Math.ceil(nodes.length / pageSize)}>
+                      Next
+                    </Button>
+                  </div>
+                </div>
+              )}
             ) : (
               <div className="text-center py-12 text-muted-foreground">
                 <Radio className="mx-auto h-10 w-10 opacity-30 mb-3" />

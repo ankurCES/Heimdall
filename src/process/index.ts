@@ -13,6 +13,7 @@ import type { SafetyConfig } from '@common/types/settings'
 import { seedDefaultSources } from './services/seeder/DefaultSourceSeeder'
 import { agentOrchestrator } from './agents/AgentOrchestrator'
 import { intelPipeline } from './services/vectordb/IntelPipeline'
+import { enrichmentOrchestrator } from './services/enrichment/EnrichmentOrchestrator'
 
 log.transports.file.level = 'info'
 log.transports.console.level = 'debug'
@@ -52,6 +53,9 @@ async function initializeDeferred(): Promise<void> {
 
   // Start vector DB ingestion pipeline
   await intelPipeline.start()
+
+  // Start background enrichment orchestrator (Multica-style)
+  enrichmentOrchestrator.start()
 
   // Auto-pull Meshtastic data on startup if configured
   try {
@@ -143,6 +147,7 @@ if (!gotTheLock) {
   })
 
   app.on('window-all-closed', () => {
+    enrichmentOrchestrator.stop()
     intelPipeline.stop()
     agentOrchestrator.stop()
     collectorManager.shutdownAll()
@@ -154,6 +159,7 @@ if (!gotTheLock) {
   })
 
   app.on('before-quit', () => {
+    enrichmentOrchestrator.stop()
     intelPipeline.stop()
     agentOrchestrator.stop()
     collectorManager.shutdownAll()

@@ -3,6 +3,7 @@ import { llmService, type ChatMessage } from '../services/llm/LlmService'
 import { agenticChatOrchestrator } from '../services/llm/AgenticChatOrchestrator'
 import { memoryService } from '../services/memory/MemoryService'
 import { vectorDbService } from '../services/vectordb/VectorDbService'
+import { syncManager } from '../services/sync/SyncManager'
 import { getDatabase } from '../services/database'
 import { generateId, timestamp } from '@common/utils/id'
 import log from 'electron-log'
@@ -185,6 +186,8 @@ export function registerChatBridge(): void {
             const stat = statSync(fullPath)
             if (stat.isDirectory()) { walkDir(fullPath); continue }
             if (!entry.endsWith('.md')) continue
+            // Skip already synced
+            if (syncManager.isSynced('vector-local', fullPath)) continue
             const content = readFileSync(fullPath, 'utf-8')
             if (content.length < 50) continue
             vectorDbService.addReport({
@@ -195,6 +198,7 @@ export function registerChatBridge(): void {
               contentHash: fullPath, latitude: null, longitude: null,
               verificationScore: 50, reviewed: false, createdAt: Date.now(), updatedAt: Date.now()
             } as any)
+            syncManager.markSynced('vector-local', fullPath)
             localFiles++
           } catch {}
         }
@@ -211,9 +215,11 @@ export function registerChatBridge(): void {
       const testConn = await obsidianService.testConnection()
       if (testConn.success) {
         const files = await obsidianService.listFiles()
-        const mdFiles = files.filter((f: string) => f.endsWith('.md'))
-        log.info(`Learnings: found ${mdFiles.length} Obsidian files`)
-        notify(`Processing ${mdFiles.length} Obsidian files...`)
+        const allMd = files.filter((f: string) => f.endsWith('.md'))
+        const mdFiles = allMd.filter((f: string) => !syncManager.isSynced('vector-obsidian', f))
+        const skipped = allMd.length - mdFiles.length
+        log.info(`Learnings: found ${allMd.length} Obsidian files, ${skipped} already synced, ${mdFiles.length} new`)
+        notify(`Processing ${mdFiles.length} new Obsidian files (${skipped} already synced)...`)
 
         // Process in parallel batches of 10
         const BATCH_SIZE = 10
@@ -232,6 +238,7 @@ export function registerChatBridge(): void {
                 contentHash: filePath, latitude: null, longitude: null,
                 verificationScore: 60, reviewed: false, createdAt: Date.now(), updatedAt: Date.now()
               } as any)
+              syncManager.markSynced('vector-obsidian', filePath)
               return filePath
             })
           )

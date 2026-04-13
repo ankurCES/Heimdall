@@ -14,7 +14,8 @@ import {
   BarChart3,
   Radio,
   Layers,
-  RefreshCw
+  RefreshCw,
+  Sparkles
 } from 'lucide-react'
 import { cn } from '@renderer/lib/utils'
 
@@ -29,6 +30,7 @@ const navItems = [
   { to: '/vault', icon: BookOpen, label: 'Obsidian Vault' },
   { to: '/chat', icon: MessageSquare, label: 'Chat' },
   { to: '/explore', icon: BarChart3, label: 'Explore' },
+  { to: '/enriched', icon: Sparkles, label: 'Enriched Data' },
   { to: '/sync', icon: RefreshCw, label: 'Sync Center' },
   { to: '/tokens', icon: Coins, label: 'Token Usage' },
   { to: '/audit', icon: Activity, label: 'Audit Log' },

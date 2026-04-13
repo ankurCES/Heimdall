@@ -14,13 +14,13 @@ const testChannels = [
   'chat:getSessionData', 'chat:isIngesting', 'explore:getData',
   'settings:testLlm', 'settings:listLlmModels', 'settings:listSerialPorts',
   'enrichment:getTags', 'enrichment:getEntities', 'enrichment:getLinks',
-  'enrichment:getTopTags', 'enrichment:getTopEntities',
+  'enrichment:getTopTags', 'enrichment:getTopEntities', 'enrichment:getEnrichedReports',
   'meshtastic:getNodes', 'meshtastic:getNodeCount', 'meshtastic:getMessages', 'meshtastic:getRecommendedMode', 'meshtastic:pullDeviceData', 'meshtastic:checkCli', 'meshtastic:discover',
   'sync:getJobs', 'sync:runJob', 'sync:runAll', 'sync:isRunning'
 ]
 const allowedChannels = [...Object.values(IPC_CHANNELS), ...testChannels]
 const chatEvents = ['chat:chunk', 'chat:done', 'chat:error']
-const syncEvents = ['sync:progress']
+const syncEvents = ['sync:progress', 'enrichment:progress']
 const allowedEvents = [...Object.values(IPC_EVENTS), ...chatEvents, ...syncEvents]
 
 const api = {
