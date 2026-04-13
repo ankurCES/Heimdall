@@ -31,7 +31,8 @@ interface GraphLink {
 const DISCIPLINE_COLORS: Record<string, string> = {
   osint: '#3b82f6', cybint: '#ef4444', finint: '#10b981', socmint: '#8b5cf6',
   geoint: '#f59e0b', sigint: '#06b6d4', rumint: '#f97316', ci: '#ec4899',
-  agency: '#6366f1', imint: '#14b8a6'
+  agency: '#6366f1', imint: '#14b8a6',
+  preliminary: '#a78bfa', gap: '#fb923c'
 }
 
 const SEVERITY_SIZE: Record<string, number> = {
@@ -156,10 +157,11 @@ export function RelationshipGraph() {
         {/* Legend */}
         <div className="space-y-1 pt-2 border-t border-border">
           <Label className="text-xs text-muted-foreground">Node Colors</Label>
-          {Object.entries(DISCIPLINE_COLORS).slice(0, 8).map(([disc, color]) => (
+          {Object.entries(DISCIPLINE_COLORS).map(([disc, color]) => (
             <div key={disc} className="flex items-center gap-2 text-[10px]">
-              <span className="h-2.5 w-2.5 rounded-full" style={{ background: color }} />
-              {DISCIPLINE_LABELS[disc as keyof typeof DISCIPLINE_LABELS] || disc}
+              <span className={`h-2.5 w-2.5 ${disc === 'preliminary' ? 'rotate-45' : disc === 'gap' ? '' : 'rounded-full'}`}
+                style={{ background: color, clipPath: disc === 'gap' ? 'polygon(50% 0%, 100% 100%, 0% 100%)' : undefined }} />
+              {disc === 'preliminary' ? '📋 Preliminary Report' : disc === 'gap' ? '⚠️ Information Gap' : (DISCIPLINE_LABELS[disc as keyof typeof DISCIPLINE_LABELS] || disc)}
             </div>
           ))}
         </div>
@@ -203,9 +205,25 @@ export function RelationshipGraph() {
               ctx.shadowColor = color
               ctx.shadowBlur = isSelected ? 15 : 8
 
-              // Draw node circle
+              // Draw shape based on type
               ctx.beginPath()
-              ctx.arc(node.x, node.y, size, 0, 2 * Math.PI)
+              if (node.type === 'preliminary') {
+                // Diamond shape for preliminary reports
+                ctx.moveTo(node.x, node.y - size * 1.3)
+                ctx.lineTo(node.x + size, node.y)
+                ctx.lineTo(node.x, node.y + size * 1.3)
+                ctx.lineTo(node.x - size, node.y)
+                ctx.closePath()
+              } else if (node.type === 'gap') {
+                // Triangle shape for gaps
+                ctx.moveTo(node.x, node.y - size * 1.2)
+                ctx.lineTo(node.x + size, node.y + size * 0.8)
+                ctx.lineTo(node.x - size, node.y + size * 0.8)
+                ctx.closePath()
+              } else {
+                // Circle for regular intel
+                ctx.arc(node.x, node.y, size, 0, 2 * Math.PI)
+              }
               ctx.fillStyle = color
               ctx.fill()
 

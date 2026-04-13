@@ -5,6 +5,7 @@ import { memoryService } from '../services/memory/MemoryService'
 import { vectorDbService } from '../services/vectordb/VectorDbService'
 import { syncManager } from '../services/sync/SyncManager'
 import { getDatabase } from '../services/database'
+import { reportExtractor } from '../services/enrichment/ReportExtractor'
 import { generateId, timestamp } from '@common/utils/id'
 import log from 'electron-log'
 
@@ -144,6 +145,93 @@ export function registerChatBridge(): void {
     } else {
       db.prepare('DELETE FROM chat_messages').run()
     }
+  })
+
+  // ── Preliminary Reports ─────────────────────────────────────────
+
+  ipcMain.handle('chat:savePreliminaryReport', (_event, params: { sessionId: string; messageId: string; content: string }) => {
+    const db = getDatabase()
+    const now = timestamp()
+    const { sessionId, messageId, content } = params
+
+    // Extract structured data from LLM response
+    const extracted = reportExtractor.extract(content)
+    const reportId = generateId()
+
+    // Find source intel IDs from session context
+    const sessionMessages = db.prepare(
+      "SELECT content FROM chat_messages WHERE session_id = ? AND role = 'system' ORDER BY created_at"
+    ).all(sessionId) as Array<{ content: string }>
+
+    // Extract report IDs mentioned in system context
+    const sourceIds: string[] = []
+    for (const msg of sessionMessages) {
+      const idMatches = msg.content.match(/[0-9a-f]{8}-[0-9a-f]{4}/g) || []
+      sourceIds.push(...idMatches.slice(0, 20))
+    }
+
+    // Insert preliminary report
+    db.prepare(`
+      INSERT INTO preliminary_reports (id, session_id, chat_message_id, title, content, status, source_report_ids, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, 'preliminary', ?, ?, ?)
+    `).run(reportId, sessionId, messageId, extracted.title, content, JSON.stringify(sourceIds.slice(0, 50)), now, now)
+
+    // Insert recommended actions
+    for (const action of extracted.actions) {
+      db.prepare('INSERT INTO recommended_actions (id, preliminary_report_id, action, priority, status, created_at) VALUES (?, ?, ?, ?, ?, ?)').run(
+        generateId(), reportId, action.action, action.priority, 'pending', now
+      )
+    }
+
+    // Insert information gaps
+    for (const gap of extracted.gaps) {
+      db.prepare('INSERT INTO intel_gaps (id, preliminary_report_id, description, category, severity, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)').run(
+        generateId(), reportId, gap.description, gap.category, gap.severity, 'open', now
+      )
+    }
+
+    // Create links from preliminary report to source intel
+    for (const srcId of sourceIds.slice(0, 10)) {
+      db.prepare('INSERT OR IGNORE INTO intel_links (id, source_report_id, target_report_id, link_type, strength, reason, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)').run(
+        generateId(), reportId, srcId, 'preliminary_reference', 0.8, 'Source intel for preliminary report', now
+      )
+    }
+
+    // Tag the preliminary report
+    const tags = ['preliminary-report', `status:preliminary`]
+    for (const action of extracted.actions) { tags.push(`action:${action.priority}`) }
+    for (const gap of extracted.gaps) { tags.push(`gap:${gap.category}`) }
+    for (const tag of [...new Set(tags)]) {
+      db.prepare('INSERT OR IGNORE INTO intel_tags (report_id, tag, confidence, source, created_at) VALUES (?, ?, ?, ?, ?)').run(
+        reportId, tag, 1.0, 'preliminary', now
+      )
+    }
+
+    log.info(`Preliminary report saved: ${extracted.title} (${extracted.actions.length} actions, ${extracted.gaps.length} gaps)`)
+
+    return {
+      reportId,
+      title: extracted.title,
+      actionsCount: extracted.actions.length,
+      gapsCount: extracted.gaps.length,
+      actions: extracted.actions,
+      gaps: extracted.gaps
+    }
+  })
+
+  ipcMain.handle('chat:getPreliminaryReports', () => {
+    const db = getDatabase()
+    const reports = db.prepare('SELECT * FROM preliminary_reports ORDER BY created_at DESC LIMIT 50').all() as Array<Record<string, unknown>>
+    return reports.map((r) => {
+      const actions = db.prepare('SELECT * FROM recommended_actions WHERE preliminary_report_id = ?').all(r.id) as Array<Record<string, unknown>>
+      const gaps = db.prepare('SELECT * FROM intel_gaps WHERE preliminary_report_id = ?').all(r.id) as Array<Record<string, unknown>>
+      return { ...r, actions, gaps }
+    })
+  })
+
+  ipcMain.handle('chat:getGaps', () => {
+    const db = getDatabase()
+    return db.prepare("SELECT g.*, p.title as report_title FROM intel_gaps g JOIN preliminary_reports p ON g.preliminary_report_id = p.id WHERE g.status = 'open' ORDER BY g.created_at DESC").all()
   })
 
   ipcMain.handle('chat:generateDailySummary', () => memoryService.generateDailySummary())

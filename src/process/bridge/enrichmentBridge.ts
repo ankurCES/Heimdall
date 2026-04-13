@@ -144,16 +144,49 @@ export function registerEnrichmentBridge(): void {
 
     const nodes = nodeIds.size > 0 ? db.prepare(nodeQuery).all(...nodeVals) as Array<Record<string, unknown>> : []
 
-    return {
-      nodes: nodes.map((n) => ({
+    // Add preliminary report nodes
+    const prelimReports = db.prepare('SELECT id, title, status FROM preliminary_reports ORDER BY created_at DESC LIMIT 50').all() as Array<Record<string, unknown>>
+    const prelimNodes = prelimReports.map((p) => ({
+      id: p.id as string, title: `📋 ${(p.title as string).slice(0, 40)}`,
+      discipline: 'preliminary', severity: 'high', source: 'Preliminary Report',
+      verification: 80, type: 'preliminary'
+    }))
+
+    // Add gap nodes
+    const gaps = db.prepare("SELECT id, description, severity FROM intel_gaps WHERE status = 'open' LIMIT 30").all() as Array<Record<string, unknown>>
+    const gapNodes = gaps.map((g) => ({
+      id: g.id as string, title: `⚠️ ${(g.description as string).slice(0, 40)}`,
+      discipline: 'gap', severity: g.severity as string, source: 'Information Gap',
+      verification: 0, type: 'gap'
+    }))
+
+    // Add links from preliminary → gaps
+    const gapLinks = gaps.map((g) => {
+      const prelim = db.prepare('SELECT preliminary_report_id FROM intel_gaps WHERE id = ?').get(g.id) as { preliminary_report_id: string }
+      return {
+        source: prelim.preliminary_report_id, target: g.id as string,
+        type: 'gap_identified', strength: 0.7, reason: 'Information gap identified in report'
+      }
+    })
+
+    const allNodes = [
+      ...nodes.map((n) => ({
         id: n.id, title: (n.title as string).slice(0, 50), discipline: n.discipline,
         severity: n.severity, source: n.source_name, verification: n.verification_score
       })),
-      links: links.map((l) => ({
+      ...prelimNodes,
+      ...gapNodes
+    ]
+
+    const allLinks = [
+      ...links.map((l) => ({
         source: l.source_report_id, target: l.target_report_id,
         type: l.link_type, strength: l.strength, reason: l.reason
-      }))
-    }
+      })),
+      ...gapLinks
+    ]
+
+    return { nodes: allNodes, links: allLinks }
   })
 
   log.info('Enrichment bridge registered')

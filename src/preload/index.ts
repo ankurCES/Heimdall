@@ -10,6 +10,7 @@ const testChannels = [
   'chat:send', 'chat:getHistory', 'chat:clearHistory', 'chat:getConnections',
   'chat:createSession', 'chat:getSessions', 'chat:renameSession', 'chat:deleteSession',
   'chat:generateDailySummary', 'chat:generateWeeklySummary',
+  'chat:savePreliminaryReport', 'chat:getPreliminaryReports', 'chat:getGaps',
   'chat:generateLearnings', 'chat:getVectorStats', 'chat:getTokenStats',
   'chat:getSessionData', 'chat:isIngesting', 'explore:getData',
   'settings:testLlm', 'settings:listLlmModels', 'settings:listSerialPorts',

@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { toast } from 'sonner'
 import {
-  MessageSquare, Send, Trash2, Loader2, Plus,
+  MessageSquare, Send, Trash2, Loader2, Plus, FileText, Check,
   Calendar, BookOpen, Brain, Zap, Bot, Edit2, X
 } from 'lucide-react'
 import { Button } from '@renderer/components/ui/button'
@@ -368,14 +368,25 @@ export function ChatPage() {
 
           {messages.map((msg) => (
             <div key={msg.id} className={cn('flex', msg.role === 'user' ? 'justify-end' : 'justify-start')}>
-              <div className={cn('max-w-[80%] rounded-lg px-4 py-3 text-sm',
-                msg.role === 'user' ? 'bg-primary text-primary-foreground' : 'bg-card border border-border'
+              <div className={cn('max-w-[80%] rounded-lg text-sm',
+                msg.role === 'user' ? 'bg-primary text-primary-foreground px-4 py-3' : 'bg-card border border-border'
               )}>
                 {msg.role === 'user' ? (
-                  <div className="whitespace-pre-wrap">{msg.content}</div>
-                ) : (
-                  <MarkdownRenderer content={msg.content} className="text-sm" />
-                )}
+                  <div className="whitespace-pre-wrap px-4 py-3">{msg.content}</div>
+                ) : (<>
+                  <div className="px-4 py-3">
+                    <MarkdownRenderer content={msg.content} className="text-sm" />
+                  </div>
+                  {msg.content.length > 200 && (
+                    <div className="border-t border-border/50 px-4 py-2 flex items-center justify-between">
+                      <SaveReportButton
+                        sessionId={activeSessionId}
+                        messageId={msg.id}
+                        content={msg.content}
+                      />
+                    </div>
+                  )}
+                </>)}
               </div>
             </div>
           ))}
@@ -414,5 +425,49 @@ export function ChatPage() {
         </div>
       </div>
     </div>
+  )
+}
+
+// Save as Preliminary Report button component
+function SaveReportButton({ sessionId, messageId, content }: { sessionId: string; messageId: string; content: string }) {
+  const [saved, setSaved] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const [result, setResult] = useState<{ actionsCount: number; gapsCount: number } | null>(null)
+
+  const handleSave = async () => {
+    setSaving(true)
+    try {
+      const res = await window.heimdall.invoke('chat:savePreliminaryReport', { sessionId, messageId, content }) as {
+        reportId: string; title: string; actionsCount: number; gapsCount: number
+      }
+      setSaved(true)
+      setResult(res)
+      toast.success('Preliminary Report Saved', {
+        description: `${res.actionsCount} actions, ${res.gapsCount} gaps extracted`
+      })
+    } catch (err) {
+      toast.error('Failed to save report', { description: String(err) })
+    }
+    setSaving(false)
+  }
+
+  if (saved && result) {
+    return (
+      <div className="flex items-center gap-2 text-[10px] text-green-500">
+        <Check className="h-3 w-3" />
+        <span>Saved — {result.actionsCount} actions, {result.gapsCount} gaps</span>
+      </div>
+    )
+  }
+
+  return (
+    <button
+      onClick={handleSave}
+      disabled={saving}
+      className="flex items-center gap-1.5 text-[10px] text-muted-foreground hover:text-primary transition-colors"
+    >
+      {saving ? <Loader2 className="h-3 w-3 animate-spin" /> : <FileText className="h-3 w-3" />}
+      {saving ? 'Saving...' : 'Save as Preliminary Report'}
+    </button>
   )
 }

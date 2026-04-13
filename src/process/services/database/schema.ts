@@ -198,5 +198,47 @@ export function createSchema(db: Database.Database): void {
     );
 
     CREATE INDEX IF NOT EXISTS idx_sync_type ON sync_log(type);
+
+    -- Preliminary reports (from chat intelligence briefings)
+    CREATE TABLE IF NOT EXISTS preliminary_reports (
+      id TEXT PRIMARY KEY,
+      session_id TEXT NOT NULL,
+      chat_message_id TEXT NOT NULL,
+      title TEXT NOT NULL,
+      content TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'preliminary',
+      source_report_ids TEXT,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_prelim_session ON preliminary_reports(session_id);
+
+    -- Information gaps identified in preliminary reports
+    CREATE TABLE IF NOT EXISTS intel_gaps (
+      id TEXT PRIMARY KEY,
+      preliminary_report_id TEXT NOT NULL,
+      description TEXT NOT NULL,
+      category TEXT,
+      severity TEXT NOT NULL DEFAULT 'medium',
+      status TEXT NOT NULL DEFAULT 'open',
+      created_at INTEGER NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_gaps_prelim ON intel_gaps(preliminary_report_id);
+    CREATE INDEX IF NOT EXISTS idx_gaps_status ON intel_gaps(status);
+
+    -- Recommended actions from preliminary reports
+    CREATE TABLE IF NOT EXISTS recommended_actions (
+      id TEXT PRIMARY KEY,
+      preliminary_report_id TEXT NOT NULL,
+      action TEXT NOT NULL,
+      priority TEXT NOT NULL DEFAULT 'medium',
+      status TEXT NOT NULL DEFAULT 'pending',
+      created_at INTEGER NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_actions_prelim ON recommended_actions(preliminary_report_id);
+    CREATE INDEX IF NOT EXISTS idx_actions_status ON recommended_actions(status);
   `)
 }
