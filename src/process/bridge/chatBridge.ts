@@ -60,7 +60,7 @@ export function registerChatBridge(): void {
     sessionId: string
     connectionId?: string
     useAgentic?: boolean
-    mode?: 'agentic' | 'direct' | 'caveman'
+    mode?: 'agentic' | 'direct' | 'caveman' | 'agent'
   }) => {
     const { messages, query, sessionId, connectionId, useAgentic = true, mode = 'direct' } = params
 
@@ -72,7 +72,18 @@ export function registerChatBridge(): void {
 
     let fullResponse = ''
     try {
-      if (useAgentic) {
+      if (mode === 'agent') {
+        // Tool-calling agent mode
+        const { toolCallingAgent } = await import('../services/llm/ToolCallingAgent')
+        fullResponse = await toolCallingAgent.run(
+          query, messages.map((m) => ({ role: m.role as 'user' | 'assistant' | 'system', content: m.content })),
+          connectionId, emitChunk,
+          (toolName, params, result) => {
+            // Log tool calls for HUMINT trail
+            log.info(`Agent tool: ${toolName}(${JSON.stringify(params).slice(0, 60)})`)
+          }
+        )
+      } else if (useAgentic) {
         fullResponse = await agenticChatOrchestrator.process(
           query, messages, connectionId, emitChunk
         )

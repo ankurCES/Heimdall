@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { toast } from 'sonner'
 import {
-  MessageSquare, Send, Trash2, Loader2, Plus, FileText, Check,
+  MessageSquare, Send, Trash2, Loader2, Plus, FileText, Check, Wrench,
   Calendar, BookOpen, Brain, Zap, Bot, Edit2, X
 } from 'lucide-react'
 import { Button } from '@renderer/components/ui/button'
@@ -48,7 +48,7 @@ export function ChatPage() {
   const [streamingContent, setStreamingContent] = useState('')
   const [connections, setConnections] = useState<LlmConn[]>([])
   const [selectedConnection, setSelectedConnection] = useState<string>('')
-  const [chatMode, setChatMode] = useState<'agentic' | 'direct' | 'caveman'>('agentic')
+  const [chatMode, setChatMode] = useState<'agentic' | 'direct' | 'caveman' | 'agent'>('agentic')
   const [editingTitle, setEditingTitle] = useState<string | null>(null)
   const [editTitle, setEditTitle] = useState('')
   const [selectedFilters, setSelectedFilters] = useState<Array<{ type: 'tag' | 'entity'; value: string }>>([])
@@ -344,7 +344,8 @@ export function ChatPage() {
             ) : <Badge variant="warning" className="text-[9px]">No LLM</Badge>}
             <div className="flex items-center gap-0.5 bg-muted rounded-md p-0.5">
               {([
-                { mode: 'agentic' as const, icon: Bot, label: 'Agent' },
+                { mode: 'agent' as const, icon: Wrench, label: 'Tools' },
+                { mode: 'agentic' as const, icon: Bot, label: 'Agentic' },
                 { mode: 'direct' as const, icon: Zap, label: 'Direct' },
                 { mode: 'caveman' as const, icon: MessageSquare, label: 'Caveman' }
               ]).map(({ mode, icon: Icon, label }) => (
