@@ -215,12 +215,35 @@ const FREE_SOURCES: SeedSource[] = [
     config: {}
   },
 
+  // ── SIGINT (additional) ────────────────────────────────────────────
+  {
+    name: 'ADS-B Aircraft (adsb.lol)',
+    discipline: 'sigint',
+    type: 'adsb-lol',
+    schedule: '*/15 * * * *',
+    config: {}
+  },
+  {
+    name: 'ISS Satellite Tracker',
+    discipline: 'sigint',
+    type: 'satellite',
+    schedule: '*/30 * * * *',
+    config: {}
+  },
+
   // ── CYBINT ─────────────────────────────────────────────────────────
+  {
+    name: 'SANS ISC Threat Level & Top Ports',
+    discipline: 'cybint',
+    type: 'sans-isc',
+    schedule: '0 */1 * * *',
+    config: {}
+  },
   {
     name: 'NVD CVE Monitor',
     discipline: 'cybint',
     type: 'cve',
-    schedule: '*/20 * * * *', // every 20 min
+    schedule: '*/20 * * * *',
     config: {}
   },
   {

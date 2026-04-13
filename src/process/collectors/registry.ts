@@ -15,6 +15,7 @@ import { UkPoliceCrimeCollector } from './osint/UkPoliceCrimeCollector'
 import { CveCollector } from './cybint/CveCollector'
 import { ThreatFeedCollector } from './cybint/ThreatFeedCollector'
 import { DnsWhoisCollector } from './cybint/DnsWhoisCollector'
+import { SansIscCollector } from './cybint/SansIscCollector'
 
 // FININT
 import { EdgarCollector } from './finint/EdgarCollector'
@@ -37,6 +38,8 @@ import { AdsbCollector } from './sigint/AdsbCollector'
 import { FccCollector } from './sigint/FccCollector'
 import { AisCollector } from './sigint/AisCollector'
 import { MeshtasticCollector } from './sigint/MeshtasticCollector'
+import { AdsbLolCollector } from './sigint/AdsbLolCollector'
+import { SatelliteCollector } from './sigint/SatelliteCollector'
 
 // IMINT
 import { TrafficCameraCollector } from './imint/TrafficCameraCollector'
@@ -67,10 +70,11 @@ export function registerAllCollectors(): void {
   collectorManager.registerFactory('fbi-crime-stats', () => new FbiCrimeStatsCollector())
   collectorManager.registerFactory('uk-police-crime', () => new UkPoliceCrimeCollector())
 
-  // CYBINT (3)
+  // CYBINT (4)
   collectorManager.registerFactory('cve', () => new CveCollector())
   collectorManager.registerFactory('threat-feed', () => new ThreatFeedCollector())
   collectorManager.registerFactory('dns-whois', () => new DnsWhoisCollector())
+  collectorManager.registerFactory('sans-isc', () => new SansIscCollector())
 
   // FININT (2)
   collectorManager.registerFactory('edgar', () => new EdgarCollector())
@@ -88,8 +92,10 @@ export function registerAllCollectors(): void {
   collectorManager.registerFactory('nasa-firms', () => new NasaFirmsCollector())
   collectorManager.registerFactory('nasa-eonet', () => new NasaEonetCollector())
 
-  // SIGINT (4)
+  // SIGINT (6)
   collectorManager.registerFactory('adsb', () => new AdsbCollector())
+  collectorManager.registerFactory('adsb-lol', () => new AdsbLolCollector())
+  collectorManager.registerFactory('satellite', () => new SatelliteCollector())
   collectorManager.registerFactory('fcc', () => new FccCollector())
   collectorManager.registerFactory('meshtastic', () => new MeshtasticCollector())
   collectorManager.registerFactory('ais-maritime', () => new AisCollector())
