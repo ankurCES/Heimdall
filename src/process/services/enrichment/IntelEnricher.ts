@@ -79,6 +79,74 @@ export class IntelEnricher {
 
     // 3. Find links to existing reports (shared entities)
     this.findLinks(report, entities, db, now)
+
+    // 4. Corroboration score — how many independent sources report similar content
+    const corroborationScore = this.calculateCorroboration(report, entities, tags, db)
+    if (corroborationScore > 0) {
+      // Update verification score based on corroboration
+      const newScore = Math.min(100, report.verificationScore + corroborationScore)
+      db.prepare('UPDATE intel_reports SET verification_score = ?, updated_at = ? WHERE id = ?').run(newScore, now, report.id)
+
+      // Add corroboration tag
+      db.prepare('INSERT OR IGNORE INTO intel_tags (report_id, tag, confidence, source, created_at) VALUES (?, ?, ?, ?, ?)').run(
+        report.id, `corroboration:${corroborationScore >= 20 ? 'high' : corroborationScore >= 10 ? 'medium' : 'low'}`,
+        corroborationScore / 30, 'enricher', now
+      )
+    }
+  }
+
+  private calculateCorroboration(
+    report: IntelReport,
+    entities: Array<{ type: string; value: string }>,
+    tags: Array<{ tag: string }>,
+    db: ReturnType<typeof getDatabase>
+  ): number {
+    let score = 0
+    const oneDay = 24 * 60 * 60 * 1000
+
+    // 1. Count independent sources reporting same entities (different source_name)
+    for (const entity of entities.slice(0, 5)) {
+      const matches = db.prepare(`
+        SELECT COUNT(DISTINCT source_name) as sources FROM intel_reports r
+        JOIN intel_entities e ON r.id = e.report_id
+        WHERE e.entity_value = ? AND e.entity_type = ? AND r.id != ?
+        AND r.source_name != ? AND r.created_at > ?
+      `).get(entity.value, entity.type, report.id, report.sourceName, report.createdAt - oneDay * 3) as { sources: number }
+
+      if (matches.sources >= 3) score += 15 // 3+ sources = strong corroboration
+      else if (matches.sources >= 2) score += 10
+      else if (matches.sources >= 1) score += 5
+    }
+
+    // 2. Count reports with same tags from different disciplines
+    const reportTags = tags.filter((t) => !t.tag.startsWith('severity:') && t.tag !== report.discipline).slice(0, 3)
+    for (const tag of reportTags) {
+      const crossDiscipline = db.prepare(`
+        SELECT COUNT(DISTINCT discipline) as disciplines FROM intel_reports r
+        JOIN intel_tags t ON r.id = t.report_id
+        WHERE t.tag = ? AND r.id != ? AND r.discipline != ? AND r.created_at > ?
+      `).get(tag.tag, report.id, report.discipline, report.createdAt - oneDay * 3) as { disciplines: number }
+
+      if (crossDiscipline.disciplines >= 2) score += 10 // Cross-discipline corroboration
+      else if (crossDiscipline.disciplines >= 1) score += 5
+    }
+
+    // 3. Similar titles from different sources (keyword overlap)
+    const titleWords = report.title.toLowerCase().split(/\s+/).filter((w) => w.length > 4).slice(0, 3)
+    if (titleWords.length > 0) {
+      const likeClause = titleWords.map(() => 'LOWER(title) LIKE ?').join(' AND ')
+      const likeParams = titleWords.map((w) => `%${w}%`)
+
+      const titleMatches = db.prepare(`
+        SELECT COUNT(DISTINCT source_name) as sources FROM intel_reports
+        WHERE ${likeClause} AND id != ? AND source_name != ? AND created_at > ?
+      `).get(...likeParams, report.id, report.sourceName, report.createdAt - oneDay * 2) as { sources: number }
+
+      if (titleMatches.sources >= 2) score += 10
+      else if (titleMatches.sources >= 1) score += 5
+    }
+
+    return Math.min(30, score) // Cap at 30 points boost
   }
 
   private extractEntities(text: string): Array<{ type: string; value: string; confidence: number }> {
