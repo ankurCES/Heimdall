@@ -11,6 +11,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Switch } from '@renderer/components/ui/switch'
 import { Label } from '@renderer/components/ui/label'
 import { MarkdownRenderer } from '@renderer/components/MarkdownRenderer'
+import { ThinkingBlocks } from '@renderer/components/ThinkingBlock'
 import { TagEntityPicker } from '@renderer/components/TagEntityPicker'
 import { cn } from '@renderer/lib/utils'
 import { formatRelativeTime } from '@renderer/lib/utils'
@@ -403,7 +404,7 @@ export function ChatPage() {
                   <div className="whitespace-pre-wrap px-4 py-3">{msg.content}</div>
                 ) : (<>
                   <div className="px-4 py-3">
-                    <MarkdownRenderer content={msg.content} className="text-sm" />
+                    <ThinkingBlocks content={msg.content} isStreaming={false} />
                   </div>
                   {msg.content.length > 200 && (
                     <div className="border-t border-border/50 px-4 py-2 flex items-center justify-between">
@@ -423,7 +424,7 @@ export function ChatPage() {
             <div className="flex justify-start">
               <div className="max-w-[80%] rounded-lg px-4 py-3 text-sm bg-card border border-border">
                 {streamingContent
-                  ? <MarkdownRenderer content={streamingContent} className="text-sm" />
+                  ? <ThinkingBlocks content={streamingContent} isStreaming={true} />
                   : <div className="flex items-center gap-2 text-muted-foreground"><Loader2 className="h-4 w-4 animate-spin" />{chatMode === 'agentic' ? 'Planning...' : 'Thinking...'}</div>
                 }
               </div>
