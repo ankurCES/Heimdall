@@ -195,7 +195,7 @@ export function MeshtasticPage() {
             <CardDescription>All Meshtastic nodes seen on the mesh network across all channels</CardDescription>
           </CardHeader>
           <CardContent>
-            {nodes.length > 0 ? (
+            {nodes.length > 0 ? (<>
               <div className="overflow-x-auto">
                 <table className="w-full text-xs">
                   <thead>
@@ -270,7 +270,7 @@ export function MeshtasticPage() {
                   </div>
                 </div>
               )}
-            ) : (
+            </>) : (
               <div className="text-center py-12 text-muted-foreground">
                 <Radio className="mx-auto h-10 w-10 opacity-30 mb-3" />
                 <p className="text-sm">No nodes discovered yet</p>
