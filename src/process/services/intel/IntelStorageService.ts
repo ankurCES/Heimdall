@@ -69,11 +69,17 @@ export class IntelStorageService {
 
     if (stored.length > 0) {
       log.info(`Stored ${stored.length} new reports (${reports.length - stored.length} duplicates skipped)`)
+      // Emit to UI immediately (fast)
       this.emitNewReports(stored)
-      this.exportToMarkdown(stored)
-      this.syncToObsidian(stored)
-      this.evaluateAlerts(stored)
-      this.enrichReports(stored)
+
+      // Defer heavy operations to next tick to not block the collector pipeline
+      setImmediate(() => {
+        this.exportToMarkdown(stored)
+        // These are fire-and-forget async ops
+        this.syncToObsidian(stored)
+        this.evaluateAlerts(stored)
+        // Enrichment handled by background EnrichmentOrchestrator — don't duplicate
+      })
     }
 
     return stored

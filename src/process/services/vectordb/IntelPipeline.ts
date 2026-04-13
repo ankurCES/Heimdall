@@ -23,7 +23,7 @@ export class IntelPipeline {
     // Schedule periodic ingestion — every 10 minutes
     cronService.schedule(
       'pipeline:ingest',
-      '*/10 * * * *',
+      '*/20 * * * *',
       'Vector DB Ingestion Pipeline',
       () => this.runIngestion()
     )

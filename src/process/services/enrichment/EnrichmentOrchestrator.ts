@@ -9,8 +9,8 @@ import log from 'electron-log'
 // Multica-style background enrichment pipeline
 // Polls for unenriched reports every 5s, processes with concurrency limit
 
-const POLL_INTERVAL = 5000     // 5 seconds
-const MAX_CONCURRENT = 5       // Semaphore limit
+const POLL_INTERVAL = 15000    // 15 seconds (was 5s — reduces DB churn 3x)
+const MAX_CONCURRENT = 3       // Semaphore limit (was 5 — reduces CPU pressure)
 const BATCH_SIZE = 50          // Reports per poll cycle
 
 export class EnrichmentOrchestrator {
@@ -25,8 +25,8 @@ export class EnrichmentOrchestrator {
 
     log.info('EnrichmentOrchestrator: starting background pipeline')
 
-    // Initial run after 10s delay (let collectors populate first)
-    setTimeout(() => this.poll(), 10000)
+    // Initial run after 30s delay (let collectors finish first cycle)
+    setTimeout(() => this.poll(), 30000)
 
     // Then poll every 5s
     this.pollTimer = setInterval(() => this.poll(), POLL_INTERVAL)

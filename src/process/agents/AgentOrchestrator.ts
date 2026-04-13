@@ -12,11 +12,11 @@ export class AgentOrchestrator {
   private running = false
 
   start(): void {
-    // Lead Agent — runs every 5 minutes, triages new reports
-    cronService.schedule('agent:lead', '*/5 * * * *', 'Lead Agent (Triage)', () => this.runLeadAgent())
+    // Lead Agent — runs every 10 minutes (was 5 — reduced overlap with enrichment orchestrator)
+    cronService.schedule('agent:lead', '*/10 * * * *', 'Lead Agent (Triage)', () => this.runLeadAgent())
 
-    // Analyst Agent — runs every 15 minutes, enriches and finds links
-    cronService.schedule('agent:analyst', '*/15 * * * *', 'Analyst Agent (Enrichment)', () => this.runAnalystAgent())
+    // Analyst Agent — runs every 30 minutes (was 15 — LLM calls are expensive)
+    cronService.schedule('agent:analyst', '*/30 * * * *', 'Analyst Agent (Enrichment)', () => this.runAnalystAgent())
 
     // Summary Agent — runs daily at midnight
     cronService.schedule('agent:summary', '0 0 * * *', 'Summary Agent (Daily)', () => this.runSummaryAgent())
@@ -27,8 +27,10 @@ export class AgentOrchestrator {
     this.running = true
     log.info('Agent orchestrator started — 4 agents scheduled')
 
-    // Run lead agent immediately on startup for any unprocessed reports
-    this.runLeadAgent().catch((err) => log.warn('Initial lead agent run failed:', err))
+    // Defer first lead agent run to 60s after startup (let collectors finish)
+    setTimeout(() => {
+      this.runLeadAgent().catch((err) => log.warn('Initial lead agent run failed:', err))
+    }, 60000)
   }
 
   stop(): void {

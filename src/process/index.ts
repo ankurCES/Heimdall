@@ -72,7 +72,7 @@ async function initializeDeferred(): Promise<void> {
         } catch (err) {
           log.debug(`Meshtastic auto-pull failed: ${err}`)
         }
-      }, 10000)
+      }, 20000) // 20s delay — let UI render first
     }
   } catch {}
 

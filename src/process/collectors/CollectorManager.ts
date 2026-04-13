@@ -48,18 +48,18 @@ export class CollectorManager {
     }
   }
 
-  private async runInitialCollection(sourceIds: string[]): Promise<void> {
-    log.info(`Starting initial collection for ${sourceIds.length} sources...`)
+  private runInitialCollection(sourceIds: string[]): void {
+    log.info(`Scheduling initial collection for ${sourceIds.length} sources (background, 5s stagger)`)
 
-    // Stagger collections to avoid overwhelming rate limits
+    // Fire-and-forget with stagger — doesn't block startup
+    let delay = 5000 // Start after 5s to let UI render first
     for (const sourceId of sourceIds) {
-      // Run in background without blocking startup
-      this.runCollector(sourceId).catch((err) => {
-        log.warn(`Initial collection failed for ${sourceId}: ${err}`)
-      })
-
-      // 2-second stagger between collector starts
-      await new Promise((resolve) => setTimeout(resolve, 2000))
+      setTimeout(() => {
+        this.runCollector(sourceId).catch((err) => {
+          log.warn(`Initial collection failed for ${sourceId}: ${err}`)
+        })
+      }, delay)
+      delay += 500 // 500ms stagger instead of 2000ms
     }
   }
 
