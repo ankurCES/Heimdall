@@ -41,7 +41,12 @@ const SEVERITY_SIZE: Record<string, number> = {
 
 const LINK_COLORS: Record<string, string> = {
   shared_entity: '#3b82f6',
-  temporal: '#6b7280'
+  temporal: '#6b7280',
+  preliminary_reference: '#a78bfa',
+  gap_identified: '#fb923c',
+  humint_source: '#fbbf24',
+  humint_preliminary: '#f59e0b',
+  humint_cross_session: '#eab308'
 }
 
 export function RelationshipGraph() {

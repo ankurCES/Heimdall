@@ -79,6 +79,33 @@ export class HumintService {
       )
     }
 
+    // Link to preliminary reports from the same session
+    const prelimReports = db.prepare(
+      'SELECT id, title FROM preliminary_reports WHERE session_id = ?'
+    ).all(sessionId) as Array<{ id: string; title: string }>
+    for (const prelim of prelimReports) {
+      db.prepare('INSERT OR IGNORE INTO intel_links (id, source_report_id, target_report_id, link_type, strength, reason, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)').run(
+        generateId(), id, prelim.id, 'humint_preliminary', 0.95, `HUMINT based on preliminary report: ${prelim.title.slice(0, 50)}`, now
+      )
+    }
+
+    // Cross-reference with HUMINT from other sessions — find shared entities/tags
+    const otherHumints = db.prepare(
+      'SELECT id, findings FROM humint_reports WHERE session_id != ? LIMIT 50'
+    ).all(sessionId) as Array<{ id: string; findings: string }>
+    for (const other of otherHumints) {
+      // Check keyword overlap between findings
+      const myWords = new Set(findings.toLowerCase().match(/\b[a-z]{5,}\b/g) || [])
+      const otherWords = other.findings.toLowerCase().match(/\b[a-z]{5,}\b/g) || []
+      const overlap = otherWords.filter((w) => myWords.has(w)).length
+      if (overlap >= 5) {
+        db.prepare('INSERT OR IGNORE INTO intel_links (id, source_report_id, target_report_id, link_type, strength, reason, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)').run(
+          generateId(), id, other.id, 'humint_cross_session', Math.min(0.9, overlap * 0.1),
+          `Cross-session HUMINT connection (${overlap} shared keywords)`, now
+        )
+      }
+    }
+
     // Tag the HUMINT report
     for (const tag of ['humint', `confidence:${confidence}`, ...toolCalls.map((t) => `tool:${t}`)]) {
       db.prepare('INSERT OR IGNORE INTO intel_tags (report_id, tag, confidence, source, created_at) VALUES (?, ?, ?, ?, ?)').run(
@@ -86,13 +113,25 @@ export class HumintService {
       )
     }
 
-    // Also create as intel_report for graph integration
+    // Also create as intel_report for graph integration + enrichment pipeline
     const { createHash } = require('crypto')
     const hash = createHash('sha256').update(title + findings.slice(0, 500)).digest('hex')
+    const reportContent = `## Analyst Notes\n\n${analystNotes.slice(0, 2000)}\n\n## Findings\n\n${findings.slice(0, 3000)}`
     db.prepare(
       'INSERT OR IGNORE INTO intel_reports (id, discipline, title, content, severity, source_id, source_name, content_hash, verification_score, reviewed, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
-    ).run(id, 'osint', title, `## Analyst Notes\n\n${analystNotes.slice(0, 2000)}\n\n## Findings\n\n${findings.slice(0, 3000)}`,
-      'high', 'humint', 'HUMINT (Human Intelligence)', hash, 90, 1, now, now)
+    ).run(id, 'osint', title, reportContent, 'high', 'humint', 'HUMINT (Human Intelligence)', hash, 90, 1, now, now)
+
+    // Trigger enrichment (entities, auto-tags, corroboration, links)
+    try {
+      const { intelEnricher } = require('../enrichment/IntelEnricher')
+      intelEnricher.enrichReport({
+        id, discipline: 'osint', title, content: reportContent,
+        summary: null, severity: 'high', sourceId: 'humint',
+        sourceUrl: null, sourceName: 'HUMINT', contentHash: hash,
+        latitude: null, longitude: null, verificationScore: 90,
+        reviewed: true, createdAt: now, updatedAt: now
+      })
+    } catch {}
 
     log.info(`HUMINT report created: ${title} (${sourceIds.length} sources, ${toolCalls.length} tools)`)
 
