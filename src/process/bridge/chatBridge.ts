@@ -81,8 +81,14 @@ export function registerChatBridge(): void {
           query, messages.map((m) => ({ role: m.role as 'user' | 'assistant' | 'system', content: m.content })),
           connectionId, emitChunk,
           (toolName, params, result) => {
-            // Log tool calls for HUMINT trail
+            // Log tool calls for HUMINT trail + persist to DB
             log.info(`Agent tool: ${toolName}(${JSON.stringify(params).slice(0, 60)})`)
+            try {
+              const tcDb = getDatabase()
+              tcDb.prepare(
+                'INSERT INTO tool_call_logs (id, session_id, tool_name, params, result, created_at) VALUES (?, ?, ?, ?, ?, ?)'
+              ).run(generateId(), sessionId, toolName, JSON.stringify(params).slice(0, 2000), String(result).slice(0, 5000), timestamp())
+            } catch {}
           }
         )
       } else if (useAgentic) {

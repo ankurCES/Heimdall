@@ -29,7 +29,10 @@ export class SyncManager {
       { type: 'local-memory', label: 'Local Memory Files' },
       { type: 'enrichment', label: 'Intel Enrichment (Tags/Entities)' },
       { type: 'meshtastic', label: 'Meshtastic Node Sync' },
-      { type: 'collectors', label: 'Source Collectors' }
+      { type: 'collectors', label: 'Source Collectors' },
+      { type: 'humint-export', label: 'HUMINT Reports to Vault' },
+      { type: 'prelim-export', label: 'Preliminary Reports to Vault' },
+      { type: 'tool-calls', label: 'Tool Call Logs to Vault' }
     ]
 
     for (const t of types) {
@@ -302,12 +305,250 @@ export class SyncManager {
     }
   }
 
+  async syncHumintReports(): Promise<void> {
+    this.updateJob('humint-export', { status: 'running', current: 0, progress: 0, itemsSynced: 0 })
+
+    try {
+      const db = getDatabase()
+      const reports = db.prepare('SELECT * FROM humint_reports ORDER BY created_at DESC').all() as Array<Record<string, unknown>>
+      const unsynced = reports.filter((r) => !this.isSynced('humint-export', r.id as string))
+      this.updateJob('humint-export', { total: unsynced.length })
+
+      if (unsynced.length === 0) {
+        this.updateJob('humint-export', { status: 'completed' })
+        return
+      }
+
+      const { obsidianService } = await import('../obsidian/ObsidianService')
+      const { settingsService } = await import('../settings/SettingsService')
+      const config = settingsService.get<any>('obsidian')
+      const folder = config?.syncFolder || 'Heimdall'
+
+      // Also write to local memory dir
+      const { app } = await import('electron')
+      const { join } = await import('path')
+      const { mkdirSync, writeFileSync } = await import('fs')
+      const memoryDir = join(app.getPath('home'), '.heimdall', 'memory')
+
+      for (const report of unsynced) {
+        const date = new Date(report.created_at as number).toISOString()
+        const dateStr = date.split('T')[0]
+        const md = `---
+type: humint
+id: ${report.id}
+confidence: ${report.confidence}
+session: ${report.session_id}
+source_intel: ${report.source_report_ids}
+tools_used: ${report.tool_calls_used}
+status: ${report.status}
+created: ${date}
+---
+
+# HUMINT Report
+
+## Analyst Notes
+
+${report.analyst_notes || 'No notes'}
+
+## Findings
+
+${report.findings || 'No findings'}
+`
+        // Write locally
+        const localDir = join(memoryDir, 'humint', dateStr)
+        mkdirSync(localDir, { recursive: true })
+        writeFileSync(join(localDir, `${(report.id as string).slice(0, 8)}-humint.md`), md, 'utf-8')
+
+        // Sync to Obsidian
+        try {
+          await obsidianService.writeFile(`${folder}/humint/${dateStr}/${(report.id as string).slice(0, 8)}-humint.md`, md)
+        } catch {}
+
+        this.markSynced('humint-export', report.id as string)
+        this.incrementProgress('humint-export')
+      }
+
+      this.updateJob('humint-export', { status: 'completed' })
+      log.info(`SyncManager: HUMINT export — ${unsynced.length} reports synced`)
+    } catch (err) {
+      this.updateJob('humint-export', { status: 'error', lastError: String(err) })
+    }
+  }
+
+  async syncPreliminaryReports(): Promise<void> {
+    this.updateJob('prelim-export', { status: 'running', current: 0, progress: 0, itemsSynced: 0 })
+
+    try {
+      const db = getDatabase()
+      const reports = db.prepare('SELECT * FROM preliminary_reports ORDER BY created_at DESC').all() as Array<Record<string, unknown>>
+      const unsynced = reports.filter((r) => !this.isSynced('prelim-export', r.id as string))
+      this.updateJob('prelim-export', { total: unsynced.length })
+
+      if (unsynced.length === 0) {
+        this.updateJob('prelim-export', { status: 'completed' })
+        return
+      }
+
+      const { obsidianService } = await import('../obsidian/ObsidianService')
+      const { settingsService } = await import('../settings/SettingsService')
+      const config = settingsService.get<any>('obsidian')
+      const folder = config?.syncFolder || 'Heimdall'
+
+      const { app } = await import('electron')
+      const { join } = await import('path')
+      const { mkdirSync, writeFileSync } = await import('fs')
+      const memoryDir = join(app.getPath('home'), '.heimdall', 'memory')
+
+      for (const report of unsynced) {
+        const date = new Date(report.created_at as number).toISOString()
+        const dateStr = date.split('T')[0]
+
+        // Get related actions and gaps
+        const actions = db.prepare('SELECT action, priority, status FROM recommended_actions WHERE preliminary_report_id = ?').all(report.id) as Array<Record<string, unknown>>
+        const gaps = db.prepare('SELECT description, category, severity, status FROM intel_gaps WHERE preliminary_report_id = ?').all(report.id) as Array<Record<string, unknown>>
+
+        const actionsSection = actions.length > 0
+          ? `## Recommended Actions\n\n${actions.map((a) => `- **[${a.priority}]** ${a.action} _(${a.status})_`).join('\n')}\n`
+          : ''
+        const gapsSection = gaps.length > 0
+          ? `## Information Gaps\n\n${gaps.map((g) => `- **[${g.severity}/${g.category}]** ${g.description} _(${g.status})_`).join('\n')}\n`
+          : ''
+
+        const md = `---
+type: preliminary
+id: ${report.id}
+session: ${report.session_id}
+status: ${report.status}
+source_reports: ${report.source_report_ids || '[]'}
+created: ${date}
+---
+
+# ${report.title || 'Preliminary Report'}
+
+${report.content || ''}
+
+${actionsSection}
+${gapsSection}
+`
+        // Write locally
+        const localDir = join(memoryDir, 'preliminary', dateStr)
+        mkdirSync(localDir, { recursive: true })
+        const slug = (report.title as string || 'report').slice(0, 40).replace(/[^a-zA-Z0-9]+/g, '-').toLowerCase()
+        const filename = `${(report.id as string).slice(0, 8)}-${slug}.md`
+        writeFileSync(join(localDir, filename), md, 'utf-8')
+
+        // Sync to Obsidian
+        try {
+          await obsidianService.writeFile(`${folder}/preliminary/${dateStr}/${filename}`, md)
+        } catch {}
+
+        this.markSynced('prelim-export', report.id as string)
+        this.incrementProgress('prelim-export')
+      }
+
+      this.updateJob('prelim-export', { status: 'completed' })
+      log.info(`SyncManager: Preliminary export — ${unsynced.length} reports synced`)
+    } catch (err) {
+      this.updateJob('prelim-export', { status: 'error', lastError: String(err) })
+    }
+  }
+
+  async syncToolCallLogs(): Promise<void> {
+    this.updateJob('tool-calls', { status: 'running', current: 0, progress: 0, itemsSynced: 0 })
+
+    try {
+      const db = getDatabase()
+
+      // Group tool calls by session and date
+      const sessions = db.prepare(`
+        SELECT DISTINCT session_id, DATE(created_at / 1000, 'unixepoch') as date_str
+        FROM tool_call_logs ORDER BY created_at DESC
+      `).all() as Array<{ session_id: string; date_str: string }>
+
+      const unsynced = sessions.filter((s) => !this.isSynced('tool-calls', `${s.session_id}:${s.date_str}`))
+      this.updateJob('tool-calls', { total: unsynced.length })
+
+      if (unsynced.length === 0) {
+        this.updateJob('tool-calls', { status: 'completed' })
+        return
+      }
+
+      const { obsidianService } = await import('../obsidian/ObsidianService')
+      const { settingsService } = await import('../settings/SettingsService')
+      const config = settingsService.get<any>('obsidian')
+      const folder = config?.syncFolder || 'Heimdall'
+
+      const { app } = await import('electron')
+      const { join } = await import('path')
+      const { mkdirSync, writeFileSync } = await import('fs')
+      const memoryDir = join(app.getPath('home'), '.heimdall', 'memory')
+
+      for (const session of unsynced) {
+        const calls = db.prepare(
+          'SELECT tool_name, params, result, execution_time_ms, created_at FROM tool_call_logs WHERE session_id = ? ORDER BY created_at ASC'
+        ).all(session.session_id) as Array<Record<string, unknown>>
+
+        if (calls.length === 0) continue
+
+        // Get session title
+        const sessionRow = db.prepare('SELECT title FROM chat_sessions WHERE id = ?').get(session.session_id) as { title: string } | undefined
+        const sessionTitle = sessionRow?.title || 'Unknown Session'
+
+        let md = `---
+type: tool-call-log
+session: ${session.session_id}
+session_title: "${sessionTitle}"
+date: ${session.date_str}
+tool_calls: ${calls.length}
+---
+
+# Tool Call Log: ${sessionTitle}
+
+**Date**: ${session.date_str}
+**Session**: ${session.session_id.slice(0, 8)}
+**Total Calls**: ${calls.length}
+
+---
+
+`
+        for (const call of calls) {
+          const time = new Date(call.created_at as number).toISOString().split('T')[1].split('.')[0]
+          md += `## ${time} — ${call.tool_name}\n\n`
+          md += `**Parameters**:\n\`\`\`json\n${(call.params as string || '{}').slice(0, 500)}\n\`\`\`\n\n`
+          md += `**Result**:\n\`\`\`\n${(call.result as string || '').slice(0, 1000)}\n\`\`\`\n\n---\n\n`
+        }
+
+        // Write locally
+        const localDir = join(memoryDir, 'tool-calls', session.date_str)
+        mkdirSync(localDir, { recursive: true })
+        const filename = `${session.session_id.slice(0, 8)}-tools.md`
+        writeFileSync(join(localDir, filename), md, 'utf-8')
+
+        // Sync to Obsidian
+        try {
+          await obsidianService.writeFile(`${folder}/tool-calls/${session.date_str}/${filename}`, md)
+        } catch {}
+
+        this.markSynced('tool-calls', `${session.session_id}:${session.date_str}`)
+        this.incrementProgress('tool-calls')
+      }
+
+      this.updateJob('tool-calls', { status: 'completed' })
+      log.info(`SyncManager: Tool calls export — ${unsynced.length} session logs synced`)
+    } catch (err) {
+      this.updateJob('tool-calls', { status: 'error', lastError: String(err) })
+    }
+  }
+
   async syncAll(): Promise<void> {
     log.info('SyncManager: sync all started')
     await this.syncVectorDb()
     await this.syncEnrichment()
     await this.syncObsidianPush()
     await this.syncMeshtastic()
+    await this.syncHumintReports()
+    await this.syncPreliminaryReports()
+    await this.syncToolCallLogs()
     log.info('SyncManager: sync all complete')
   }
 }

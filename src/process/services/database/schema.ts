@@ -274,5 +274,20 @@ export function createSchema(db: Database.Database): void {
 
     CREATE INDEX IF NOT EXISTS idx_watch_enabled ON watch_terms(enabled);
     CREATE INDEX IF NOT EXISTS idx_watch_source ON watch_terms(source);
+
+    -- Tool call logs for audit trail and Obsidian sync
+    CREATE TABLE IF NOT EXISTS tool_call_logs (
+      id TEXT PRIMARY KEY,
+      session_id TEXT NOT NULL,
+      tool_name TEXT NOT NULL,
+      params TEXT,
+      result TEXT,
+      execution_time_ms INTEGER,
+      created_at INTEGER NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_tool_calls_session ON tool_call_logs(session_id);
+    CREATE INDEX IF NOT EXISTS idx_tool_calls_tool ON tool_call_logs(tool_name);
+    CREATE INDEX IF NOT EXISTS idx_tool_calls_created ON tool_call_logs(created_at);
   `)
 }
