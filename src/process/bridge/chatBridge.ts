@@ -154,68 +154,27 @@ export function registerChatBridge(): void {
     }))
   })
 
-  // Manual vector DB ingestion trigger — processes DB records + Obsidian vault files
+  // Manual vector DB ingestion — DB records + local files + Obsidian vault (batched)
   ipcMain.handle('chat:generateLearnings', async () => {
     log.info('Manual vector DB ingestion triggered')
+    const notify = (msg: string) => {
+      for (const win of BrowserWindow.getAllWindows()) {
+        win.webContents.send('app:notification', { title: 'Learnings', body: msg, severity: 'info' })
+      }
+    }
 
-    // 1. Ingest from DB (intel_reports)
+    // 1. Ingest from DB
+    notify('Processing intel reports...')
     const { intelPipeline } = await import('../services/vectordb/IntelPipeline')
     await intelPipeline.runIngestion()
 
-    // 2. Ingest from Obsidian vault markdown files
-    let obsidianFiles = 0
-    try {
-      const { obsidianService } = await import('../services/obsidian/ObsidianService')
-      const testConn = await obsidianService.testConnection()
-      if (testConn.success) {
-        const files = await obsidianService.listFiles()
-        const mdFiles = files.filter((f: string) => f.endsWith('.md'))
-        log.info(`Learnings: found ${mdFiles.length} Obsidian markdown files to process`)
-
-        for (const filePath of mdFiles) {
-          try {
-            const content = await obsidianService.readFile(filePath)
-            if (!content || content.length < 50) continue
-
-            // Ingest into vector DB
-            await vectorDbService.addReport({
-              id: `obsidian_${filePath.replace(/[^a-zA-Z0-9]/g, '_')}`,
-              discipline: 'osint',
-              title: filePath.split('/').pop()?.replace('.md', '') || filePath,
-              content: content.slice(0, 3000),
-              summary: null,
-              severity: 'info',
-              sourceId: 'obsidian',
-              sourceUrl: null,
-              sourceName: `Obsidian: ${filePath}`,
-              contentHash: filePath,
-              latitude: null,
-              longitude: null,
-              verificationScore: 60,
-              reviewed: false,
-              createdAt: Date.now(),
-              updatedAt: Date.now()
-            } as any)
-            obsidianFiles++
-          } catch {}
-
-          // Rate limit
-          if (obsidianFiles % 20 === 0) await new Promise((r) => setTimeout(r, 200))
-        }
-        log.info(`Learnings: ingested ${obsidianFiles} Obsidian files into vector DB`)
-      }
-    } catch (err) {
-      log.debug(`Obsidian ingestion skipped: ${err}`)
-    }
-
-    // 3. Also ingest local ~/.heimdall/memory markdown files
+    // 2. Ingest local ~/.heimdall/memory files (fast — direct filesystem read)
     let localFiles = 0
     try {
-      const { app } = await import('electron')
+      const { app: electronApp } = await import('electron')
       const { join } = await import('path')
       const { readdirSync, readFileSync, statSync } = await import('fs')
-
-      const memoryDir = join(app.getPath('home'), '.heimdall', 'memory')
+      const memoryDir = join(electronApp.getPath('home'), '.heimdall', 'memory')
 
       const walkDir = (dir: string): void => {
         let entries: string[]
@@ -226,36 +185,70 @@ export function registerChatBridge(): void {
             const stat = statSync(fullPath)
             if (stat.isDirectory()) { walkDir(fullPath); continue }
             if (!entry.endsWith('.md')) continue
-
             const content = readFileSync(fullPath, 'utf-8')
             if (content.length < 50) continue
-
             vectorDbService.addReport({
               id: `local_${fullPath.replace(/[^a-zA-Z0-9]/g, '_').slice(-60)}`,
-              discipline: 'osint',
-              title: entry.replace('.md', ''),
-              content: content.slice(0, 3000),
-              summary: null,
-              severity: 'info',
-              sourceId: 'local-memory',
-              sourceUrl: null,
-              sourceName: `Local: ${entry}`,
-              contentHash: fullPath,
-              latitude: null,
-              longitude: null,
-              verificationScore: 50,
-              reviewed: false,
-              createdAt: Date.now(),
-              updatedAt: Date.now()
+              discipline: 'osint', title: entry.replace('.md', ''),
+              content: content.slice(0, 3000), summary: null, severity: 'info',
+              sourceId: 'local-memory', sourceUrl: null, sourceName: `Local: ${entry}`,
+              contentHash: fullPath, latitude: null, longitude: null,
+              verificationScore: 50, reviewed: false, createdAt: Date.now(), updatedAt: Date.now()
             } as any)
             localFiles++
           } catch {}
         }
       }
-
       walkDir(memoryDir)
-      log.info(`Learnings: ingested ${localFiles} local memory files into vector DB`)
+      log.info(`Learnings: ingested ${localFiles} local memory files`)
+      notify(`${localFiles} local files processed`)
     } catch {}
+
+    // 3. Ingest Obsidian vault — parallel batches of 10 concurrent reads
+    let obsidianFiles = 0
+    try {
+      const { obsidianService } = await import('../services/obsidian/ObsidianService')
+      const testConn = await obsidianService.testConnection()
+      if (testConn.success) {
+        const files = await obsidianService.listFiles()
+        const mdFiles = files.filter((f: string) => f.endsWith('.md'))
+        log.info(`Learnings: found ${mdFiles.length} Obsidian files`)
+        notify(`Processing ${mdFiles.length} Obsidian files...`)
+
+        // Process in parallel batches of 10
+        const BATCH_SIZE = 10
+        for (let i = 0; i < mdFiles.length; i += BATCH_SIZE) {
+          const batch = mdFiles.slice(i, i + BATCH_SIZE)
+          const results = await Promise.allSettled(
+            batch.map(async (filePath: string) => {
+              const content = await obsidianService.readFile(filePath)
+              if (!content || content.length < 50) return null
+              await vectorDbService.addReport({
+                id: `obs_${filePath.replace(/[^a-zA-Z0-9]/g, '_').slice(-60)}`,
+                discipline: 'osint',
+                title: filePath.split('/').pop()?.replace('.md', '') || filePath,
+                content: content.slice(0, 3000), summary: null, severity: 'info',
+                sourceId: 'obsidian', sourceUrl: null, sourceName: `Obsidian: ${filePath}`,
+                contentHash: filePath, latitude: null, longitude: null,
+                verificationScore: 60, reviewed: false, createdAt: Date.now(), updatedAt: Date.now()
+              } as any)
+              return filePath
+            })
+          )
+          obsidianFiles += results.filter((r) => r.status === 'fulfilled' && r.value).length
+
+          // Progress update every 100 files
+          if (i % 100 === 0 && i > 0) {
+            log.info(`Learnings: Obsidian progress ${i}/${mdFiles.length}`)
+            notify(`Obsidian: ${i}/${mdFiles.length} files...`)
+          }
+        }
+        log.info(`Learnings: ingested ${obsidianFiles} Obsidian files`)
+        notify(`${obsidianFiles} Obsidian files ingested`)
+      }
+    } catch (err) {
+      log.debug(`Obsidian ingestion: ${err}`)
+    }
 
     const stats = vectorDbService.getStats()
     const db = getDatabase()
@@ -264,15 +257,7 @@ export function registerChatBridge(): void {
     const totalEntities = (db.prepare('SELECT COUNT(*) as count FROM intel_entities').get() as { count: number }).count
     const totalLinks = (db.prepare('SELECT COUNT(*) as count FROM intel_links').get() as { count: number }).count
 
-    return {
-      totalReports,
-      totalTags,
-      totalEntities,
-      totalLinks,
-      obsidianFiles,
-      localFiles,
-      vectorDbInitialized: stats.initialized
-    }
+    return { totalReports, totalTags, totalEntities, totalLinks, obsidianFiles, localFiles, vectorDbInitialized: stats.initialized }
   })
 
   ipcMain.handle('chat:getVectorStats', () => {
