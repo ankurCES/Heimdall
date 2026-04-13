@@ -16,7 +16,7 @@ async function pullViaHttp(baseUrl: string): Promise<{ success: boolean; message
     await fetch(`${url}/api/v1/toradio`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/x-protobuf' },
-      body: Buffer.from([0x08, 0x01]), // want_config_id = 1
+      body: Buffer.from([0x18, 0x01]), // ToRadio field 3 (want_config_id) = 1
       signal: AbortSignal.timeout(5000)
     }).catch(() => {})
 
@@ -46,7 +46,7 @@ async function pullViaHttp(baseUrl: string): Promise<{ success: boolean; message
     let hasMore = true
     let iterations = 0
 
-    while (hasMore && iterations < 200) {
+    while (hasMore && iterations < 500) {
       try {
         const response = await fetch(`${url}/api/v1/fromradio`, {
           headers: { Accept: 'application/x-protobuf' },
