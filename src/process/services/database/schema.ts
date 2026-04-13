@@ -188,5 +188,15 @@ export function createSchema(db: Database.Database): void {
     );
 
     CREATE INDEX IF NOT EXISTS idx_mesh_nodes_seen ON meshtastic_nodes(last_seen);
+
+    -- Sync dedup log
+    CREATE TABLE IF NOT EXISTS sync_log (
+      type TEXT NOT NULL,
+      content_hash TEXT NOT NULL,
+      synced_at INTEGER NOT NULL,
+      PRIMARY KEY (type, content_hash)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_sync_type ON sync_log(type);
   `)
 }

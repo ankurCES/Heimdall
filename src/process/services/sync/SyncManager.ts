@@ -40,8 +40,16 @@ export class SyncManager {
       })
     }
 
-    // Load sync log from DB
+    // Don't load sync log in constructor — DB may not be ready yet
+    // Will lazy-load on first access
+  }
+
+  private syncLogLoaded = false
+
+  private ensureSyncLogLoaded(): void {
+    if (this.syncLogLoaded) return
     this.loadSyncLog()
+    this.syncLogLoaded = true
   }
 
   private loadSyncLog(): void {
@@ -71,11 +79,13 @@ export class SyncManager {
 
   // Check if an item was already synced
   isSynced(type: string, contentHash: string): boolean {
+    this.ensureSyncLogLoaded()
     return this.syncLog.get(type)?.has(contentHash) || false
   }
 
   // Mark an item as synced
   markSynced(type: string, contentHash: string): void {
+    this.ensureSyncLogLoaded()
     if (!this.syncLog.has(type)) this.syncLog.set(type, new Set())
     this.syncLog.get(type)!.add(contentHash)
 
