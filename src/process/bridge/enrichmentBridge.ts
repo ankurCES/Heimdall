@@ -152,6 +152,14 @@ export function registerEnrichmentBridge(): void {
       verification: 80, type: 'preliminary'
     }))
 
+    // Add HUMINT nodes
+    const humintReports = db.prepare('SELECT id, findings, confidence FROM humint_reports ORDER BY created_at DESC LIMIT 30').all() as Array<Record<string, unknown>>
+    const humintNodes = humintReports.map((h) => ({
+      id: h.id as string, title: `🔰 HUMINT: ${(h.findings as string).slice(0, 35)}`,
+      discipline: 'humint', severity: 'high', source: 'HUMINT',
+      verification: 90, type: 'humint'
+    }))
+
     // Add gap nodes
     const gaps = db.prepare("SELECT id, description, severity FROM intel_gaps WHERE status = 'open' LIMIT 30").all() as Array<Record<string, unknown>>
     const gapNodes = gaps.map((g) => ({
@@ -175,6 +183,7 @@ export function registerEnrichmentBridge(): void {
         severity: n.severity, source: n.source_name, verification: n.verification_score
       })),
       ...prelimNodes,
+      ...humintNodes,
       ...gapNodes
     ]
 

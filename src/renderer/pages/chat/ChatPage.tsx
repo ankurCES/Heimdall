@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { toast } from 'sonner'
 import {
-  MessageSquare, Send, Trash2, Loader2, Plus, FileText, Check, Wrench,
+  MessageSquare, Send, Trash2, Loader2, Plus, FileText, Check, Wrench, Shield,
   Calendar, BookOpen, Brain, Zap, Bot, Edit2, X
 } from 'lucide-react'
 import { Button } from '@renderer/components/ui/button'
@@ -363,6 +363,16 @@ export function ChatPage() {
             </div>
           </div>
           <div className="flex items-center gap-1">
+            <Button variant="outline" size="sm" className="h-7 text-xs border-amber-500/30 text-amber-500 hover:bg-amber-500/10" onClick={async () => {
+              if (!activeSessionId) return
+              try {
+                const result = await invoke('chat:recordHumint', { sessionId: activeSessionId }) as any
+                if (result.error) { toast.error(result.error); return }
+                toast.success('HUMINT Recorded', { description: `${result.sourceReportIds?.length || 0} sources, ${result.toolCallsUsed?.length || 0} tools` })
+              } catch (err) { toast.error('Failed', { description: String(err) }) }
+            }} disabled={!activeSessionId || messages.length === 0}>
+              <Shield className="h-3 w-3 mr-1" />Record HUMINT
+            </Button>
             <Button variant="outline" size="sm" className="h-7 text-xs" onClick={generateLearnings} disabled={learningsLoading}>
               {learningsLoading ? <Loader2 className="h-3 w-3 mr-1 animate-spin" /> : <Brain className="h-3 w-3 mr-1" />}
               {learningsLoading ? 'Processing...' : 'Generate Learnings'}

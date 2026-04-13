@@ -240,5 +240,21 @@ export function createSchema(db: Database.Database): void {
 
     CREATE INDEX IF NOT EXISTS idx_actions_prelim ON recommended_actions(preliminary_report_id);
     CREATE INDEX IF NOT EXISTS idx_actions_status ON recommended_actions(status);
+
+    -- HUMINT reports
+    CREATE TABLE IF NOT EXISTS humint_reports (
+      id TEXT PRIMARY KEY,
+      session_id TEXT NOT NULL,
+      analyst_notes TEXT,
+      findings TEXT NOT NULL,
+      confidence TEXT NOT NULL DEFAULT 'medium',
+      source_report_ids TEXT,
+      tool_calls_used TEXT,
+      status TEXT NOT NULL DEFAULT 'draft',
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_humint_session ON humint_reports(session_id);
   `)
 }

@@ -11,6 +11,7 @@ const testChannels = [
   'chat:createSession', 'chat:getSessions', 'chat:renameSession', 'chat:deleteSession',
   'chat:generateDailySummary', 'chat:generateWeeklySummary',
   'chat:savePreliminaryReport', 'chat:getPreliminaryReports', 'chat:getGaps',
+  'chat:recordHumint', 'chat:getHumintReports',
   'chat:generateLearnings', 'chat:getVectorStats', 'chat:getTokenStats',
   'chat:getSessionData', 'chat:isIngesting', 'explore:getData',
   'settings:testLlm', 'settings:listLlmModels', 'settings:listSerialPorts',

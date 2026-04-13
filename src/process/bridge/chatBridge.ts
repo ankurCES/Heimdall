@@ -152,6 +152,31 @@ export function registerChatBridge(): void {
     }
   })
 
+  // ── HUMINT ─────────────────────────────────────────────────────────
+
+  ipcMain.handle('chat:recordHumint', async (_event, params: { sessionId: string; confidence?: string }) => {
+    const { humintService } = await import('../services/humint/HumintService')
+    const report = humintService.createFromSession(params.sessionId, params.confidence || 'medium')
+    if (!report) return { error: 'No messages in session' }
+
+    // Sync to Obsidian if enabled
+    try {
+      const { obsidianService } = await import('../services/obsidian/ObsidianService')
+      const md = humintService.exportAsMarkdown(report.id)
+      if (md) {
+        const date = new Date().toISOString().split('T')[0]
+        await obsidianService.syncReport(`humint/${date}/${report.id.slice(0, 8)}.md`, md)
+      }
+    } catch {}
+
+    return report
+  })
+
+  ipcMain.handle('chat:getHumintReports', async () => {
+    const { humintService } = await import('../services/humint/HumintService')
+    return humintService.getAll()
+  })
+
   // ── Preliminary Reports ─────────────────────────────────────────
 
   ipcMain.handle('chat:savePreliminaryReport', (_event, params: { sessionId: string; messageId: string; content: string }) => {

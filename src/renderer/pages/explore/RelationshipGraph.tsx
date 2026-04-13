@@ -32,7 +32,7 @@ const DISCIPLINE_COLORS: Record<string, string> = {
   osint: '#3b82f6', cybint: '#ef4444', finint: '#10b981', socmint: '#8b5cf6',
   geoint: '#f59e0b', sigint: '#06b6d4', rumint: '#f97316', ci: '#ec4899',
   agency: '#6366f1', imint: '#14b8a6',
-  preliminary: '#a78bfa', gap: '#fb923c'
+  preliminary: '#a78bfa', gap: '#fb923c', humint: '#fbbf24'
 }
 
 const SEVERITY_SIZE: Record<string, number> = {
@@ -213,6 +213,15 @@ export function RelationshipGraph() {
                 ctx.lineTo(node.x + size, node.y)
                 ctx.lineTo(node.x, node.y + size * 1.3)
                 ctx.lineTo(node.x - size, node.y)
+                ctx.closePath()
+              } else if (node.type === 'humint') {
+                // Hexagon shape for HUMINT
+                for (let a = 0; a < 6; a++) {
+                  const angle = (Math.PI / 3) * a - Math.PI / 6
+                  const px = node.x + size * 1.2 * Math.cos(angle)
+                  const py = node.y + size * 1.2 * Math.sin(angle)
+                  if (a === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py)
+                }
                 ctx.closePath()
               } else if (node.type === 'gap') {
                 // Triangle shape for gaps
