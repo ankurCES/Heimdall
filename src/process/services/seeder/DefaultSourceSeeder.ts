@@ -283,6 +283,59 @@ const FREE_SOURCES: SeedSource[] = [
     }
   },
 
+  // ── RUMINT (Unverified / Chatter) ──────────────────────────────────
+  {
+    name: 'RUMINT: Conflict & Crisis Chatter',
+    discipline: 'rumint',
+    type: 'forum',
+    schedule: '*/30 * * * *',
+    config: {
+      feeds: [
+        { url: 'https://www.bellingcat.com/feed/', name: 'Bellingcat', tier: 'established' },
+        { url: 'https://www.thedailybeast.com/rss', name: 'Daily Beast', tier: 'established' },
+        { url: 'https://www.vice.com/en/rss', name: 'VICE News', tier: 'community' },
+        { url: 'https://theintercept.com/feed/?rss', name: 'The Intercept', tier: 'established' }
+      ]
+    }
+  },
+  {
+    name: 'RUMINT: Cyber Underground Chatter',
+    discipline: 'rumint',
+    type: 'forum',
+    schedule: '0 */2 * * *',
+    config: {
+      feeds: [
+        { url: 'https://www.schneier.com/feed/', name: 'Schneier on Security', tier: 'established' },
+        { url: 'https://risky.biz/feeds/risky-business/', name: 'Risky Business', tier: 'established' },
+        { url: 'https://grahamcluley.com/feed/', name: 'Graham Cluley', tier: 'community' },
+        { url: 'https://nakedsecurity.sophos.com/feed/', name: 'Naked Security', tier: 'established' }
+      ]
+    }
+  },
+  {
+    name: 'RUMINT: Leak & Whistleblower Monitoring',
+    discipline: 'rumint',
+    type: 'rss',
+    schedule: '0 */3 * * *',
+    config: {
+      feeds: [
+        { url: 'https://wikileaks.org/feed', name: 'WikiLeaks' },
+        { url: 'https://www.documentcloud.org/feed', name: 'DocumentCloud' },
+        { url: 'https://www.propublica.org/feeds/propublica/main', name: 'ProPublica' },
+        { url: 'https://www.occrp.org/en/component/content/?format=feed&type=rss', name: 'OCCRP' }
+      ]
+    }
+  },
+  {
+    name: 'RUMINT: Reddit Unverified Tips',
+    discipline: 'rumint',
+    type: 'reddit',
+    schedule: '*/30 * * * *',
+    config: {
+      subreddits: ['conspiracy', 'UnresolvedMysteries', 'RBI', 'TrueCrime', 'datahoarder', 'privacy']
+    }
+  },
+
   // ── GEOINT ─────────────────────────────────────────────────────────
   {
     name: 'USGS Earthquakes (M4.0+)',
