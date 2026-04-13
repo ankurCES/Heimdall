@@ -102,24 +102,34 @@ async function pullViaHttp(baseUrl: string): Promise<{ success: boolean; message
       }
 
       // Extract sfixed32 pairs for lat/lon
-      // In Position message: field 1 = latitude_i (sfixed32, tag 0x0d), field 2 = longitude_i (sfixed32, tag 0x15)
+      // Position message: latitude_i (field 1, sfixed32 tag=0x0d), longitude_i (field 2, sfixed32 tag=0x15)
+      // They should appear as a pair close together in the packet
       let lat: number | null = null
       let lon: number | null = null
 
-      for (let i = 0; i < packet.length - 5; i++) {
+      for (let i = 0; i < packet.length - 9; i++) {
+        // Look for lat (0x0d) followed by lon (0x15) within 8 bytes
         if (packet[i] === 0x0d && i + 4 < packet.length) {
-          const val = packet.readInt32LE(i + 1)
-          // Valid latitude: -90 to 90 degrees → -900000000 to 900000000
-          if (Math.abs(val) > 1000000 && Math.abs(val) < 900000000) {
-            lat = val / 10000000
+          const latVal = packet.readInt32LE(i + 1)
+          const latDeg = latVal / 10000000
+
+          // Must be valid latitude
+          if (Math.abs(latDeg) < 0.01 || Math.abs(latDeg) > 90) continue
+
+          // Look for 0x15 (lon tag) right after the lat value (at i+5)
+          for (let j = i + 5; j < Math.min(i + 10, packet.length - 4); j++) {
+            if (packet[j] === 0x15) {
+              const lonVal = packet.readInt32LE(j + 1)
+              const lonDeg = lonVal / 10000000
+
+              if (Math.abs(lonDeg) < 0.01 || Math.abs(lonDeg) > 180) continue
+
+              lat = latDeg
+              lon = lonDeg
+              break
+            }
           }
-        }
-        if (packet[i] === 0x15 && i + 4 < packet.length) {
-          const val = packet.readInt32LE(i + 1)
-          // Valid longitude: -180 to 180 degrees → -1800000000 to 1800000000
-          if (Math.abs(val) > 1000000 && Math.abs(val) < 1800000000) {
-            lon = val / 10000000
-          }
+          if (lat && lon) break
         }
       }
 
