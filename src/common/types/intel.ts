@@ -8,6 +8,7 @@ export type Discipline =
   | 'rumint'
   | 'ci'
   | 'agency'
+  | 'imint'
 
 export type ThreatLevel = 'critical' | 'high' | 'medium' | 'low' | 'info'
 
@@ -80,7 +81,8 @@ export const DISCIPLINE_LABELS: Record<Discipline, string> = {
   sigint: 'Signals',
   rumint: 'Rumor',
   ci: 'Counter-Intel',
-  agency: 'Agency'
+  agency: 'Agency',
+  imint: 'Imagery'
 }
 
 export const THREAT_LEVEL_ORDER: Record<ThreatLevel, number> = {

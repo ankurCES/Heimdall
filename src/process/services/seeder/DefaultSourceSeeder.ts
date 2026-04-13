@@ -183,6 +183,22 @@ const FREE_SOURCES: SeedSource[] = [
     }
   },
 
+  // ── IMINT (Camera Feeds) ───────────────────────────────────────────
+  {
+    name: 'Traffic Cameras (US Cities)',
+    discipline: 'imint',
+    type: 'traffic-camera',
+    schedule: '*/30 * * * *',
+    config: {}
+  },
+  {
+    name: 'Public Cameras (Weather, Cities, Ports)',
+    discipline: 'imint',
+    type: 'public-camera',
+    schedule: '0 */1 * * *',
+    config: {}
+  },
+
   // ── GEOINT (additional) ───────────────────────────────────────────
   {
     name: 'NASA FIRMS Fire Detection',

@@ -17,7 +17,9 @@ export class GovernmentDataCollector extends BaseCollector {
     { name: 'World Bank Indicators', fetchFn: (c) => c.fetchWorldBank() },
     { name: 'WHO Disease Outbreaks', fetchFn: (c) => c.fetchWhoOutbreaks() },
     { name: 'US Federal Register', fetchFn: (c) => c.fetchFederalRegister() },
-    { name: 'UK Gov Publications', fetchFn: (c) => c.fetchUkGov() }
+    { name: 'UK Gov Publications', fetchFn: (c) => c.fetchUkGov() },
+    { name: 'Data.gov Datasets', fetchFn: (c) => c.fetchDataGov() },
+    { name: 'EU Open Data', fetchFn: (c) => c.fetchEuOpenData() }
   ]
 
   async collect(): Promise<IntelReport[]> {
@@ -183,6 +185,64 @@ export class GovernmentDataCollector extends BaseCollector {
       }
     } catch (err) {
       log.debug(`UK Gov failed: ${err}`)
+    }
+    return reports
+  }
+
+  private async fetchDataGov(): Promise<IntelReport[]> {
+    const reports: IntelReport[] = []
+    try {
+      // Data.gov CKAN API — search for recently updated security/safety datasets
+      const data = await this.fetchJson<{
+        result: { results: Array<{ title: string; notes: string; url: string; metadata_modified: string; organization: { title: string } }> }
+      }>(
+        'https://catalog.data.gov/api/3/action/package_search?q=crime+OR+safety+OR+emergency+OR+security&sort=metadata_modified+desc&rows=15',
+        { timeout: 15000 }
+      )
+
+      for (const ds of data.result?.results || []) {
+        reports.push(
+          this.createReport({
+            title: `Data.gov: ${ds.title?.slice(0, 80)}`,
+            content: `**Organization**: ${ds.organization?.title || 'Unknown'}\n**Updated**: ${ds.metadata_modified}\n\n${(ds.notes || '').replace(/<[^>]*>/g, '').slice(0, 1500)}`,
+            severity: 'info',
+            sourceUrl: ds.url || `https://catalog.data.gov/dataset/${ds.title?.toLowerCase().replace(/\s+/g, '-')}`,
+            sourceName: 'Data.gov',
+            verificationScore: 90
+          })
+        )
+      }
+    } catch (err) {
+      log.debug(`Data.gov failed: ${err}`)
+    }
+    return reports
+  }
+
+  private async fetchEuOpenData(): Promise<IntelReport[]> {
+    const reports: IntelReport[] = []
+    try {
+      // EU Open Data Portal — security related datasets
+      const data = await this.fetchJson<{
+        result: { results: Array<{ title: string; notes: string; url: string; metadata_modified: string }> }
+      }>(
+        'https://data.europa.eu/api/hub/search/datasets?q=security+crime+emergency&sort=modification_date+desc&limit=10',
+        { timeout: 15000 }
+      )
+
+      for (const ds of data.result?.results || []) {
+        reports.push(
+          this.createReport({
+            title: `EU Data: ${(ds.title || '').slice(0, 80)}`,
+            content: `**Updated**: ${ds.metadata_modified || 'Unknown'}\n\n${(ds.notes || '').slice(0, 1000)}`,
+            severity: 'info',
+            sourceUrl: ds.url || 'https://data.europa.eu',
+            sourceName: 'EU Open Data',
+            verificationScore: 90
+          })
+        )
+      }
+    } catch (err) {
+      log.debug(`EU Open Data failed: ${err}`)
     }
     return reports
   }

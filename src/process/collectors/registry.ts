@@ -38,6 +38,10 @@ import { FccCollector } from './sigint/FccCollector'
 import { AisCollector } from './sigint/AisCollector'
 import { MeshtasticCollector } from './sigint/MeshtasticCollector'
 
+// IMINT
+import { TrafficCameraCollector } from './imint/TrafficCameraCollector'
+import { PublicCameraCollector } from './imint/PublicCameraCollector'
+
 // RUMINT
 import { ForumCollector } from './rumint/ForumCollector'
 
@@ -89,6 +93,10 @@ export function registerAllCollectors(): void {
   collectorManager.registerFactory('fcc', () => new FccCollector())
   collectorManager.registerFactory('meshtastic', () => new MeshtasticCollector())
   collectorManager.registerFactory('ais-maritime', () => new AisCollector())
+
+  // IMINT (2)
+  collectorManager.registerFactory('traffic-camera', () => new TrafficCameraCollector())
+  collectorManager.registerFactory('public-camera', () => new PublicCameraCollector())
 
   // RUMINT (1)
   collectorManager.registerFactory('forum', () => new ForumCollector())
