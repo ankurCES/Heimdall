@@ -3,6 +3,7 @@ import { IPC_EVENTS } from '@common/adapter/ipcBridge'
 import { BaseCollector, type SourceConfig } from './BaseCollector'
 import { intelStorageService } from '../services/intel/IntelStorageService'
 import { cronService } from '../services/cron/CronService'
+import { watchTermsService } from '../services/watch/WatchTermsService'
 import { getDatabase } from '../services/database'
 import { generateId, timestamp } from '@common/utils/id'
 import log from 'electron-log'
@@ -104,6 +105,11 @@ export class CollectorManager {
         'UPDATE sources SET last_collected_at = ?, last_error = NULL, error_count = 0, updated_at = ? WHERE id = ?'
       ).run(timestamp(), timestamp(), sourceId)
 
+      // Check new reports against enabled watch terms
+      if (stored.length > 0) {
+        this.matchWatchTerms(stored)
+      }
+
       log.info(`Collector ${sourceId}: collected ${reports.length} reports, stored ${stored.length} new`)
       this.emitStatus(sourceId, 'idle')
     } catch (err) {
@@ -151,6 +157,36 @@ export class CollectorManager {
       type: collector.type,
       running: cronService.isRunning(`collector:${sourceId}`)
     }))
+  }
+
+  private matchWatchTerms(reports: Array<{ title: string; content: string }>): void {
+    try {
+      const terms = watchTermsService.getEnabled()
+      if (terms.length === 0) return
+
+      let totalHits = 0
+      for (const term of terms) {
+        const termLower = term.term.toLowerCase()
+        for (const report of reports) {
+          const text = `${report.title} ${report.content}`.toLowerCase()
+          if (text.includes(termLower)) {
+            watchTermsService.recordHit(term.id)
+            totalHits++
+            break // Count once per term per batch
+          }
+        }
+      }
+
+      if (totalHits > 0) {
+        log.info(`WatchTerms: ${totalHits} terms matched in ${reports.length} new reports`)
+        // Notify UI
+        for (const win of BrowserWindow.getAllWindows()) {
+          win.webContents.send('watch:hits', { count: totalHits })
+        }
+      }
+    } catch (err) {
+      log.warn('WatchTerms matching failed:', err)
+    }
   }
 
   private emitStatus(sourceId: string, status: 'running' | 'idle' | 'error', error?: string): void {

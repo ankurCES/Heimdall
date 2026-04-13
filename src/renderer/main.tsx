@@ -17,6 +17,7 @@ import { MeshtasticPage } from './pages/meshtastic/MeshtasticPage'
 import { BrowsePage } from './pages/browse/BrowsePage'
 import { SyncPage } from './pages/sync/SyncPage'
 import { EnrichedPage } from './pages/enriched/EnrichedPage'
+import { WatchPage } from './pages/watch/WatchPage'
 import { Toaster } from 'sonner'
 import { NotificationListener } from './components/NotificationListener'
 import './styles/globals.css'
@@ -47,6 +48,7 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
           <Route path="/chat" element={<ChatPage />} />
           <Route path="/explore" element={<ExplorePage />} />
           <Route path="/enriched" element={<EnrichedPage />} />
+          <Route path="/watch" element={<WatchPage />} />
           <Route path="/sync" element={<SyncPage />} />
           <Route path="/tokens" element={<TokensPage />} />
           <Route path="/audit" element={<AuditPage />} />

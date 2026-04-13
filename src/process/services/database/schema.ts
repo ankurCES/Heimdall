@@ -256,5 +256,23 @@ export function createSchema(db: Database.Database): void {
     );
 
     CREATE INDEX IF NOT EXISTS idx_humint_session ON humint_reports(session_id);
+
+    -- Watch terms for targeted intelligence collection
+    CREATE TABLE IF NOT EXISTS watch_terms (
+      id TEXT PRIMARY KEY,
+      term TEXT NOT NULL,
+      source TEXT NOT NULL DEFAULT 'manual',
+      source_id TEXT,
+      category TEXT,
+      priority TEXT NOT NULL DEFAULT 'medium',
+      enabled INTEGER NOT NULL DEFAULT 1,
+      hits INTEGER NOT NULL DEFAULT 0,
+      last_hit_at INTEGER,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_watch_enabled ON watch_terms(enabled);
+    CREATE INDEX IF NOT EXISTS idx_watch_source ON watch_terms(source);
   `)
 }

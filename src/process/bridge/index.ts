@@ -10,6 +10,7 @@ import { registerEnrichmentBridge } from './enrichmentBridge'
 import { registerAuditBridge } from './auditBridge'
 import { registerMeshtasticBridge } from './meshtasticBridge'
 import { registerSyncBridge } from './syncBridge'
+import { registerWatchBridge } from './watchBridge'
 import log from 'electron-log'
 
 export function registerAllBridges(): void {
@@ -25,5 +26,6 @@ export function registerAllBridges(): void {
   registerAuditBridge()
   registerMeshtasticBridge()
   registerSyncBridge()
+  registerWatchBridge()
   log.info('All IPC bridges registered')
 }

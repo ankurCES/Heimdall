@@ -6,6 +6,7 @@ import { vectorDbService } from '../services/vectordb/VectorDbService'
 import { syncManager } from '../services/sync/SyncManager'
 import { getDatabase } from '../services/database'
 import { reportExtractor } from '../services/enrichment/ReportExtractor'
+import { watchTermsService } from '../services/watch/WatchTermsService'
 import { generateId, timestamp } from '@common/utils/id'
 import log from 'electron-log'
 
@@ -249,13 +250,20 @@ export function registerChatBridge(): void {
       )
     }
 
-    log.info(`Preliminary report saved: ${extracted.title} (${extracted.actions.length} actions, ${extracted.gaps.length} gaps)`)
+    // Auto-extract watch terms from actions and gaps
+    let watchTermsAdded = 0
+    try {
+      watchTermsAdded = watchTermsService.extractFromActions(reportId)
+    } catch {}
+
+    log.info(`Preliminary report saved: ${extracted.title} (${extracted.actions.length} actions, ${extracted.gaps.length} gaps, ${watchTermsAdded} watch terms)`)
 
     return {
       reportId,
       title: extracted.title,
       actionsCount: extracted.actions.length,
       gapsCount: extracted.gaps.length,
+      watchTermsAdded,
       actions: extracted.actions,
       gaps: extracted.gaps
     }

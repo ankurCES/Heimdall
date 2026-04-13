@@ -18,11 +18,12 @@ const testChannels = [
   'enrichment:getTags', 'enrichment:getEntities', 'enrichment:getLinks',
   'enrichment:getTopTags', 'enrichment:getTopEntities', 'enrichment:getEnrichedReports', 'enrichment:getGraph',
   'meshtastic:getNodes', 'meshtastic:getNodeCount', 'meshtastic:getMessages', 'meshtastic:getRecommendedMode', 'meshtastic:pullDeviceData', 'meshtastic:checkCli', 'meshtastic:discover',
-  'sync:getJobs', 'sync:runJob', 'sync:runAll', 'sync:isRunning'
+  'sync:getJobs', 'sync:runJob', 'sync:runAll', 'sync:isRunning',
+  'watch:getTerms', 'watch:addTerm', 'watch:toggleTerm', 'watch:removeTerm', 'watch:scan'
 ]
 const allowedChannels = [...Object.values(IPC_CHANNELS), ...testChannels]
 const chatEvents = ['chat:chunk', 'chat:done', 'chat:error']
-const syncEvents = ['sync:progress', 'enrichment:progress']
+const syncEvents = ['sync:progress', 'enrichment:progress', 'watch:hits']
 const allowedEvents = [...Object.values(IPC_EVENTS), ...chatEvents, ...syncEvents]
 
 const api = {
