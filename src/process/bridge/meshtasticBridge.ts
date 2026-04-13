@@ -20,6 +20,24 @@ async function pullViaHttp(baseUrl: string): Promise<{ success: boolean; message
       signal: AbortSignal.timeout(5000)
     }).catch(() => {})
 
+    // Also grab device info from JSON endpoint
+    try {
+      const infoResp = await fetch(`${url}/json/report`, { signal: AbortSignal.timeout(5000) })
+      if (infoResp.ok) {
+        const info = await infoResp.json() as any
+        log.info(`Meshtastic device: battery=${info.data?.power?.battery_percent}%, wifi_rssi=${info.data?.wifi?.rssi}, freq=${info.data?.radio?.frequency}MHz, uptime=${info.data?.airtime?.seconds_since_boot}s`)
+
+        // Store device itself as a node
+        const deviceDb = getDatabase()
+        const deviceNow = timestamp()
+        deviceDb.prepare(`
+          INSERT INTO meshtastic_nodes (node_id, long_name, battery_level, first_seen, last_seen, seen_count)
+          VALUES ('self', 'This Device', ?, ?, ?, 1)
+          ON CONFLICT(node_id) DO UPDATE SET battery_level = ?, last_seen = ?, seen_count = seen_count + 1
+        `).run(info.data?.power?.battery_percent || null, deviceNow, deviceNow, info.data?.power?.battery_percent || null, deviceNow)
+      }
+    } catch {}
+
     // Wait for device to prepare the dump
     await new Promise((r) => setTimeout(r, 2000))
 
@@ -219,7 +237,8 @@ export function registerMeshtasticBridge(): void {
     const config = settingsService.get<MeshtasticConfig>('meshtastic')
 
     // Try HTTP first if we have an address
-    const httpAddress = config?.address || ''
+    let httpAddress = config?.address || ''
+    if (httpAddress && !httpAddress.startsWith('http')) httpAddress = `http://${httpAddress}`
     if (httpAddress || config?.connectionType === 'tcp') {
       const httpResult = await pullViaHttp(httpAddress || 'http://meshtastic.local')
       if (httpResult.success) return httpResult
