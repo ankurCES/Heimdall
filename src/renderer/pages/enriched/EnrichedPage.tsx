@@ -43,12 +43,17 @@ export function EnrichedPage() {
 
   useEffect(() => { loadData() }, [filterTag, filterEntityType, filterCorroboration])
 
-  // Listen for enrichment progress
+  // Listen for enrichment progress (safe — catch if event not allowed)
   useEffect(() => {
-    const unsub = window.heimdall.on('enrichment:progress', (data: unknown) => {
-      setEnrichmentStats(data as any)
-    })
-    return unsub
+    try {
+      const unsub = window.heimdall.on('enrichment:progress', (data: unknown) => {
+        setEnrichmentStats(data as any)
+      })
+      return unsub
+    } catch {
+      // Event not in allowlist — skip
+      return () => {}
+    }
   }, [])
 
   const loadStats = async () => {
