@@ -68,8 +68,16 @@ class KuzuService {
   async initialize(): Promise<void> {
     try {
       this.dbPath = path.join(app.getPath('userData'), 'heimdall-graph')
-      if (!existsSync(this.dbPath)) {
-        mkdirSync(this.dbPath, { recursive: true })
+      // Kuzu manages its own directory — don't pre-create it
+      // But if an empty dir exists from a previous failed init, remove it
+      if (existsSync(this.dbPath)) {
+        try {
+          const { readdirSync } = require('fs')
+          const entries = readdirSync(this.dbPath)
+          if (entries.length === 0) {
+            rmSync(this.dbPath, { recursive: true })
+          }
+        } catch {}
       }
 
       this.database = new kuzu.Database(this.dbPath)
