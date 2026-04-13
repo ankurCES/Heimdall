@@ -46,6 +46,8 @@ export function MeshtasticPage() {
   const [loading, setLoading] = useState(true)
   const [activeTab, setActiveTab] = useState<'nodes' | 'messages'>('nodes')
 
+  const [selectedNodeDetail, setSelectedNodeDetail] = useState<MeshNode | null>(null)
+
   const invoke = useCallback((ch: string, p?: unknown) => window.heimdall.invoke(ch, p), [])
 
   const loadData = async () => {
@@ -210,7 +212,7 @@ export function MeshtasticPage() {
                     {nodes.map((node) => {
                       const isOnline = node.last_seen > Date.now() - 3600000
                       return (
-                        <tr key={node.node_id} className="border-b border-border/50 hover:bg-accent/30">
+                        <tr key={node.node_id} className="border-b border-border/50 hover:bg-accent/30 cursor-pointer" onClick={() => setSelectedNodeDetail(node)}>
                           <td className="py-1.5 px-2">
                             <span className={cn('inline-block h-2 w-2 rounded-full', isOnline ? 'bg-green-500' : 'bg-gray-500')} />
                           </td>
@@ -257,6 +259,41 @@ export function MeshtasticPage() {
             )}
           </CardContent>
         </Card>
+
+        {/* Node detail panel */}
+        {selectedNodeDetail && (
+          <Card className="border-green-500/20">
+            <CardHeader className="pb-2">
+              <div className="flex items-center justify-between">
+                <CardTitle className="text-sm flex items-center gap-2">
+                  📻 {selectedNodeDetail.long_name || selectedNodeDetail.node_id}
+                </CardTitle>
+                <button onClick={() => setSelectedNodeDetail(null)} className="text-xs text-muted-foreground hover:text-foreground">Close</button>
+              </div>
+            </CardHeader>
+            <CardContent>
+              <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-xs">
+                <div className="text-muted-foreground">Node ID</div>
+                <div className="font-mono">{selectedNodeDetail.node_id}</div>
+                {selectedNodeDetail.long_name && <><div className="text-muted-foreground">Long Name</div><div>{selectedNodeDetail.long_name}</div></>}
+                {selectedNodeDetail.short_name && <><div className="text-muted-foreground">Short Name</div><div>{selectedNodeDetail.short_name}</div></>}
+                {selectedNodeDetail.hardware_model && <><div className="text-muted-foreground">Hardware</div><div>{selectedNodeDetail.hardware_model}</div></>}
+                {selectedNodeDetail.battery_level !== null && <><div className="text-muted-foreground">Battery</div>
+                  <div className={cn(selectedNodeDetail.battery_level! > 50 ? 'text-green-500' : selectedNodeDetail.battery_level! > 20 ? 'text-yellow-500' : 'text-red-500')}>{selectedNodeDetail.battery_level}%</div></>}
+                {selectedNodeDetail.snr !== null && <><div className="text-muted-foreground">SNR</div><div>{typeof selectedNodeDetail.snr === 'number' ? selectedNodeDetail.snr.toFixed(2) : selectedNodeDetail.snr}</div></>}
+                {selectedNodeDetail.channel !== null && <><div className="text-muted-foreground">Channel</div><div>CH {selectedNodeDetail.channel}</div></>}
+                {selectedNodeDetail.latitude && selectedNodeDetail.longitude && <><div className="text-muted-foreground">Position</div><div>{selectedNodeDetail.latitude.toFixed(5)}, {selectedNodeDetail.longitude.toFixed(5)}</div></>}
+                <div className="text-muted-foreground">First Seen</div><div>{new Date(selectedNodeDetail.first_seen).toLocaleString()}</div>
+                <div className="text-muted-foreground">Last Seen</div><div>{new Date(selectedNodeDetail.last_seen).toLocaleString()}</div>
+                <div className="text-muted-foreground">Times Seen</div><div>{selectedNodeDetail.seen_count}x</div>
+                <div className="text-muted-foreground">Status</div>
+                <div className={selectedNodeDetail.last_seen > Date.now() - 3600000 ? 'text-green-500' : 'text-gray-500'}>
+                  {selectedNodeDetail.last_seen > Date.now() - 3600000 ? '● Online' : '○ Offline'}
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        )}
       )}
 
       {/* Messages */}

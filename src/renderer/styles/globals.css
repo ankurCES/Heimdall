@@ -45,6 +45,29 @@
     z-index: 1;
   }
 
+  /* Custom tooltip for map markers */
+  .custom-tooltip {
+    background: hsl(222 47% 8%) !important;
+    border: 1px solid hsl(217 33% 17%) !important;
+    color: hsl(210 40% 93%) !important;
+    border-radius: 6px !important;
+    padding: 4px 8px !important;
+    font-size: 10px !important;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.3) !important;
+  }
+  .custom-tooltip::before {
+    border-top-color: hsl(217 33% 17%) !important;
+  }
+  .leaflet-popup-content-wrapper {
+    background: hsl(222 47% 8%) !important;
+    border: 1px solid hsl(217 33% 17%) !important;
+    color: hsl(210 40% 93%) !important;
+    border-radius: 8px !important;
+  }
+  .leaflet-popup-tip {
+    background: hsl(222 47% 8%) !important;
+  }
+
   /* Custom scrollbar */
   ::-webkit-scrollbar {
     width: 6px;

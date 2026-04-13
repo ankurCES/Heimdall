@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback, useRef } from 'react'
-import { MapContainer, TileLayer, Marker, Popup, useMap, CircleMarker } from 'react-leaflet'
+import { MapContainer, TileLayer, Marker, Popup, Tooltip, CircleMarker } from 'react-leaflet'
 import L from 'leaflet'
-import { Map as MapIcon, Filter, RefreshCw, Loader2, Maximize2 } from 'lucide-react'
+import { Map as MapIcon, Filter, RefreshCw, Loader2 } from 'lucide-react'
 import { Button } from '@renderer/components/ui/button'
 import { Badge } from '@renderer/components/ui/badge'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@renderer/components/ui/select'
@@ -27,6 +27,21 @@ const SEVERITY_RADIUS: Record<ThreatLevel, number> = {
   info: 4
 }
 
+const DISCIPLINE_ICONS: Record<string, string> = {
+  osint: '🌐', cybint: '🛡️', finint: '💰', socmint: '💬',
+  geoint: '🌍', sigint: '📡', rumint: '👂', ci: '🔒',
+  agency: '🏛️', imint: '📷'
+}
+
+function makeDivIcon(emoji: string, color: string, size: number = 24): L.DivIcon {
+  return L.divIcon({
+    html: `<div style="width:${size}px;height:${size}px;display:flex;align-items:center;justify-content:center;font-size:${size * 0.6}px;border-radius:50%;border:2px solid ${color};background:rgba(15,23,42,0.85);box-shadow:0 0 6px ${color}40;">${emoji}</div>`,
+    className: '',
+    iconSize: [size, size],
+    iconAnchor: [size / 2, size / 2]
+  })
+}
+
 // Fix Leaflet default icon path issue in bundled apps
 delete (L.Icon.Default.prototype as any)._getIconUrl
 L.Icon.Default.mergeOptions({
@@ -44,6 +59,7 @@ export function MapPage() {
   const [reports, setReports] = useState<GeoReport[]>([])
   const [loading, setLoading] = useState(true)
   const [selectedReport, setSelectedReport] = useState<GeoReport | null>(null)
+  const [selectedNode, setSelectedNode] = useState<any>(null)
   const [filterDiscipline, setFilterDiscipline] = useState<string>('all')
   const [filterSeverity, setFilterSeverity] = useState<string>('all')
   const [layers, setLayers] = useState<Record<string, boolean>>({
@@ -195,60 +211,40 @@ export function MapPage() {
             url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
           />
 
-          {reports.filter((r) => layers[r.discipline] !== false).map((report) => (
-            <CircleMarker
-              key={report.id}
-              center={[report.latitude, report.longitude]}
-              radius={SEVERITY_RADIUS[report.severity]}
-              pathOptions={{
-                color: SEVERITY_COLORS[report.severity],
-                fillColor: SEVERITY_COLORS[report.severity],
-                fillOpacity: 0.6,
-                weight: 1.5
-              }}
-              eventHandlers={{
-                click: () => setSelectedReport(report)
-              }}
-            >
-              <Popup>
-                <div style={{ minWidth: 200, color: '#e2e8f0', background: '#1e293b', padding: 8, borderRadius: 6, margin: -12 }}>
-                  <div style={{ fontSize: 11, fontWeight: 600, marginBottom: 4 }}>{report.title.slice(0, 80)}</div>
-                  <div style={{ fontSize: 10, color: '#94a3b8' }}>
-                    <div>{report.discipline.toUpperCase()} | {report.severity.toUpperCase()}</div>
-                    <div>{report.sourceName}</div>
-                    <div>{formatRelativeTime(report.createdAt)}</div>
-                  </div>
-                </div>
-              </Popup>
-            </CircleMarker>
-          ))}
+          {reports.filter((r) => layers[r.discipline] !== false).map((report) => {
+            const emoji = DISCIPLINE_ICONS[report.discipline] || '📄'
+            const color = SEVERITY_COLORS[report.severity]
+            const size = SEVERITY_RADIUS[report.severity] * 3
+            return (
+              <Marker
+                key={report.id}
+                position={[report.latitude, report.longitude]}
+                icon={makeDivIcon(emoji, color, size)}
+                eventHandlers={{ click: () => { setSelectedReport(report); setSelectedNode(null) } }}
+              >
+                <Tooltip direction="top" offset={[0, -size/2]} className="custom-tooltip">
+                  <span style={{ fontSize: 10 }}>{emoji} {report.title.slice(0, 50)}</span>
+                </Tooltip>
+              </Marker>
+            )
+          })}
 
           {/* Meshtastic nodes */}
           {layers.mesh && meshNodes.map((node) => {
             const isSelf = node.node_id === 'self'
+            const color = isSelf ? '#f59e0b' : '#10b981'
+            const emoji = isSelf ? '📍' : '📻'
             return (
-              <CircleMarker
+              <Marker
                 key={node.node_id}
-                center={[node.latitude!, node.longitude!]}
-                radius={isSelf ? 10 : 7}
-                pathOptions={{
-                  color: isSelf ? '#f59e0b' : '#10b981',
-                  fillColor: isSelf ? '#f59e0b' : '#10b981',
-                  fillOpacity: isSelf ? 1.0 : 0.8,
-                  weight: isSelf ? 3 : 2
-                }}
+                position={[node.latitude!, node.longitude!]}
+                icon={makeDivIcon(emoji, color, isSelf ? 30 : 24)}
+                eventHandlers={{ click: () => { setSelectedNode(node); setSelectedReport(null) } }}
               >
-                <Popup>
-                  <div style={{ minWidth: 150, color: '#e2e8f0', background: '#1e293b', padding: 8, borderRadius: 6, margin: -12 }}>
-                    <div style={{ fontSize: 11, fontWeight: 600 }}>{isSelf ? '📍 You' : '📻'} {node.long_name || node.node_id}</div>
-                    <div style={{ fontSize: 10, color: '#94a3b8' }}>
-                      <div>Node: {node.node_id}</div>
-                      {node.battery_level && <div>Battery: {node.battery_level}%</div>}
-                      <div>Last seen: {new Date(node.last_seen).toLocaleString()}</div>
-                    </div>
-                  </div>
-                </Popup>
-              </CircleMarker>
+                <Tooltip direction="top" offset={[0, -12]} className="custom-tooltip">
+                  <span style={{ fontSize: 10 }}>{emoji} {node.long_name || node.node_id}{isSelf ? ' (You)' : ''}</span>
+                </Tooltip>
+              </Marker>
             )
           })}
 
@@ -290,6 +286,61 @@ export function MapPage() {
                   Open Source
                 </a>
               )}
+            </div>
+          </div>
+        )}
+
+        {/* Mesh node detail panel */}
+        {selectedNode && (
+          <div className="absolute top-3 right-3 w-80 bg-card/95 backdrop-blur border border-border rounded-lg shadow-lg z-[1000] max-h-[70vh] overflow-auto">
+            <div className="p-3">
+              <div className="flex items-center justify-between mb-2">
+                <Badge variant="outline" className="gap-1 text-green-500 border-green-500/30">
+                  📻 Meshtastic Node
+                </Badge>
+                <button onClick={() => setSelectedNode(null)} className="text-muted-foreground hover:text-foreground text-xs">Close</button>
+              </div>
+              <h3 className="text-sm font-semibold mb-3">
+                {selectedNode.node_id === 'self' ? '📍 ' : ''}{selectedNode.long_name || selectedNode.node_id}
+              </h3>
+              <div className="space-y-2 text-xs">
+                <div className="grid grid-cols-2 gap-1">
+                  <div className="text-muted-foreground">Node ID</div>
+                  <div className="font-mono">{selectedNode.node_id}</div>
+                  {selectedNode.short_name && <>
+                    <div className="text-muted-foreground">Short Name</div>
+                    <div>{selectedNode.short_name}</div>
+                  </>}
+                  {selectedNode.hardware_model && <>
+                    <div className="text-muted-foreground">Hardware</div>
+                    <div>{selectedNode.hardware_model}</div>
+                  </>}
+                  {selectedNode.battery_level !== null && selectedNode.battery_level !== undefined && <>
+                    <div className="text-muted-foreground">Battery</div>
+                    <div className={selectedNode.battery_level > 50 ? 'text-green-500' : selectedNode.battery_level > 20 ? 'text-yellow-500' : 'text-red-500'}>
+                      {selectedNode.battery_level}%
+                    </div>
+                  </>}
+                  {selectedNode.snr !== null && selectedNode.snr !== undefined && <>
+                    <div className="text-muted-foreground">SNR</div>
+                    <div>{typeof selectedNode.snr === 'number' ? selectedNode.snr.toFixed(2) : selectedNode.snr}</div>
+                  </>}
+                  {selectedNode.channel !== null && selectedNode.channel !== undefined && <>
+                    <div className="text-muted-foreground">Channel</div>
+                    <div>CH {selectedNode.channel}</div>
+                  </>}
+                  {selectedNode.latitude && selectedNode.longitude && <>
+                    <div className="text-muted-foreground">Position</div>
+                    <div>{selectedNode.latitude.toFixed(5)}, {selectedNode.longitude.toFixed(5)}</div>
+                  </>}
+                  <div className="text-muted-foreground">First Seen</div>
+                  <div>{new Date(selectedNode.first_seen).toLocaleString()}</div>
+                  <div className="text-muted-foreground">Last Seen</div>
+                  <div>{new Date(selectedNode.last_seen).toLocaleString()}</div>
+                  <div className="text-muted-foreground">Seen Count</div>
+                  <div>{selectedNode.seen_count}x</div>
+                </div>
+              </div>
             </div>
           </div>
         )}
