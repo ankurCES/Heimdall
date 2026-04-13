@@ -118,19 +118,44 @@ export function MapPage() {
           {stats.high > 0 && <Badge variant="warning" className="text-xs">{stats.high} high</Badge>}
         </div>
         <div className="flex items-center gap-2">
-          {/* Layer toggles */}
-          <div className="flex items-center gap-0.5">
-            {Object.entries({ osint: '🔵', cybint: '🔴', geoint: '🟡', sigint: '🟢', agency: '🟣', imint: '📷', mesh: '📻' }).map(([disc, emoji]) => (
-              <button
-                key={disc}
-                onClick={() => setLayers((l) => ({ ...l, [disc]: !l[disc] }))}
-                className={`px-1.5 py-0.5 rounded text-[9px] border transition-opacity ${layers[disc] ? 'opacity-100 border-primary' : 'opacity-40 border-border'}`}
-                title={disc.toUpperCase()}
-              >
-                {emoji}
-              </button>
-            ))}
-          </div>
+          {/* Layer selector dropdown */}
+          <Select value="layers" onValueChange={() => {}}>
+            <SelectTrigger className="w-40 h-7 text-xs">
+              <span className="flex items-center gap-1.5">
+                <Filter className="h-3 w-3" />
+                Layers ({Object.values(layers).filter(Boolean).length})
+              </span>
+            </SelectTrigger>
+            <SelectContent>
+              {([
+                { key: 'osint', icon: '🌐', label: 'OSINT — Open Source' },
+                { key: 'cybint', icon: '🛡️', label: 'CYBINT — Cyber' },
+                { key: 'finint', icon: '💰', label: 'FININT — Financial' },
+                { key: 'socmint', icon: '💬', label: 'SOCMINT — Social Media' },
+                { key: 'geoint', icon: '🌍', label: 'GEOINT — Geospatial' },
+                { key: 'sigint', icon: '📡', label: 'SIGINT — Signals' },
+                { key: 'rumint', icon: '👂', label: 'RUMINT — Rumor' },
+                { key: 'ci', icon: '🔒', label: 'CI — Counter-Intel' },
+                { key: 'agency', icon: '🏛️', label: 'Agency — Law Enforcement' },
+                { key: 'imint', icon: '📷', label: 'IMINT — Imagery' },
+                { key: 'mesh', icon: '📻', label: 'Meshtastic — Mesh Nodes' }
+              ]).map(({ key, icon, label }) => (
+                <div
+                  key={key}
+                  className="flex items-center gap-2 px-2 py-1.5 text-xs cursor-pointer hover:bg-accent rounded-sm"
+                  onClick={(e) => { e.preventDefault(); e.stopPropagation(); setLayers((l) => ({ ...l, [key]: !l[key] })) }}
+                >
+                  <span className={cn('h-3 w-3 rounded-sm border flex items-center justify-center text-[8px]',
+                    layers[key] ? 'bg-primary border-primary text-primary-foreground' : 'border-muted-foreground'
+                  )}>
+                    {layers[key] ? '✓' : ''}
+                  </span>
+                  <span>{icon}</span>
+                  <span className={layers[key] ? 'text-foreground' : 'text-muted-foreground'}>{label}</span>
+                </div>
+              ))}
+            </SelectContent>
+          </Select>
           <Select value={filterDiscipline} onValueChange={setFilterDiscipline}>
             <SelectTrigger className="w-32 h-7 text-xs"><SelectValue /></SelectTrigger>
             <SelectContent>
