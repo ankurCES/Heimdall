@@ -185,7 +185,7 @@ export function MeshtasticPage() {
       </div>
 
       {/* Nodes Table */}
-      {activeTab === 'nodes' && (
+      {activeTab === 'nodes' && (<>
         <Card>
           <CardHeader className="pb-2">
             <CardTitle className="text-sm">Discovered Nodes</CardTitle>
@@ -294,7 +294,7 @@ export function MeshtasticPage() {
             </CardContent>
           </Card>
         )}
-      )}
+      </>)}
 
       {/* Messages */}
       {activeTab === 'messages' && (
