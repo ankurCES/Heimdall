@@ -54,17 +54,16 @@ export class AgenticChatOrchestrator {
       return this.hybridRag(query, conversationHistory, connectionId, onChunk)
     }
 
-    // Research each sub-task with both keyword + vector search
-    const findings: string[] = []
-    for (let i = 0; i < plan.length; i++) {
-      const step = plan[i]
-      onChunk?.(`**[Researching ${i + 1}/${plan.length}]** ${step.task}\n`)
-
-      const stepFindings = await this.research(step)
-      if (stepFindings) {
-        findings.push(`### Research: ${step.task}\n\n${stepFindings}`)
-      }
-    }
+    // Research all sub-tasks in PARALLEL for speed
+    onChunk?.(`**[Researching]** ${plan.length} steps in parallel...\n`)
+    const researchResults = await Promise.all(
+      plan.map(async (step, i) => {
+        const stepFindings = await this.research(step)
+        onChunk?.(`**[Research ${i + 1}/${plan.length}]** ${step.task} ✓\n`)
+        return stepFindings ? `### Research: ${step.task}\n\n${stepFindings}` : ''
+      })
+    )
+    const findings = researchResults.filter(Boolean)
 
     if (findings.length === 0) {
       onChunk?.('\n**[No data found]** Using vector search fallback...\n\n')
@@ -91,19 +90,21 @@ export class AgenticChatOrchestrator {
   }
 
   private async research(step: PlanStep): Promise<string> {
-    const allResults: string[] = []
     const seenIds = new Set<string>()
 
-    // Vector search for each term
-    for (const term of step.search_terms) {
+    // Run ALL search terms in parallel (vector + keyword for each)
+    const termResults = await Promise.all(step.search_terms.map(async (term) => {
+      const results: string[] = []
+
+      // Vector search
       try {
         const vectorResults = await vectorDbService.search(term, 3)
         for (const vr of vectorResults) {
           if (seenIds.has(vr.reportId)) continue
           seenIds.add(vr.reportId)
-          allResults.push(
-            `**[${vr.severity.toUpperCase()}] ${vr.title}** (vector score: ${vr.score.toFixed(2)})\n` +
-            `Discipline: ${vr.discipline} | ${vr.snippet.slice(0, 400)}\n`
+          results.push(
+            `**[${vr.severity.toUpperCase()}] ${vr.title}** (vector: ${vr.score.toFixed(2)})\n` +
+            `${vr.discipline} | ${vr.snippet.slice(0, 400)}\n`
           )
         }
       } catch {}
@@ -114,16 +115,16 @@ export class AgenticChatOrchestrator {
       for (const report of filtered) {
         if (seenIds.has(report.id)) continue
         seenIds.add(report.id)
-        const tags = intelEnricher.getTags(report.id)
-        const tagStr = tags.length > 0 ? ` | Tags: ${tags.map((t) => t.tag).join(', ')}` : ''
-        allResults.push(
+        results.push(
           `**[${report.severity.toUpperCase()}] ${report.title}**\n` +
-          `Discipline: ${report.discipline} | Source: ${report.sourceName} | Verification: ${report.verificationScore}/100${tagStr}\n` +
+          `${report.discipline} | ${report.sourceName} | V:${report.verificationScore}/100\n` +
           `${report.content.slice(0, 400)}\n`
         )
       }
-    }
+      return results
+    }))
 
+    const allResults = termResults.flat()
     if (allResults.length === 0) return ''
     return allResults.slice(0, 10).join('\n---\n')
   }

@@ -64,16 +64,17 @@ export function registerChatBridge(): void {
   }) => {
     const { messages, query, sessionId, connectionId, useAgentic = true, mode = 'direct' } = params
 
+    // Cache windows once for this request — avoid per-chunk lookup
+    const windows = BrowserWindow.getAllWindows()
+    const emitChunk = (chunk: string) => {
+      for (const win of windows) win.webContents.send('chat:chunk', chunk)
+    }
+
     let fullResponse = ''
     try {
       if (useAgentic) {
         fullResponse = await agenticChatOrchestrator.process(
-          query, messages, connectionId,
-          (chunk) => {
-            for (const win of BrowserWindow.getAllWindows()) {
-              win.webContents.send('chat:chunk', chunk)
-            }
-          }
+          query, messages, connectionId, emitChunk
         )
       } else {
         // Use vector search for context
@@ -95,39 +96,32 @@ export function registerChatBridge(): void {
           ...messages
         ]
 
-        fullResponse = await llmService.chat(fullMessages, connectionId, (chunk) => {
-          for (const win of BrowserWindow.getAllWindows()) {
-            win.webContents.send('chat:chunk', chunk)
-          }
-        }, mode)
+        fullResponse = await llmService.chat(fullMessages, connectionId, emitChunk, mode)
       }
 
-      for (const win of BrowserWindow.getAllWindows()) {
-        win.webContents.send('chat:done', fullResponse)
-      }
+      for (const win of windows) win.webContents.send('chat:done', fullResponse)
     } catch (err) {
       log.error('Chat error:', err)
-      for (const win of BrowserWindow.getAllWindows()) {
-        win.webContents.send('chat:error', String(err))
-      }
+      for (const win of windows) win.webContents.send('chat:error', String(err))
       throw err
     }
 
     // Persist messages to session
+    // Batch all DB writes in a single transaction
     const db = getDatabase()
     const now = timestamp()
-    db.prepare('INSERT INTO chat_messages (id, session_id, role, content, created_at) VALUES (?, ?, ?, ?, ?)').run(generateId(), sessionId, 'user', query, now)
-    db.prepare('INSERT INTO chat_messages (id, session_id, role, content, created_at) VALUES (?, ?, ?, ?, ?)').run(generateId(), sessionId, 'assistant', fullResponse, now)
-
-    // Update session timestamp and auto-title
-    const msgCount = (db.prepare('SELECT COUNT(*) as count FROM chat_messages WHERE session_id = ?').get(sessionId) as { count: number }).count
-    if (msgCount <= 2) {
-      // Auto-title from first user query
-      const title = query.slice(0, 60) + (query.length > 60 ? '...' : '')
-      db.prepare('UPDATE chat_sessions SET title = ?, updated_at = ? WHERE id = ?').run(title, now, sessionId)
-    } else {
-      db.prepare('UPDATE chat_sessions SET updated_at = ? WHERE id = ?').run(now, sessionId)
-    }
+    const persistChat = db.transaction(() => {
+      db.prepare('INSERT INTO chat_messages (id, session_id, role, content, created_at) VALUES (?, ?, ?, ?, ?)').run(generateId(), sessionId, 'user', query, now)
+      db.prepare('INSERT INTO chat_messages (id, session_id, role, content, created_at) VALUES (?, ?, ?, ?, ?)').run(generateId(), sessionId, 'assistant', fullResponse, now)
+      const msgCount = (db.prepare('SELECT COUNT(*) as count FROM chat_messages WHERE session_id = ?').get(sessionId) as { count: number }).count
+      if (msgCount <= 2) {
+        const title = query.slice(0, 60) + (query.length > 60 ? '...' : '')
+        db.prepare('UPDATE chat_sessions SET title = ?, updated_at = ? WHERE id = ?').run(title, now, sessionId)
+      } else {
+        db.prepare('UPDATE chat_sessions SET updated_at = ? WHERE id = ?').run(now, sessionId)
+      }
+    })
+    persistChat()
 
     return fullResponse
   })

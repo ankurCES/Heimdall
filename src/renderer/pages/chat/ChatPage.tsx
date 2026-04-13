@@ -72,16 +72,34 @@ export function ChatPage() {
     return () => clearInterval(interval)
   }, [])
 
-  // Stream events
+  // Stream events — debounced state updates for performance
+  const streamBufferRef = useRef('')
+  const updateTimerRef = useRef<ReturnType<typeof setTimeout>>()
+  const scrollTimerRef = useRef<ReturnType<typeof setTimeout>>()
+
   useEffect(() => {
     const unsubChunk = window.heimdall.on('chat:chunk', (chunk: unknown) => {
-      setStreamingContent((prev) => prev + (chunk as string))
+      streamBufferRef.current += chunk as string
+
+      // Debounce: batch state updates to max 20/sec (50ms interval)
+      if (!updateTimerRef.current) {
+        updateTimerRef.current = setTimeout(() => {
+          setStreamingContent(streamBufferRef.current)
+          updateTimerRef.current = undefined
+        }, 50)
+      }
     })
     const unsubDone = window.heimdall.on('chat:done', () => {
+      // Flush any remaining buffer
+      if (updateTimerRef.current) clearTimeout(updateTimerRef.current)
+      setStreamingContent(streamBufferRef.current)
+      streamBufferRef.current = ''
       setStreaming(false)
       setStreamingContent('')
     })
     const unsubError = window.heimdall.on('chat:error', (err: unknown) => {
+      if (updateTimerRef.current) clearTimeout(updateTimerRef.current)
+      streamBufferRef.current = ''
       setStreaming(false)
       setStreamingContent('')
       setMessages((prev) => [...prev, {
@@ -89,13 +107,23 @@ export function ChatPage() {
         content: `Error: ${err}`, createdAt: Date.now()
       }])
     })
-    return () => { unsubChunk(); unsubDone(); unsubError() }
+    return () => {
+      unsubChunk(); unsubDone(); unsubError()
+      if (updateTimerRef.current) clearTimeout(updateTimerRef.current)
+    }
   }, [])
 
-  // Auto-scroll
+  // Auto-scroll — throttled to once per 100ms, no smooth during streaming
   useEffect(() => {
-    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' })
-  }, [messages, streamingContent])
+    if (scrollTimerRef.current) clearTimeout(scrollTimerRef.current)
+    scrollTimerRef.current = setTimeout(() => {
+      scrollRef.current?.scrollTo({
+        top: scrollRef.current.scrollHeight,
+        behavior: streaming ? 'auto' : 'smooth'
+      })
+    }, 100)
+    return () => { if (scrollTimerRef.current) clearTimeout(scrollTimerRef.current) }
+  }, [messages, streamingContent, streaming])
 
   const loadSessions = async () => {
     const s = await invoke('chat:getSessions') as ChatSession[]

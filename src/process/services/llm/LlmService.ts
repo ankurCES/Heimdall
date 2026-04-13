@@ -169,27 +169,34 @@ export class LlmService {
       }
 
       let full = ''
+      let sseBuffer = ''
       const reader = response.body!.getReader()
       const decoder = new TextDecoder()
 
       while (true) {
         const { done, value } = await reader.read()
         if (done) break
-        const text = decoder.decode(value, { stream: true })
+        sseBuffer += decoder.decode(value, { stream: true })
 
-        for (const line of text.split('\n')) {
-          const trimmed = line.trim()
-          if (!trimmed || trimmed === 'data: [DONE]') continue
-          if (!trimmed.startsWith('data: ')) continue
+        // Split by newlines, keep last partial line in buffer
+        const lines = sseBuffer.split('\n')
+        sseBuffer = lines[lines.length - 1]
+
+        // Batch all deltas from this read into one onChunk call
+        let batch = ''
+        for (let i = 0; i < lines.length - 1; i++) {
+          const line = lines[i].trim()
+          if (!line || line === 'data: [DONE]' || !line.startsWith('data: ')) continue
           try {
-            const data = JSON.parse(trimmed.slice(6))
+            const data = JSON.parse(line.slice(6))
             const delta = data.choices?.[0]?.delta?.content
             if (delta) {
               full += delta
-              onChunk(delta)
+              batch += delta
             }
           } catch {}
         }
+        if (batch) onChunk(batch)
       }
       return full
     }
