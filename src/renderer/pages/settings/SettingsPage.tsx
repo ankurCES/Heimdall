@@ -8,7 +8,8 @@ import {
   Database,
   ShieldCheck,
   Brain,
-  BookOpen
+  BookOpen,
+  Info
 } from 'lucide-react'
 import { cn } from '@renderer/lib/utils'
 import { ApiKeysTab } from './tabs/ApiKeysTab'
@@ -19,6 +20,7 @@ import { SourcesTab } from './tabs/SourcesTab'
 import { SafetyTab } from './tabs/SafetyTab'
 import { LlmTab } from './tabs/LlmTab'
 import { ObsidianTab } from './tabs/ObsidianTab'
+import { AboutTab } from './tabs/AboutTab'
 
 const tabs = [
   { id: 'sources', label: 'Sources', icon: Database, component: SourcesTab },
@@ -28,7 +30,8 @@ const tabs = [
   { id: 'meshtastic', label: 'Meshtastic', icon: Radio, component: MeshtasticTab },
   { id: 'obsidian', label: 'Obsidian', icon: BookOpen, component: ObsidianTab },
   { id: 'llm', label: 'LLM', icon: Brain, component: LlmTab },
-  { id: 'safety', label: 'Safety', icon: ShieldCheck, component: SafetyTab }
+  { id: 'safety', label: 'Safety', icon: ShieldCheck, component: SafetyTab },
+  { id: 'about', label: 'About', icon: Info, component: AboutTab }
 ]
 
 export function SettingsPage() {

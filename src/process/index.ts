@@ -93,6 +93,10 @@ async function initializeDeferred(): Promise<void> {
 }
 
 function createWindow(): void {
+  const iconPath = process.platform === 'darwin'
+    ? join(__dirname, '../../build/icon.icns')
+    : join(__dirname, '../../build/icon.png')
+
   mainWindow = new BrowserWindow({
     width: 1280,
     height: 800,
@@ -100,6 +104,7 @@ function createWindow(): void {
     minHeight: 600,
     show: false,
     title: 'Heimdall',
+    icon: iconPath,
     titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'default',
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
