@@ -425,6 +425,29 @@ const FREE_SOURCES: SeedSource[] = [
     type: 'security-advisory',
     schedule: '0 */12 * * *', // every 12 hours
     config: {}
+  },
+
+  // ── Phase B: Enhanced Cyber + Markets ─────────────────────────────
+  {
+    name: 'Cyber IOCs (Feodo + Ransomware.live + C2Intel)',
+    discipline: 'cybint',
+    type: 'cyber-ioc',
+    schedule: '0 */2 * * *', // every 2 hours
+    config: {}
+  },
+  {
+    name: 'Commodity & Energy Prices',
+    discipline: 'finint',
+    type: 'commodity',
+    schedule: '*/30 * * * *', // every 30 min during market hours
+    config: {}
+  },
+  {
+    name: 'Polymarket Geopolitical Predictions',
+    discipline: 'osint',
+    type: 'prediction-market',
+    schedule: '0 */3 * * *', // every 3 hours
+    config: {}
   }
 ]
 

@@ -8,6 +8,7 @@ import { FactbookCollector } from './osint/FactbookCollector'
 import { GdeltCollector } from './osint/GdeltCollector'
 import { GovernmentDataCollector } from './osint/GovernmentDataCollector'
 import { GNewsCollector } from './osint/GNewsCollector'
+import { PredictionMarketCollector } from './osint/PredictionMarketCollector'
 import { FbiCrimeStatsCollector } from './osint/FbiCrimeStatsCollector'
 import { UkPoliceCrimeCollector } from './osint/UkPoliceCrimeCollector'
 
@@ -16,11 +17,13 @@ import { CveCollector } from './cybint/CveCollector'
 import { ThreatFeedCollector } from './cybint/ThreatFeedCollector'
 import { DnsWhoisCollector } from './cybint/DnsWhoisCollector'
 import { InternetOutageCollector } from './cybint/InternetOutageCollector'
+import { CyberIocCollector } from './cybint/CyberIocCollector'
 import { SansIscCollector } from './cybint/SansIscCollector'
 
 // FININT
 import { EdgarCollector } from './finint/EdgarCollector'
 import { SanctionsCollector } from './finint/SanctionsCollector'
+import { CommodityCollector } from './finint/CommodityCollector'
 
 // SOCMINT
 import { TwitterCollector } from './socmint/TwitterCollector'
@@ -72,6 +75,7 @@ export function registerAllCollectors(): void {
   collectorManager.registerFactory('government-data', () => new GovernmentDataCollector())
   collectorManager.registerFactory('gnews', () => new GNewsCollector())
   collectorManager.registerFactory('fbi-crime-stats', () => new FbiCrimeStatsCollector())
+  collectorManager.registerFactory('prediction-market', () => new PredictionMarketCollector())
   collectorManager.registerFactory('uk-police-crime', () => new UkPoliceCrimeCollector())
 
   // CYBINT (4)
@@ -80,10 +84,12 @@ export function registerAllCollectors(): void {
   collectorManager.registerFactory('dns-whois', () => new DnsWhoisCollector())
   collectorManager.registerFactory('sans-isc', () => new SansIscCollector())
   collectorManager.registerFactory('internet-outage', () => new InternetOutageCollector())
+  collectorManager.registerFactory('cyber-ioc', () => new CyberIocCollector())
 
   // FININT (2)
   collectorManager.registerFactory('edgar', () => new EdgarCollector())
   collectorManager.registerFactory('sanctions', () => new SanctionsCollector())
+  collectorManager.registerFactory('commodity', () => new CommodityCollector())
 
   // SOCMINT (3)
   collectorManager.registerFactory('twitter', () => new TwitterCollector())
