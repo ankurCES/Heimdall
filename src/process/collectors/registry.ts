@@ -46,6 +46,8 @@ import { AisCollector } from './sigint/AisCollector'
 import { MeshtasticCollector } from './sigint/MeshtasticCollector'
 import { AdsbLolCollector } from './sigint/AdsbLolCollector'
 import { SatelliteCollector } from './sigint/SatelliteCollector'
+import { AirportDelayCollector } from './sigint/AirportDelayCollector'
+import { ChokepointCollector } from './sigint/ChokepointCollector'
 
 // IMINT
 import { TrafficCameraCollector } from './imint/TrafficCameraCollector'
@@ -112,6 +114,8 @@ export function registerAllCollectors(): void {
   collectorManager.registerFactory('fcc', () => new FccCollector())
   collectorManager.registerFactory('meshtastic', () => new MeshtasticCollector())
   collectorManager.registerFactory('ais-maritime', () => new AisCollector())
+  collectorManager.registerFactory('airport-delay', () => new AirportDelayCollector())
+  collectorManager.registerFactory('chokepoint', () => new ChokepointCollector())
 
   // IMINT (2)
   collectorManager.registerFactory('traffic-camera', () => new TrafficCameraCollector())

@@ -448,6 +448,22 @@ const FREE_SOURCES: SeedSource[] = [
     type: 'prediction-market',
     schedule: '0 */3 * * *', // every 3 hours
     config: {}
+  },
+
+  // ── Phase C: Maritime & Aviation ──────────────────────────────────
+  {
+    name: 'FAA Airport Delays (14 US Hubs)',
+    discipline: 'sigint',
+    type: 'airport-delay',
+    schedule: '*/15 * * * *', // every 15 min
+    config: {}
+  },
+  {
+    name: 'Maritime Chokepoint Monitor',
+    discipline: 'sigint',
+    type: 'chokepoint',
+    schedule: '0 */2 * * *', // every 2 hours
+    config: {}
   }
 ]
 

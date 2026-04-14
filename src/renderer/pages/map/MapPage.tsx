@@ -50,7 +50,16 @@ const SOURCE_ICONS: Record<string, string> = {
   'IODA Internet Outage': '📵',
   'Cloudflare Radar': '📵',
   'UK FCDO': '⚠️',
-  'AU DFAT': '⚠️'
+  'AU DFAT': '⚠️',
+  'FAA ASWS': '✈️',
+  'Chokepoint Monitor': '⚓',
+  'IMF PortWatch': '🚢',
+  'AIS Maritime': '🚢',
+  'Feodo Tracker': '🦠',
+  'Ransomware.live': '🔓',
+  'C2IntelFeeds': '🦠',
+  'Yahoo Finance Commodities': '📊',
+  'Polymarket': '🎯'
 }
 
 const TRAJECTORY_COLORS = [
