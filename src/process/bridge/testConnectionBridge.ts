@@ -133,21 +133,50 @@ export function registerTestConnectionBridge(): void {
               return { success: true, message: `Connected to Meshtastic node at ${address}` }
             }
 
-            // Step 3: Send test message via HTTP API (broadcast on channel)
+            // Step 3: Send test message via toradio (protobuf-encoded)
+            // Meshtastic uses PUT /api/v1/toradio with protobuf ToRadio message
             const ch = config.channelIndex || 0
-            const testMsg = `Heimdall test [CH${ch}] - mesh node connected`
+            const testMsg = `Heimdall test [CH${ch}]`
 
             try {
-              const msgResp = await fetch(`${addr}/api/v1/sendtext`, {
-                method: 'POST',
-                body: testMsg,
-                headers: { 'Content-Type': 'text/plain' },
+              // Build protobuf manually: ToRadio { packet { decoded { portnum: TEXT_MESSAGE_APP(1), payload: text } } }
+              const textBytes = Buffer.from(testMsg, 'utf-8')
+
+              // MeshPacket.decoded.payload (field 4 in SubPacket → field 1 in Data)
+              // Data: portnum=1 (TEXT_MESSAGE_APP), payload=textBytes
+              const dataProto = Buffer.concat([
+                Buffer.from([0x08, 0x01]),                              // field 1 (portnum) = 1 (TEXT_MESSAGE_APP)
+                Buffer.from([0x12, textBytes.length]), textBytes        // field 2 (payload) = text
+              ])
+
+              // MeshPacket.decoded (field 3 in MeshPacket)
+              const decodedField = Buffer.concat([
+                Buffer.from([0x1a, dataProto.length]), dataProto        // field 3 (decoded) = Data
+              ])
+
+              // MeshPacket: to=0xFFFFFFFF (broadcast), channel=ch, decoded=Data
+              const packetProto = Buffer.concat([
+                Buffer.from([0x08, 0xff, 0xff, 0xff, 0xff, 0x0f]),     // field 1 (to) = 0xFFFFFFFF (broadcast)
+                Buffer.from([0x38, ch]),                                 // field 7 (channel) = ch
+                decodedField
+              ])
+
+              // ToRadio: packet (field 1)
+              const toRadioProto = Buffer.concat([
+                Buffer.from([0x0a, packetProto.length]), packetProto    // field 1 (packet) = MeshPacket
+              ])
+
+              const msgResp = await fetch(`${addr}/api/v1/toradio`, {
+                method: 'PUT',
+                body: toRadioProto,
+                headers: { 'Content-Type': 'application/x-protobuf' },
                 signal: AbortSignal.timeout(5000)
               })
-              if (msgResp.ok || msgResp.status === 200 || msgResp.status === 204) {
+
+              if (msgResp.ok) {
                 const targetNodes = (config.targetNodeIds as string[]) || []
                 const targetInfo = targetNodes.length > 0 ? ` (targets: ${targetNodes.join(', ')})` : ''
-                return { success: true, message: `Test message sent on CH${ch} via ${address}${targetInfo}` }
+                return { success: true, message: `Test message broadcast on CH${ch} via ${address}${targetInfo}` }
               }
               return { success: false, message: `Send failed: HTTP ${msgResp.status} ${msgResp.statusText}` }
             } catch (sendErr) {
