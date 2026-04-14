@@ -21,6 +21,14 @@ import { graphSync } from './services/graphdb/GraphSync'
 log.transports.file.level = 'info'
 log.transports.console.level = 'debug'
 
+// Global crash handlers — prevent silent process death
+process.on('uncaughtException', (err) => {
+  log.error(`UNCAUGHT EXCEPTION: ${err.message}\n${err.stack}`)
+})
+process.on('unhandledRejection', (reason) => {
+  log.error(`UNHANDLED REJECTION: ${reason}`)
+})
+
 let mainWindow: BrowserWindow | null = null
 
 async function initializeEssentials(): Promise<void> {
@@ -60,12 +68,16 @@ async function initializeDeferred(): Promise<void> {
   // Start background enrichment orchestrator (Multica-style)
   enrichmentOrchestrator.start()
 
-  // Initialize Kuzu graph database + sync from SQLite
+  // Initialize Kuzu graph database (sync deferred to background — don't block startup)
   try {
     await kuzuService.initialize()
     if (kuzuService.isReady()) {
-      const syncResult = await graphSync.fullSync()
-      log.info(`Kuzu graph sync complete: ${syncResult.nodes} nodes, ${syncResult.links} links`)
+      // Defer sync to background after 30s — avoids startup crash with large DBs
+      setTimeout(() => {
+        graphSync.fullSync()
+          .then((r) => log.info(`Kuzu graph sync complete: ${r.nodes} nodes, ${r.links} links`))
+          .catch((err) => log.warn(`Kuzu graph sync failed (non-fatal): ${err}`))
+      }, 30000)
     }
   } catch (err) {
     log.warn(`Kuzu initialization failed, using SQLite-only graph: ${err}`)

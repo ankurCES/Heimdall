@@ -28,8 +28,10 @@ export class IntelPipeline {
       () => this.runIngestion()
     )
 
-    // Run initial ingestion
-    this.runIngestion().catch((err) => log.warn('Initial ingestion failed:', err))
+    // Run initial ingestion after 45s delay (let collectors + UI settle first)
+    setTimeout(() => {
+      this.runIngestion().catch((err) => log.warn('Initial ingestion failed:', err))
+    }, 45000)
 
     log.info('Intel pipeline started')
   }
@@ -65,7 +67,7 @@ export class IntelPipeline {
       // Get reports not yet vectorized (check by timestamp)
       const lastIngested = this.getLastIngestedTimestamp()
       const newReports = db.prepare(
-        'SELECT * FROM intel_reports WHERE created_at > ? ORDER BY created_at ASC LIMIT 200'
+        'SELECT * FROM intel_reports WHERE created_at > ? ORDER BY created_at ASC LIMIT 30'
       ).all(lastIngested) as Array<Record<string, unknown>>
 
       if (newReports.length === 0) {
@@ -95,24 +97,32 @@ export class IntelPipeline {
         updatedAt: r.updated_at as number
       }))
 
-      // Process each report through the pipeline
-      for (const report of reports) {
-        // Step 1: Enrich (tags, entities) — may already be done by LeadAgent
+      // Process each report through the pipeline (with yields to prevent blocking)
+      for (let i = 0; i < reports.length; i++) {
+        const report = reports[i]
         try {
-          const existingTags = intelEnricher.getTags(report.id)
-          if (existingTags.length === 0) {
-            intelEnricher.enrichReport(report)
-          }
-        } catch {}
+          // Step 1: Enrich (tags, entities) — may already be done by LeadAgent
+          try {
+            const existingTags = intelEnricher.getTags(report.id)
+            if (existingTags.length === 0) {
+              intelEnricher.enrichReport(report)
+            }
+          } catch {}
 
-        // Step 2: Build enriched document for vector DB
-        const enrichedDoc = this.buildEnrichedDocument(report)
+          // Step 2: Build enriched document for vector DB
+          const enrichedDoc = this.buildEnrichedDocument(report)
 
-        // Step 3: Ingest into vector DB
-        await vectorDbService.addReport({
-          ...report,
-          content: enrichedDoc // Use enriched content for better embeddings
-        })
+          // Step 3: Ingest into vector DB
+          await vectorDbService.addReport({
+            ...report,
+            content: enrichedDoc // Use enriched content for better embeddings
+          })
+        } catch (err) {
+          log.debug(`Pipeline: report ${report.id} failed: ${err}`)
+        }
+
+        // Yield every 5 reports to keep event loop responsive
+        if (i % 5 === 4) await new Promise((r) => setImmediate(r))
       }
 
       // Update last ingested timestamp

@@ -31,13 +31,18 @@ class GraphSync {
           const batch = db.prepare('SELECT id, title, discipline, severity, source_name, verification_score, created_at FROM intel_reports LIMIT ? OFFSET ?').all(PAGE, offset) as Array<Record<string, unknown>>
           if (batch.length === 0) break
           for (const r of batch) {
-            await kuzuService.upsertIntelReport({
-              id: r.id as string, title: r.title as string, discipline: r.discipline as string,
-              severity: r.severity as string, source: r.source_name as string,
-              verification: r.verification_score as number, created_at: r.created_at as number
-            })
+            try {
+              await kuzuService.upsertIntelReport({
+                id: r.id as string, title: (r.title as string || '').slice(0, 200),
+                discipline: r.discipline as string, severity: r.severity as string,
+                source: (r.source_name as string || '').slice(0, 100),
+                verification: r.verification_score as number, created_at: r.created_at as number
+              })
+              totalNodes++
+            } catch (e) {
+              log.debug(`GraphSync: report upsert failed: ${e}`)
+            }
           }
-          totalNodes += batch.length
           offset += PAGE
           await new Promise((r) => setImmediate(r))
         }
