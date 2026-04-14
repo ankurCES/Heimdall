@@ -133,46 +133,25 @@ export function registerTestConnectionBridge(): void {
               return { success: true, message: `Connected to Meshtastic node at ${address}` }
             }
 
-            // Step 3: Send test message via HTTP API
-            const targetNodes = (config.targetNodeIds as string[]) || []
+            // Step 3: Send test message via HTTP API (broadcast on channel)
             const ch = config.channelIndex || 0
             const testMsg = `Heimdall test [CH${ch}] - mesh node connected`
 
-            if (targetNodes.length > 0) {
-              // Send to each target node ID
-              const results: string[] = []
-              for (const nodeId of targetNodes) {
-                try {
-                  // Meshtastic HTTP API sendtext with destination
-                  const msgResp = await fetch(`${addr}/api/v1/sendtext`, {
-                    method: 'POST',
-                    body: testMsg,
-                    headers: { 'Content-Type': 'text/plain' },
-                    signal: AbortSignal.timeout(5000)
-                  })
-                  results.push(msgResp.ok ? `\u2705 ${nodeId}` : `\u274C ${nodeId}`)
-                } catch {
-                  results.push(`\u274C ${nodeId}`)
-                }
+            try {
+              const msgResp = await fetch(`${addr}/api/v1/sendtext`, {
+                method: 'POST',
+                body: testMsg,
+                headers: { 'Content-Type': 'text/plain' },
+                signal: AbortSignal.timeout(5000)
+              })
+              if (msgResp.ok || msgResp.status === 200 || msgResp.status === 204) {
+                const targetNodes = (config.targetNodeIds as string[]) || []
+                const targetInfo = targetNodes.length > 0 ? ` (targets: ${targetNodes.join(', ')})` : ''
+                return { success: true, message: `Test message sent on CH${ch} via ${address}${targetInfo}` }
               }
-              const allOk = results.every((r) => r.startsWith('\u2705'))
-              return { success: allOk, message: `${address}: sent to ${results.join(', ')}` }
-            } else {
-              // Broadcast on channel
-              try {
-                const msgResp = await fetch(`${addr}/api/v1/sendtext`, {
-                  method: 'POST',
-                  body: testMsg,
-                  headers: { 'Content-Type': 'text/plain' },
-                  signal: AbortSignal.timeout(5000)
-                })
-                if (msgResp.ok) {
-                  return { success: true, message: `Test message broadcast on CH${ch} via ${address}` }
-                }
-                return { success: false, message: `Send failed: HTTP ${msgResp.status}` }
-              } catch (sendErr) {
-                return { success: false, message: `Send failed: ${sendErr}` }
-              }
+              return { success: false, message: `Send failed: HTTP ${msgResp.status} ${msgResp.statusText}` }
+            } catch (sendErr) {
+              return { success: false, message: `Send failed: ${sendErr}` }
             }
           }
         } catch {}
