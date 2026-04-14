@@ -1,5 +1,5 @@
-import { BrowserWindow } from 'electron'
 import { IPC_EVENTS } from '@common/adapter/ipcBridge'
+import { emitToAll } from '../resource/WindowCache'
 import { vectorDbService } from './VectorDbService'
 import { intelEnricher } from '../enrichment/IntelEnricher'
 import { cronService } from '../cron/CronService'
@@ -44,9 +44,7 @@ export class IntelPipeline {
   }
 
   private notify(title: string, body: string, severity: string): void {
-    for (const win of BrowserWindow.getAllWindows()) {
-      win.webContents.send(IPC_EVENTS.APP_NOTIFICATION, { title, body, severity })
-    }
+    emitToAll(IPC_EVENTS.APP_NOTIFICATION, { title, body, severity })
   }
 
   async runIngestion(): Promise<void> {
@@ -54,6 +52,14 @@ export class IntelPipeline {
     this.processing = true
 
     try {
+      // Check index size — skip if too large to prevent unbounded memory growth
+      const indexSize = await vectorDbService.getIndexSize()
+      if (indexSize > 20000) {
+        log.warn(`Pipeline: vector index has ${indexSize} items (>20K cap), skipping ingestion`)
+        this.processing = false
+        return
+      }
+
       const db = getDatabase()
 
       // Get reports not yet vectorized (check by timestamp)

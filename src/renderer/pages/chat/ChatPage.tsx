@@ -73,19 +73,19 @@ export function ChatPage() {
     return () => clearInterval(interval)
   }, [])
 
-  // Stream events — debounced state updates for performance
-  const streamBufferRef = useRef('')
+  // Stream events — array buffer (O(1) push) instead of string concat (O(n))
+  const streamChunksRef = useRef<string[]>([])
   const updateTimerRef = useRef<ReturnType<typeof setTimeout>>()
   const scrollTimerRef = useRef<ReturnType<typeof setTimeout>>()
 
   useEffect(() => {
     const unsubChunk = window.heimdall.on('chat:chunk', (chunk: unknown) => {
-      streamBufferRef.current += chunk as string
+      streamChunksRef.current.push(chunk as string)
 
       // Debounce: batch state updates to max 20/sec (50ms interval)
       if (!updateTimerRef.current) {
         updateTimerRef.current = setTimeout(() => {
-          setStreamingContent(streamBufferRef.current)
+          setStreamingContent(streamChunksRef.current.join(''))
           updateTimerRef.current = undefined
         }, 50)
       }
@@ -93,14 +93,14 @@ export function ChatPage() {
     const unsubDone = window.heimdall.on('chat:done', () => {
       // Flush any remaining buffer
       if (updateTimerRef.current) clearTimeout(updateTimerRef.current)
-      setStreamingContent(streamBufferRef.current)
-      streamBufferRef.current = ''
+      setStreamingContent(streamChunksRef.current.join(''))
+      streamChunksRef.current = []
       setStreaming(false)
       setStreamingContent('')
     })
     const unsubError = window.heimdall.on('chat:error', (err: unknown) => {
       if (updateTimerRef.current) clearTimeout(updateTimerRef.current)
-      streamBufferRef.current = ''
+      streamChunksRef.current = []
       setStreaming(false)
       setStreamingContent('')
       setMessages((prev) => [...prev, {

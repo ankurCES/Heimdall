@@ -1,5 +1,5 @@
-import { BrowserWindow } from 'electron'
 import { getDatabase } from '../database'
+import { emitToAll } from '../resource/WindowCache'
 import { intelEnricher } from './IntelEnricher'
 import { vectorDbService } from '../vectordb/VectorDbService'
 import { syncManager } from '../sync/SyncManager'
@@ -120,9 +120,7 @@ export class EnrichmentOrchestrator {
   }
 
   private emitProgress(): void {
-    for (const win of BrowserWindow.getAllWindows()) {
-      win.webContents.send('enrichment:progress', this.stats)
-    }
+    emitToAll('enrichment:progress', this.stats)
   }
 
   private mapReport(row: Record<string, unknown>): IntelReport {

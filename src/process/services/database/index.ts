@@ -21,6 +21,7 @@ export function initDatabase(): Database.Database {
   db = new Database(dbPath)
 
   db.pragma('journal_mode = WAL')
+  db.pragma('wal_autocheckpoint = 1000')
   db.pragma('foreign_keys = ON')
   db.pragma('busy_timeout = 5000')
 

@@ -1,5 +1,5 @@
-import { BrowserWindow } from 'electron'
 import { IPC_EVENTS } from '@common/adapter/ipcBridge'
+import { emitToAll } from '../resource/WindowCache'
 import type { IntelReport, AlertChannel } from '@common/types/intel'
 import type { AlertRule, AlertDispatchResult } from '@common/types/alerts'
 import { AlertRuleEvaluator } from './AlertRuleEvaluator'
@@ -111,9 +111,7 @@ export class AlertEngine {
       sentAt: status === 'sent' ? now : null,
       createdAt: now
     }
-    for (const win of BrowserWindow.getAllWindows()) {
-      win.webContents.send(IPC_EVENTS.INTEL_ALERT_SENT, alertData)
-    }
+    emitToAll(IPC_EVENTS.INTEL_ALERT_SENT, alertData)
   }
 
   private checkHourlyReset(): void {

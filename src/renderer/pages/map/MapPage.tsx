@@ -155,7 +155,7 @@ export function MapPage() {
   const loadTrajectories = useCallback(async () => {
     try {
       const result = await window.heimdall.invoke('intel:getTrajectories') as { trajectories: Trajectory[] }
-      setTrajectories(result.trajectories || [])
+      setTrajectories((result.trajectories || []).slice(0, 50)) // Cap at 50 paths
     } catch (err) {
       console.error('Failed to load trajectories:', err)
     }
@@ -204,7 +204,7 @@ export function MapPage() {
         (r): r is GeoReport => r.latitude !== null && r.longitude !== null
       )
       if (geoNew.length > 0) {
-        setReports((prev) => [...geoNew, ...prev])
+        setReports((prev) => [...geoNew, ...prev].slice(0, 2000)) // Cap at 2000
       }
     })
     return unsub

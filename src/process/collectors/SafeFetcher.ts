@@ -109,6 +109,16 @@ export class SafeFetcher {
   getRateLimitUsage(domain: string): { available: number; max: number } {
     return this.rateLimiter.getUsage(domain)
   }
+
+  /** Remove rate limiter buckets not accessed in the last hour */
+  pruneStale(): void {
+    this.rateLimiter.pruneStale()
+  }
+
+  /** Remove expired robots.txt cache entries and cap at 200 */
+  pruneRobotsCache(): void {
+    this.robotsChecker.prune()
+  }
 }
 
 // Shared instance

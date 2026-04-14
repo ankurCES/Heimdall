@@ -60,6 +60,16 @@ export class RateLimiter {
     return bucket
   }
 
+  /** Remove buckets not accessed in the last hour */
+  pruneStale(): void {
+    const oneHourAgo = Date.now() - 60 * 60 * 1000
+    for (const [domain, bucket] of this.buckets) {
+      if (bucket.lastRefill < oneHourAgo) {
+        this.buckets.delete(domain)
+      }
+    }
+  }
+
   private refill(bucket: Bucket): void {
     const now = Date.now()
     const elapsed = now - bucket.lastRefill

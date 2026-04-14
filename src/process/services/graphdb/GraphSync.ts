@@ -23,20 +23,24 @@ class GraphSync {
     try {
       const db = getDatabase()
 
-      // 1. Sync intel_reports
-      const reports = db.prepare('SELECT id, title, discipline, severity, source_name, verification_score, created_at FROM intel_reports').all() as Array<Record<string, unknown>>
-      for (let i = 0; i < reports.length; i += 100) {
-        const batch = reports.slice(i, i + 100)
-        for (const r of batch) {
-          await kuzuService.upsertIntelReport({
-            id: r.id as string, title: r.title as string, discipline: r.discipline as string,
-            severity: r.severity as string, source: r.source_name as string,
-            verification: r.verification_score as number, created_at: r.created_at as number
-          })
+      // 1. Sync intel_reports (paginated to avoid loading all into memory)
+      {
+        let offset = 0
+        const PAGE = 500
+        while (true) {
+          const batch = db.prepare('SELECT id, title, discipline, severity, source_name, verification_score, created_at FROM intel_reports LIMIT ? OFFSET ?').all(PAGE, offset) as Array<Record<string, unknown>>
+          if (batch.length === 0) break
+          for (const r of batch) {
+            await kuzuService.upsertIntelReport({
+              id: r.id as string, title: r.title as string, discipline: r.discipline as string,
+              severity: r.severity as string, source: r.source_name as string,
+              verification: r.verification_score as number, created_at: r.created_at as number
+            })
+          }
+          totalNodes += batch.length
+          offset += PAGE
+          await new Promise((r) => setImmediate(r))
         }
-        totalNodes += batch.length
-        // Yield to event loop between batches
-        if (i + 100 < reports.length) await new Promise((r) => setImmediate(r))
       }
       log.info(`GraphSync: synced ${totalNodes} intel reports`)
 
@@ -70,64 +74,85 @@ class GraphSync {
         totalNodes++
       }
 
-      // 5. Sync entities (deduplicated by type:value)
-      const entities = db.prepare(
-        'SELECT DISTINCT entity_type, entity_value FROM intel_entities'
-      ).all() as Array<{ entity_type: string; entity_value: string }>
-      for (let i = 0; i < entities.length; i += 100) {
-        const batch = entities.slice(i, i + 100)
-        for (const e of batch) {
-          const entityId = `${e.entity_type}:${e.entity_value}`
-          await kuzuService.upsertEntity({ id: entityId, type: e.entity_type, value: e.entity_value })
-          totalNodes++
+      // 5. Sync entities (paginated)
+      {
+        let offset = 0
+        const PAGE = 500
+        while (true) {
+          const batch = db.prepare('SELECT DISTINCT entity_type, entity_value FROM intel_entities LIMIT ? OFFSET ?').all(PAGE, offset) as Array<{ entity_type: string; entity_value: string }>
+          if (batch.length === 0) break
+          for (const e of batch) {
+            const entityId = `${e.entity_type}:${e.entity_value}`
+            await kuzuService.upsertEntity({ id: entityId, type: e.entity_type, value: e.entity_value })
+            totalNodes++
+          }
+          offset += PAGE
+          await new Promise((r) => setImmediate(r))
         }
-        if (i + 100 < entities.length) await new Promise((r) => setImmediate(r))
       }
 
-      // 6. Sync HAS_ENTITY relationships
-      const entityLinks = db.prepare(
-        'SELECT report_id, entity_type, entity_value FROM intel_entities'
-      ).all() as Array<{ report_id: string; entity_type: string; entity_value: string }>
-      for (let i = 0; i < entityLinks.length; i += 100) {
-        const batch = entityLinks.slice(i, i + 100)
-        for (const el of batch) {
-          await kuzuService.createHasEntity(el.report_id, `${el.entity_type}:${el.entity_value}`)
-          totalLinks++
+      // 6. Sync HAS_ENTITY relationships (paginated)
+      {
+        let offset = 0
+        const PAGE = 500
+        while (true) {
+          const batch = db.prepare('SELECT report_id, entity_type, entity_value FROM intel_entities LIMIT ? OFFSET ?').all(PAGE, offset) as Array<{ report_id: string; entity_type: string; entity_value: string }>
+          if (batch.length === 0) break
+          for (const el of batch) {
+            await kuzuService.createHasEntity(el.report_id, `${el.entity_type}:${el.entity_value}`)
+            totalLinks++
+          }
+          offset += PAGE
+          await new Promise((r) => setImmediate(r))
         }
-        if (i + 100 < entityLinks.length) await new Promise((r) => setImmediate(r))
       }
 
-      // 7. Sync tags
-      const tags = db.prepare('SELECT DISTINCT tag FROM intel_tags').all() as Array<{ tag: string }>
-      for (const t of tags) {
-        await kuzuService.upsertTag(t.tag)
-        totalNodes++
+      // 7. Sync tags (paginated)
+      {
+        let offset = 0
+        const PAGE = 500
+        while (true) {
+          const batch = db.prepare('SELECT DISTINCT tag FROM intel_tags LIMIT ? OFFSET ?').all(PAGE, offset) as Array<{ tag: string }>
+          if (batch.length === 0) break
+          for (const t of batch) {
+            await kuzuService.upsertTag(t.tag)
+            totalNodes++
+          }
+          offset += PAGE
+          await new Promise((r) => setImmediate(r))
+        }
       }
 
-      // 8. Sync HAS_TAG relationships
-      const tagLinks = db.prepare(
-        'SELECT report_id, tag, confidence FROM intel_tags'
-      ).all() as Array<{ report_id: string; tag: string; confidence: number }>
-      for (let i = 0; i < tagLinks.length; i += 100) {
-        const batch = tagLinks.slice(i, i + 100)
-        for (const tl of batch) {
-          await kuzuService.createHasTag(tl.report_id, tl.tag, tl.confidence)
-          totalLinks++
+      // 8. Sync HAS_TAG relationships (paginated)
+      {
+        let offset = 0
+        const PAGE = 500
+        while (true) {
+          const batch = db.prepare('SELECT report_id, tag, confidence FROM intel_tags LIMIT ? OFFSET ?').all(PAGE, offset) as Array<{ report_id: string; tag: string; confidence: number }>
+          if (batch.length === 0) break
+          for (const tl of batch) {
+            await kuzuService.createHasTag(tl.report_id, tl.tag, tl.confidence)
+            totalLinks++
+          }
+          offset += PAGE
+          await new Promise((r) => setImmediate(r))
         }
-        if (i + 100 < tagLinks.length) await new Promise((r) => setImmediate(r))
       }
 
-      // 9. Sync intel_links
-      const intelLinks = db.prepare(
-        'SELECT source_report_id, target_report_id, link_type, strength FROM intel_links'
-      ).all() as Array<{ source_report_id: string; target_report_id: string; link_type: string; strength: number }>
-      for (let i = 0; i < intelLinks.length; i += 100) {
-        const batch = intelLinks.slice(i, i + 100)
-        for (const l of batch) {
-          await kuzuService.createLink(l.source_report_id, l.target_report_id, l.link_type, l.strength)
-          totalLinks++
+      // 9. Sync intel_links (paginated)
+      {
+        let offset = 0
+        const PAGE = 500
+        while (true) {
+          const batch = db.prepare('SELECT source_report_id, target_report_id, link_type, strength FROM intel_links LIMIT ? OFFSET ?').all(PAGE, offset) as Array<{ source_report_id: string; target_report_id: string; link_type: string; strength: number }>
+          if (batch.length === 0) break
+          for (const l of batch) {
+            await kuzuService.createLink(l.source_report_id, l.target_report_id, l.link_type, l.strength)
+            totalLinks++
+          }
+          offset += PAGE
+          await new Promise((r) => setImmediate(r))
         }
-        if (i + 100 < intelLinks.length) await new Promise((r) => setImmediate(r))
       }
 
       // Record sync timestamp

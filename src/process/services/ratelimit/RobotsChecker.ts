@@ -67,6 +67,25 @@ export class RobotsChecker {
     }
   }
 
+  /** Evict expired entries and cap at 200 */
+  prune(): void {
+    const now = Date.now()
+    // Remove expired
+    for (const [domain, entry] of this.cache) {
+      if (now - entry.fetchedAt > CACHE_TTL) {
+        this.cache.delete(domain)
+      }
+    }
+    // Cap at 200 — evict oldest
+    if (this.cache.size > 200) {
+      const sorted = [...this.cache.entries()].sort((a, b) => a[1].fetchedAt - b[1].fetchedAt)
+      const toRemove = sorted.slice(0, this.cache.size - 200)
+      for (const [domain] of toRemove) {
+        this.cache.delete(domain)
+      }
+    }
+  }
+
   private parse(text: string): RobotsEntry {
     const rules: RobotsEntry['rules'] = []
     let relevantSection = false

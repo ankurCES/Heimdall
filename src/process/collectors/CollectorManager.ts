@@ -1,5 +1,5 @@
-import { BrowserWindow } from 'electron'
 import { IPC_EVENTS } from '@common/adapter/ipcBridge'
+import { emitToAll } from '../services/resource/WindowCache'
 import { BaseCollector, type SourceConfig } from './BaseCollector'
 import { intelStorageService } from '../services/intel/IntelStorageService'
 import { cronService } from '../services/cron/CronService'
@@ -179,10 +179,7 @@ export class CollectorManager {
 
       if (totalHits > 0) {
         log.info(`WatchTerms: ${totalHits} terms matched in ${reports.length} new reports`)
-        // Notify UI
-        for (const win of BrowserWindow.getAllWindows()) {
-          win.webContents.send('watch:hits', { count: totalHits })
-        }
+        emitToAll('watch:hits', { count: totalHits })
       }
     } catch (err) {
       log.warn('WatchTerms matching failed:', err)
@@ -190,9 +187,7 @@ export class CollectorManager {
   }
 
   private emitStatus(sourceId: string, status: 'running' | 'idle' | 'error', error?: string): void {
-    for (const win of BrowserWindow.getAllWindows()) {
-      win.webContents.send(IPC_EVENTS.COLLECTOR_STATUS_CHANGED, { sourceId, status, error })
-    }
+    emitToAll(IPC_EVENTS.COLLECTOR_STATUS_CHANGED, { sourceId, status, error })
   }
 }
 

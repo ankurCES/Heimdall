@@ -1,5 +1,5 @@
-import { BrowserWindow } from 'electron'
 import { getDatabase } from '../database'
+import { emitToAll } from '../resource/WindowCache'
 import { generateId, timestamp } from '@common/utils/id'
 import log from 'electron-log'
 
@@ -18,7 +18,6 @@ export interface SyncJob {
 
 export class SyncManager {
   private jobs = new Map<string, SyncJob>()
-  private syncLog = new Map<string, Set<string>>() // type → set of synced content hashes
 
   constructor() {
     // Register all sync job types
@@ -43,55 +42,21 @@ export class SyncManager {
       })
     }
 
-    // Don't load sync log in constructor — DB may not be ready yet
-    // Will lazy-load on first access
   }
 
-  private syncLogLoaded = false
-
-  private ensureSyncLogLoaded(): void {
-    if (this.syncLogLoaded) return
-    this.loadSyncLog()
-    this.syncLogLoaded = true
-  }
-
-  private loadSyncLog(): void {
+  // Check if an item was already synced — on-demand DB query (no in-memory cache)
+  isSynced(type: string, contentHash: string): boolean {
     try {
       const db = getDatabase()
-      // Ensure sync_log table exists
-      db.exec(`
-        CREATE TABLE IF NOT EXISTS sync_log (
-          type TEXT NOT NULL,
-          content_hash TEXT NOT NULL,
-          synced_at INTEGER NOT NULL,
-          PRIMARY KEY (type, content_hash)
-        );
-        CREATE INDEX IF NOT EXISTS idx_sync_type ON sync_log(type);
-      `)
-
-      const rows = db.prepare('SELECT type, content_hash FROM sync_log').all() as Array<{ type: string; content_hash: string }>
-      for (const row of rows) {
-        if (!this.syncLog.has(row.type)) this.syncLog.set(row.type, new Set())
-        this.syncLog.get(row.type)!.add(row.content_hash)
-      }
-      log.info(`SyncManager: loaded ${rows.length} sync log entries`)
-    } catch (err) {
-      log.debug(`SyncManager: sync log load failed: ${err}`)
+      const row = db.prepare('SELECT 1 FROM sync_log WHERE type = ? AND content_hash = ? LIMIT 1').get(type, contentHash)
+      return !!row
+    } catch {
+      return false
     }
-  }
-
-  // Check if an item was already synced
-  isSynced(type: string, contentHash: string): boolean {
-    this.ensureSyncLogLoaded()
-    return this.syncLog.get(type)?.has(contentHash) || false
   }
 
   // Mark an item as synced
   markSynced(type: string, contentHash: string): void {
-    this.ensureSyncLogLoaded()
-    if (!this.syncLog.has(type)) this.syncLog.set(type, new Set())
-    this.syncLog.get(type)!.add(contentHash)
-
     try {
       const db = getDatabase()
       db.prepare('INSERT OR IGNORE INTO sync_log (type, content_hash, synced_at) VALUES (?, ?, ?)').run(type, contentHash, timestamp())
@@ -100,7 +65,12 @@ export class SyncManager {
 
   // Get count of synced items for a type
   getSyncedCount(type: string): number {
-    return this.syncLog.get(type)?.size || 0
+    try {
+      const db = getDatabase()
+      return (db.prepare('SELECT COUNT(*) as c FROM sync_log WHERE type = ?').get(type) as { c: number }).c
+    } catch {
+      return 0
+    }
   }
 
   // Update job status and emit to renderer
@@ -148,10 +118,7 @@ export class SyncManager {
   }
 
   private emitProgress(): void {
-    const jobs = this.getJobs()
-    for (const win of BrowserWindow.getAllWindows()) {
-      win.webContents.send('sync:progress', jobs)
-    }
+    emitToAll('sync:progress', this.getJobs())
   }
 
   // ── Sync operations ──────────────────────────────────────────────

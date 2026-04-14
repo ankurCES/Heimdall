@@ -14,6 +14,7 @@ import { seedDefaultSources } from './services/seeder/DefaultSourceSeeder'
 import { agentOrchestrator } from './agents/AgentOrchestrator'
 import { intelPipeline } from './services/vectordb/IntelPipeline'
 import { enrichmentOrchestrator } from './services/enrichment/EnrichmentOrchestrator'
+import { resourceManager } from './services/resource/ResourceManager'
 import { kuzuService } from './services/graphdb/KuzuService'
 import { graphSync } from './services/graphdb/GraphSync'
 
@@ -69,6 +70,9 @@ async function initializeDeferred(): Promise<void> {
   } catch (err) {
     log.warn(`Kuzu initialization failed, using SQLite-only graph: ${err}`)
   }
+
+  // Start resource manager (memory cleanup, WAL checkpoint, cache pruning)
+  resourceManager.start()
 
   // Auto-pull Meshtastic data on startup if configured
   try {
@@ -165,6 +169,7 @@ if (!gotTheLock) {
   })
 
   app.on('window-all-closed', () => {
+    resourceManager.stop()
     kuzuService.close().catch(() => {})
     enrichmentOrchestrator.stop()
     intelPipeline.stop()
@@ -178,6 +183,7 @@ if (!gotTheLock) {
   })
 
   app.on('before-quit', () => {
+    resourceManager.stop()
     kuzuService.close().catch(() => {})
     enrichmentOrchestrator.stop()
     intelPipeline.stop()

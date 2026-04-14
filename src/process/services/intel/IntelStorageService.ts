@@ -1,6 +1,6 @@
 import { getDatabase } from '../database'
-import { BrowserWindow } from 'electron'
 import { IPC_EVENTS } from '@common/adapter/ipcBridge'
+import { emitToAll } from '../resource/WindowCache'
 import type { IntelReport } from '@common/types/intel'
 import { app } from 'electron'
 import { join } from 'path'
@@ -86,9 +86,7 @@ export class IntelStorageService {
   }
 
   private emitNewReports(reports: IntelReport[]): void {
-    for (const win of BrowserWindow.getAllWindows()) {
-      win.webContents.send(IPC_EVENTS.INTEL_NEW_REPORTS, reports)
-    }
+    emitToAll(IPC_EVENTS.INTEL_NEW_REPORTS, reports)
   }
 
   private enrichReports(reports: IntelReport[]): void {

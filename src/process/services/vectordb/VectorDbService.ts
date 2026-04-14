@@ -37,6 +37,16 @@ export class VectorDbService {
     }
   }
 
+  async getIndexSize(): Promise<number> {
+    if (!this.index || !this.initialized) return 0
+    try {
+      const stats = await this.index.listItems()
+      return stats.length
+    } catch {
+      return 0
+    }
+  }
+
   async addReport(report: IntelReport): Promise<void> {
     if (!this.index || !this.initialized) return
 
