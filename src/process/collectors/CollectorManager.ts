@@ -53,14 +53,14 @@ export class CollectorManager {
     log.info(`Scheduling initial collection for ${sourceIds.length} sources (background, 5s stagger)`)
 
     // Fire-and-forget with stagger — doesn't block startup
-    let delay = 5000 // Start after 5s to let UI render first
+    let delay = 10000 // Start after 10s to let UI + services settle
     for (const sourceId of sourceIds) {
       setTimeout(() => {
         this.runCollector(sourceId).catch((err) => {
           log.warn(`Initial collection failed for ${sourceId}: ${err}`)
         })
       }, delay)
-      delay += 500 // 500ms stagger instead of 2000ms
+      delay += 2000 // 2s stagger — prevents memory pressure from 47 concurrent fetches
     }
   }
 

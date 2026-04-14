@@ -68,19 +68,24 @@ async function initializeDeferred(): Promise<void> {
   // Start background enrichment orchestrator (Multica-style)
   enrichmentOrchestrator.start()
 
-  // Initialize Kuzu graph database (sync deferred to background — don't block startup)
-  try {
-    await kuzuService.initialize()
-    if (kuzuService.isReady()) {
-      // Defer sync to background after 30s — avoids startup crash with large DBs
-      setTimeout(() => {
-        graphSync.fullSync()
-          .then((r) => log.info(`Kuzu graph sync complete: ${r.nodes} nodes, ${r.links} links`))
-          .catch((err) => log.warn(`Kuzu graph sync failed (non-fatal): ${err}`))
-      }, 30000)
+  // Kuzu graph database — disabled by default to prevent native module crashes
+  // Enable via Settings when needed. SQLite graph fallback works for all queries.
+  const kuzuEnabled = false // TODO: make configurable via settings
+  if (kuzuEnabled) {
+    try {
+      await kuzuService.initialize()
+      if (kuzuService.isReady()) {
+        setTimeout(() => {
+          graphSync.fullSync()
+            .then((r) => log.info(`Kuzu graph sync complete: ${r.nodes} nodes, ${r.links} links`))
+            .catch((err) => log.warn(`Kuzu graph sync failed (non-fatal): ${err}`))
+        }, 60000)
+      }
+    } catch (err) {
+      log.warn(`Kuzu initialization failed, using SQLite-only graph: ${err}`)
     }
-  } catch (err) {
-    log.warn(`Kuzu initialization failed, using SQLite-only graph: ${err}`)
+  } else {
+    log.info('Kuzu graph DB disabled — using SQLite graph queries (stable)')
   }
 
   // Start resource manager (memory cleanup, WAL checkpoint, cache pruning)
