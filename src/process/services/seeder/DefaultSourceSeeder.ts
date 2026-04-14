@@ -21,7 +21,7 @@ const FREE_SOURCES: SeedSource[] = [
     schedule: '*/15 * * * *', // every 15 min
     config: {
       feeds: [
-        { url: 'https://feeds.reuters.com/reuters/worldNews', name: 'Reuters World' },
+        { url: 'https://www.reuters.com/arc/outboundfeeds/v3/all/rss.xml', name: 'Reuters World' },
         { url: 'https://rss.nytimes.com/services/xml/rss/nyt/World.xml', name: 'NYT World' },
         { url: 'https://feeds.bbci.co.uk/news/world/rss.xml', name: 'BBC World' },
         { url: 'https://www.aljazeera.com/xml/rss/all.xml', name: 'Al Jazeera' },
@@ -104,7 +104,7 @@ const FREE_SOURCES: SeedSource[] = [
     schedule: '*/30 * * * *',
     config: {
       feeds: [
-        { url: 'https://www3.nhk.or.jp/nhkworld/en/news/feeds/', name: 'NHK World Japan' },
+        { url: 'https://www3.nhk.or.jp/nhkworld/en/news/list.html', name: 'NHK World Japan' },
         { url: 'https://www.channelnewsasia.com/api/v1/rss-outbound-feed?_format=xml', name: 'CNA Asia' },
         { url: 'https://timesofindia.indiatimes.com/rssfeedstopstories.cms', name: 'Times of India' },
         { url: 'https://www.scmp.com/rss/91/feed', name: 'SCMP' }
@@ -118,10 +118,9 @@ const FREE_SOURCES: SeedSource[] = [
     schedule: '*/30 * * * *',
     config: {
       feeds: [
-        { url: 'https://www.middleeasteye.net/rss', name: 'Middle East Eye' },
-        { url: 'https://www.dailymaverick.co.za/feed/', name: 'Daily Maverick SA' },
+        { url: 'https://www.aljazeera.com/xml/rss/all.xml', name: 'Al Jazeera' },
         { url: 'https://www.france24.com/en/rss', name: 'France 24' },
-        { url: 'https://www.dw.com/rss/en/all/rss-en-all/s-9097', name: 'Deutsche Welle' }
+        { url: 'https://rss.dw.com/xml/rss-en-all', name: 'Deutsche Welle' }
       ]
     }
   },
@@ -149,7 +148,7 @@ const FREE_SOURCES: SeedSource[] = [
         { url: 'https://www.govinfo.gov/rss/fr.xml', name: 'US Federal Register (GovInfo)' },
         { url: 'https://www.govinfo.gov/rss/cprt.xml', name: 'US Congressional Reports' },
         { url: 'https://www.govinfo.gov/rss/cdoc.xml', name: 'US Congressional Documents' },
-        { url: 'https://www.legislation.gov.uk/new/data.feed', name: 'UK Legislation' }
+        { url: 'https://www.legislation.gov.uk/new/data.feed', name: 'UK Legislation (XML)' }
       ]
     }
   },
@@ -161,7 +160,7 @@ const FREE_SOURCES: SeedSource[] = [
     config: {
       feeds: [
         { url: 'https://www.defense.gov/DesktopModules/ArticleCS/RSS.ashx?ContentType=1&Site=945', name: 'US DoD News' },
-        { url: 'https://www.janes.com/feeds/news', name: 'Janes Defense' },
+        { url: 'https://www.defensenews.com/arc/outboundfeeds/rss/?outputType=xml', name: 'Defense News' },
         { url: 'https://www.defensenews.com/arc/outboundfeeds/rss/?outputType=xml', name: 'Defense News' }
       ]
     }

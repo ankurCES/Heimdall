@@ -26,7 +26,14 @@ export class GdeltCollector extends BaseCollector {
     const reports: IntelReport[] = []
     const queries = this.getQueries()
 
-    for (const query of queries) {
+    for (let qi = 0; qi < queries.length; qi++) {
+      const query = queries[qi]
+
+      // Delay between queries to avoid 429 rate limiting (GDELT is aggressive)
+      if (qi > 0) {
+        await new Promise((r) => setTimeout(r, 3000))
+      }
+
       try {
         const params = new URLSearchParams({
           query: query.q,

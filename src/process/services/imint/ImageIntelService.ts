@@ -67,16 +67,26 @@ export class ImageIntelService {
         const framePath = join(dir, `${timeStr}.${ext}`)
         writeFileSync(framePath, imageBuffer)
 
-        return this.createReport({
+        const report: IntelReport = {
+          id: generateId(),
+          discipline: 'imint',
           title: `IMINT Capture: ${sourceName}`,
           content: `**Source**: ${sourceName}\n**Frame Size**: ${imageBuffer.length} bytes\n**Frame**: ${framePath}\n\n_No LLM configured for vision analysis. Frame saved for manual review._`,
+          summary: null,
           severity: 'info',
+          sourceId: 'imint',
           sourceUrl: imageUrl,
           sourceName: `IMINT: ${sourceName}`,
-          latitude: latitude,
-          longitude: longitude,
-          verificationScore: 50
-        })
+          contentHash: generateId(),
+          latitude: latitude ?? null,
+          longitude: longitude ?? null,
+          verificationScore: 50,
+          reviewed: false,
+          createdAt: timestamp(),
+          updatedAt: timestamp()
+        }
+        intelStorageService.store([report])
+        return report
       }
 
       const base64Image = imageBuffer.toString('base64')
@@ -112,7 +122,7 @@ export class ImageIntelService {
         content: `**Source**: ${sourceName}\n**Analysis**:\n${cleanAnalysis}\n\n**Frame**: ${framePath}`,
         summary: cleanAnalysis.slice(0, 200),
         severity: isEvent ? 'high' : 'info',
-        sourceId: this.sourceConfig?.id || 'imint',
+        sourceId: 'imint',
         sourceUrl: imageUrl,
         sourceName: `IMINT: ${sourceName}`,
         contentHash: generateId(), // Unique per frame

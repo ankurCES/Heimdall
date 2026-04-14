@@ -23,6 +23,9 @@ export class VectorDbService {
     if (this.initialized) return
 
     try {
+      // Check for corrupt index and repair before opening
+      await this.repairIfCorrupt()
+
       this.index = new LocalIndex(this.indexPath)
 
       if (!await this.index.isIndexCreated()) {
@@ -34,6 +37,59 @@ export class VectorDbService {
       log.info(`Vector DB initialized at ${this.indexPath}`)
     } catch (err) {
       log.error('Vector DB init failed:', err)
+      // If init fails due to corruption, rebuild
+      await this.rebuildIndex()
+    }
+  }
+
+  private async repairIfCorrupt(): Promise<void> {
+    const { readFileSync, writeFileSync, existsSync, renameSync } = require('fs')
+    const indexFile = join(this.indexPath, 'index.json')
+    if (!existsSync(indexFile)) return
+
+    try {
+      const content = readFileSync(indexFile, 'utf-8')
+      JSON.parse(content) // Test validity
+    } catch (err) {
+      log.warn(`Vector index corrupt: ${err}. Attempting repair...`)
+      try {
+        const content = readFileSync(indexFile, 'utf-8')
+        // Backup corrupt file
+        renameSync(indexFile, indexFile + '.corrupt.' + Date.now())
+
+        // Try to salvage: find the last complete item and truncate
+        const lastGoodBracket = content.lastIndexOf('}]')
+        if (lastGoodBracket > 100) {
+          const truncated = content.slice(0, lastGoodBracket + 2) + '}'
+          try {
+            JSON.parse(truncated)
+            writeFileSync(indexFile, truncated, 'utf-8')
+            log.info(`Vector index repaired: truncated from ${content.length} to ${truncated.length} bytes`)
+            return
+          } catch {}
+        }
+
+        // Can't salvage — create empty index
+        log.warn('Vector index could not be repaired, creating fresh index')
+        writeFileSync(indexFile, '{"version":1,"metadata_config":{"indexed":[]},"items":[]}', 'utf-8')
+      } catch (repairErr) {
+        log.error(`Vector index repair failed: ${repairErr}`)
+      }
+    }
+  }
+
+  private async rebuildIndex(): Promise<void> {
+    try {
+      const { rmSync, existsSync } = require('fs')
+      if (existsSync(this.indexPath)) {
+        rmSync(this.indexPath, { recursive: true, force: true })
+      }
+      this.index = new LocalIndex(this.indexPath)
+      await this.index.createIndex()
+      this.initialized = true
+      log.info('Vector DB rebuilt from scratch')
+    } catch (err) {
+      log.error(`Vector DB rebuild failed: ${err}`)
     }
   }
 

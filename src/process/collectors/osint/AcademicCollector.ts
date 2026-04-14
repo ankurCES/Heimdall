@@ -17,7 +17,13 @@ export class AcademicCollector extends BaseCollector {
     for (const category of categories) {
       try {
         const query = `cat:${category}&sortBy=submittedDate&sortOrder=descending&max_results=15`
-        const xml = await this.fetchText(`${ARXIV_API}?search_query=${query}`)
+        // Use direct fetch — arXiv blocks via robots.txt
+        const resp = await fetch(`${ARXIV_API}?search_query=${query}`, {
+          headers: { 'User-Agent': 'Heimdall/0.1.0 (Academic Research Monitor)' },
+          signal: AbortSignal.timeout(15000)
+        })
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
+        const xml = await resp.text()
         const entries = this.parseAtom(xml)
 
         for (const entry of entries) {

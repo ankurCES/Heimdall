@@ -193,12 +193,15 @@ export class GovernmentDataCollector extends BaseCollector {
     const reports: IntelReport[] = []
     try {
       // Data.gov CKAN API — search for recently updated security/safety datasets
-      const data = await this.fetchJson<{
-        result: { results: Array<{ title: string; notes: string; url: string; metadata_modified: string; organization: { title: string } }> }
-      }>(
+      // Use direct fetch — data.gov blocks via robots.txt
+      const resp = await fetch(
         'https://catalog.data.gov/api/3/action/package_search?q=crime+OR+safety+OR+emergency+OR+security&sort=metadata_modified+desc&rows=15',
-        { timeout: 15000 }
+        { headers: { Accept: 'application/json', 'User-Agent': 'Heimdall/0.1.0' }, signal: AbortSignal.timeout(15000) }
       )
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
+      const data = await resp.json() as {
+        result: { results: Array<{ title: string; notes: string; url: string; metadata_modified: string; organization: { title: string } }> }
+      }
 
       for (const ds of data.result?.results || []) {
         reports.push(
