@@ -33,6 +33,26 @@ const DISCIPLINE_ICONS: Record<string, string> = {
   agency: '🏛️', imint: '📷'
 }
 
+// Source-specific icons override discipline icons for special data types
+const SOURCE_ICONS: Record<string, string> = {
+  'USGS Earthquake': '🔴',
+  'NASA FIRMS': '🔥',
+  'NASA EONET': '🌪️',
+  'Safecast Radiation': '☢️',
+  'EPA RadNet': '☢️',
+  'GDACS Earthquake': '🔴',
+  'GDACS Tropical Cyclone': '🌀',
+  'GDACS Flood': '🌊',
+  'GDACS Volcanic Eruption': '🌋',
+  'GDACS Wildfire': '🔥',
+  'GDACS Drought': '🏜️',
+  'ISS Tracker': '🛰️',
+  'IODA Internet Outage': '📵',
+  'Cloudflare Radar': '📵',
+  'UK FCDO': '⚠️',
+  'AU DFAT': '⚠️'
+}
+
 const TRAJECTORY_COLORS = [
   '#06b6d4', '#8b5cf6', '#ec4899', '#14b8a6', '#f43f5e',
   '#6366f1', '#22c55e', '#e879f9', '#0ea5e9', '#fb923c'
@@ -307,7 +327,7 @@ export function MapPage() {
           />
 
           {reports.filter((r) => layers[r.discipline] !== false).map((report) => {
-            const emoji = DISCIPLINE_ICONS[report.discipline] || '📄'
+            const emoji = SOURCE_ICONS[report.sourceName] || DISCIPLINE_ICONS[report.discipline] || '📄'
             const color = SEVERITY_COLORS[report.severity]
             const size = SEVERITY_RADIUS[report.severity] * 3
             return (

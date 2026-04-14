@@ -395,6 +395,36 @@ const FREE_SOURCES: SeedSource[] = [
     type: 'unsc',
     schedule: '0 */3 * * *',
     config: {}
+  },
+
+  // ── Phase A: Natural Disasters & Environmental ────────────────────
+  {
+    name: 'Radiation Monitoring (Safecast + EPA)',
+    discipline: 'geoint',
+    type: 'radiation',
+    schedule: '0 */1 * * *', // every hour
+    config: {}
+  },
+  {
+    name: 'GDACS Disaster Alerts (UN)',
+    discipline: 'geoint',
+    type: 'gdacs',
+    schedule: '*/15 * * * *', // every 15 min
+    config: {}
+  },
+  {
+    name: 'Internet Outage Detection (IODA)',
+    discipline: 'cybint',
+    type: 'internet-outage',
+    schedule: '*/15 * * * *',
+    config: {}
+  },
+  {
+    name: 'Security Advisories (UK FCDO + AU DFAT)',
+    discipline: 'agency',
+    type: 'security-advisory',
+    schedule: '0 */12 * * *', // every 12 hours
+    config: {}
   }
 ]
 

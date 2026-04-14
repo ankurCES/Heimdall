@@ -15,6 +15,7 @@ import { UkPoliceCrimeCollector } from './osint/UkPoliceCrimeCollector'
 import { CveCollector } from './cybint/CveCollector'
 import { ThreatFeedCollector } from './cybint/ThreatFeedCollector'
 import { DnsWhoisCollector } from './cybint/DnsWhoisCollector'
+import { InternetOutageCollector } from './cybint/InternetOutageCollector'
 import { SansIscCollector } from './cybint/SansIscCollector'
 
 // FININT
@@ -32,6 +33,8 @@ import { NoaaWeatherCollector } from './geoint/NoaaWeatherCollector'
 import { SentinelCollector } from './geoint/SentinelCollector'
 import { NasaFirmsCollector } from './geoint/NasaFirmsCollector'
 import { NasaEonetCollector } from './geoint/NasaEonetCollector'
+import { RadiationCollector } from './geoint/RadiationCollector'
+import { GdacsCollector } from './geoint/GdacsCollector'
 
 // SIGINT
 import { AdsbCollector } from './sigint/AdsbCollector'
@@ -57,6 +60,7 @@ import { InterpolCollector } from './agency/InterpolCollector'
 import { FbiCollector } from './agency/FbiCollector'
 import { EuropolCollector } from './agency/EuropolCollector'
 import { UnscCollector } from './agency/UnscCollector'
+import { SecurityAdvisoryCollector } from './agency/SecurityAdvisoryCollector'
 
 export function registerAllCollectors(): void {
   // OSINT (7)
@@ -75,6 +79,7 @@ export function registerAllCollectors(): void {
   collectorManager.registerFactory('threat-feed', () => new ThreatFeedCollector())
   collectorManager.registerFactory('dns-whois', () => new DnsWhoisCollector())
   collectorManager.registerFactory('sans-isc', () => new SansIscCollector())
+  collectorManager.registerFactory('internet-outage', () => new InternetOutageCollector())
 
   // FININT (2)
   collectorManager.registerFactory('edgar', () => new EdgarCollector())
@@ -91,6 +96,8 @@ export function registerAllCollectors(): void {
   collectorManager.registerFactory('sentinel', () => new SentinelCollector())
   collectorManager.registerFactory('nasa-firms', () => new NasaFirmsCollector())
   collectorManager.registerFactory('nasa-eonet', () => new NasaEonetCollector())
+  collectorManager.registerFactory('radiation', () => new RadiationCollector())
+  collectorManager.registerFactory('gdacs', () => new GdacsCollector())
 
   // SIGINT (6)
   collectorManager.registerFactory('adsb', () => new AdsbCollector())
@@ -116,4 +123,5 @@ export function registerAllCollectors(): void {
   collectorManager.registerFactory('fbi', () => new FbiCollector())
   collectorManager.registerFactory('europol', () => new EuropolCollector())
   collectorManager.registerFactory('unsc', () => new UnscCollector())
+  collectorManager.registerFactory('security-advisory', () => new SecurityAdvisoryCollector())
 }
