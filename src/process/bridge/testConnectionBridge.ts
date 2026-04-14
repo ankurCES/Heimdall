@@ -68,8 +68,7 @@ export function registerTestConnectionBridge(): void {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
               chat_id: chatId,
-              text: `\u{1F6E1}\u{FE0F} *Heimdall Test Message*\n\nBot @${botName} is connected and working\\.\n_This is a test from Heimdall Intelligence Monitor\\._`,
-              parse_mode: 'MarkdownV2'
+              text: `\u{1F6E1}\u{FE0F} Heimdall Test Message\n\nBot @${botName} is connected and working.\nThis is a test from Heimdall Intelligence Monitor.`
             }),
             signal: AbortSignal.timeout(10000)
           })
@@ -129,27 +128,52 @@ export function registerTestConnectionBridge(): void {
           })
 
           if (infoResp.ok) {
+            const sendTestMessage = config.sendTestMessage === true
+            if (!sendTestMessage) {
+              return { success: true, message: `Connected to Meshtastic node at ${address}` }
+            }
+
             // Step 3: Send test message via HTTP API
-            const sendTestMessage = config.sendTestMessage !== false
-            if (sendTestMessage) {
+            const targetNodes = (config.targetNodeIds as string[]) || []
+            const ch = config.channelIndex || 0
+            const testMsg = `Heimdall test [CH${ch}] - mesh node connected`
+
+            if (targetNodes.length > 0) {
+              // Send to each target node ID
+              const results: string[] = []
+              for (const nodeId of targetNodes) {
+                try {
+                  // Meshtastic HTTP API sendtext with destination
+                  const msgResp = await fetch(`${addr}/api/v1/sendtext`, {
+                    method: 'POST',
+                    body: testMsg,
+                    headers: { 'Content-Type': 'text/plain' },
+                    signal: AbortSignal.timeout(5000)
+                  })
+                  results.push(msgResp.ok ? `\u2705 ${nodeId}` : `\u274C ${nodeId}`)
+                } catch {
+                  results.push(`\u274C ${nodeId}`)
+                }
+              }
+              const allOk = results.every((r) => r.startsWith('\u2705'))
+              return { success: allOk, message: `${address}: sent to ${results.join(', ')}` }
+            } else {
+              // Broadcast on channel
               try {
                 const msgResp = await fetch(`${addr}/api/v1/sendtext`, {
                   method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({
-                    text: 'Heimdall test - mesh node connected',
-                    channelIndex: config.channelIndex || 0
-                  }),
+                  body: testMsg,
+                  headers: { 'Content-Type': 'text/plain' },
                   signal: AbortSignal.timeout(5000)
                 })
                 if (msgResp.ok) {
-                  return { success: true, message: `Connected to ${address} \u2014 test message sent on CH${config.channelIndex || 0}` }
+                  return { success: true, message: `Test message broadcast on CH${ch} via ${address}` }
                 }
-              } catch {}
-              // sendtext might not be available on all firmware versions
-              return { success: true, message: `Connected to ${address} (HTTP API responding)` }
+                return { success: false, message: `Send failed: HTTP ${msgResp.status}` }
+              } catch (sendErr) {
+                return { success: false, message: `Send failed: ${sendErr}` }
+              }
             }
-            return { success: true, message: `Connected to Meshtastic node at ${address}` }
           }
         } catch {}
 
