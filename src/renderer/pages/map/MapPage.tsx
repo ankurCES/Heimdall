@@ -42,6 +42,80 @@ const ISS_COLOR = '#f59e0b'
 interface TrajectoryPoint { lat: number; lng: number; time: number }
 interface Trajectory { id: string; label: string; type: 'adsb' | 'iss'; points: TrajectoryPoint[] }
 
+// Split a trajectory at antimeridian (±180° lng) crossings to avoid horizontal map-spanning lines
+// Also interpolate intermediate points for smooth curves
+function splitAtAntimeridian(points: Array<[number, number]>): Array<Array<[number, number]>> {
+  if (points.length < 2) return [points]
+
+  const segments: Array<Array<[number, number]>> = []
+  let current: Array<[number, number]> = [points[0]]
+
+  for (let i = 1; i < points.length; i++) {
+    const prevLng = points[i - 1][1]
+    const currLng = points[i][1]
+
+    // Detect antimeridian crossing: longitude jump > 180°
+    if (Math.abs(currLng - prevLng) > 180) {
+      // End current segment, start new one
+      if (current.length >= 2) segments.push(current)
+      current = [points[i]]
+    } else {
+      current.push(points[i])
+    }
+  }
+  if (current.length >= 2) segments.push(current)
+  return segments
+}
+
+// Interpolate points along great circle arc for smooth orbital curves
+function interpolateGreatCircle(points: Array<[number, number]>, stepsPerSegment: number = 8): Array<[number, number]> {
+  if (points.length < 2) return points
+  const result: Array<[number, number]> = []
+
+  for (let i = 0; i < points.length - 1; i++) {
+    const [lat1, lng1] = points[i]
+    const [lat2, lng2] = points[i + 1]
+
+    // Skip interpolation for very short segments
+    const dLat = Math.abs(lat2 - lat1)
+    const dLng = Math.abs(lng2 - lng1)
+    if (dLat < 0.5 && dLng < 0.5) {
+      result.push(points[i])
+      continue
+    }
+
+    const toRad = (d: number) => d * Math.PI / 180
+    const toDeg = (r: number) => r * 180 / Math.PI
+
+    const phi1 = toRad(lat1), lam1 = toRad(lng1)
+    const phi2 = toRad(lat2), lam2 = toRad(lng2)
+
+    // Great circle distance
+    const d = 2 * Math.asin(Math.sqrt(
+      Math.sin((phi2 - phi1) / 2) ** 2 +
+      Math.cos(phi1) * Math.cos(phi2) * Math.sin((lam2 - lam1) / 2) ** 2
+    ))
+
+    if (d < 1e-6) {
+      result.push(points[i])
+      continue
+    }
+
+    for (let s = 0; s < stepsPerSegment; s++) {
+      const f = s / stepsPerSegment
+      const A = Math.sin((1 - f) * d) / Math.sin(d)
+      const B = Math.sin(f * d) / Math.sin(d)
+      const x = A * Math.cos(phi1) * Math.cos(lam1) + B * Math.cos(phi2) * Math.cos(lam2)
+      const y = A * Math.cos(phi1) * Math.sin(lam1) + B * Math.cos(phi2) * Math.sin(lam2)
+      const z = A * Math.sin(phi1) + B * Math.sin(phi2)
+      result.push([toDeg(Math.atan2(z, Math.sqrt(x * x + y * y))), toDeg(Math.atan2(y, x))])
+    }
+  }
+  // Add last point
+  result.push(points[points.length - 1])
+  return result
+}
+
 function makeDivIcon(emoji: string, color: string, size: number = 24): L.DivIcon {
   return L.divIcon({
     html: `<div style="width:${size}px;height:${size}px;display:flex;align-items:center;justify-content:center;font-size:${size * 0.6}px;border-radius:50%;border:2px solid ${color};background:rgba(15,23,42,0.85);box-shadow:0 0 6px ${color}40;">${emoji}</div>`,
@@ -269,25 +343,35 @@ export function MapPage() {
             )
           })}
 
-          {/* Trajectory paths — dotted bold lines */}
+          {/* Trajectory paths — smooth dotted bold lines */}
           {layers.paths && trajectories.map((traj, idx) => {
             const color = traj.type === 'iss' ? ISS_COLOR : TRAJECTORY_COLORS[idx % TRAJECTORY_COLORS.length]
-            const positions = traj.points.map((p) => [p.lat, p.lng] as [number, number])
-            if (positions.length < 2) return null
-            const lastPt = positions[positions.length - 1]
+            const rawPositions = traj.points.map((p) => [p.lat, p.lng] as [number, number])
+            if (rawPositions.length < 2) return null
+
+            // For ISS/orbital: interpolate great circle arcs + split at antimeridian
+            const isOrbital = traj.type === 'iss'
+            const interpolated = isOrbital ? interpolateGreatCircle(rawPositions, 12) : rawPositions
+            const segments = isOrbital ? splitAtAntimeridian(interpolated) : [interpolated]
+            const lastPt = rawPositions[rawPositions.length - 1]
+
             return (
               <span key={traj.id}>
-                <Polyline
-                  positions={positions}
-                  pathOptions={{
-                    color,
-                    weight: 3,
-                    opacity: 0.75,
-                    dashArray: '8 6',
-                    lineCap: 'round',
-                    lineJoin: 'round'
-                  }}
-                />
+                {segments.map((seg, si) => (
+                  <Polyline
+                    key={`${traj.id}-seg-${si}`}
+                    positions={seg}
+                    pathOptions={{
+                      color,
+                      weight: 3,
+                      opacity: 0.75,
+                      dashArray: '8 6',
+                      lineCap: 'round',
+                      lineJoin: 'round'
+                    }}
+                    smoothFactor={isOrbital ? 1.5 : 1.0}
+                  />
+                ))}
                 {/* Endpoint marker — latest position */}
                 <CircleMarker
                   center={lastPt}
@@ -295,7 +379,7 @@ export function MapPage() {
                   pathOptions={{ color, fillColor: color, fillOpacity: 1, weight: 2 }}
                 >
                   <Tooltip direction="top" offset={[0, -8]} className="custom-tooltip">
-                    <span style={{ fontSize: 10 }}>{traj.type === 'iss' ? '🛰️' : '✈️'} {traj.label} ({traj.points.length} pts)</span>
+                    <span style={{ fontSize: 10 }}>{isOrbital ? '🛰️' : '✈️'} {traj.label} ({traj.points.length} pts)</span>
                   </Tooltip>
                 </CircleMarker>
               </span>
