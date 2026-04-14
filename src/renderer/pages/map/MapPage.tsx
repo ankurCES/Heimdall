@@ -59,7 +59,8 @@ const SOURCE_ICONS: Record<string, string> = {
   'Ransomware.live': '🔓',
   'C2IntelFeeds': '🦠',
   'Yahoo Finance Commodities': '📊',
-  'Polymarket': '🎯'
+  'Polymarket': '🎯',
+  'Open-Meteo Climate': '🌡️'
 }
 
 const TRAJECTORY_COLORS = [

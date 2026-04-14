@@ -38,6 +38,7 @@ import { NasaFirmsCollector } from './geoint/NasaFirmsCollector'
 import { NasaEonetCollector } from './geoint/NasaEonetCollector'
 import { RadiationCollector } from './geoint/RadiationCollector'
 import { GdacsCollector } from './geoint/GdacsCollector'
+import { ClimateAnomalyCollector } from './geoint/ClimateAnomalyCollector'
 
 // SIGINT
 import { AdsbCollector } from './sigint/AdsbCollector'
@@ -106,6 +107,7 @@ export function registerAllCollectors(): void {
   collectorManager.registerFactory('nasa-eonet', () => new NasaEonetCollector())
   collectorManager.registerFactory('radiation', () => new RadiationCollector())
   collectorManager.registerFactory('gdacs', () => new GdacsCollector())
+  collectorManager.registerFactory('climate-anomaly', () => new ClimateAnomalyCollector())
 
   // SIGINT (6)
   collectorManager.registerFactory('adsb', () => new AdsbCollector())

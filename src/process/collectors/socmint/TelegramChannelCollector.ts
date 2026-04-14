@@ -55,13 +55,16 @@ export class TelegramChannelCollector extends BaseCollector {
         const text = post.text || post.caption || ''
         if (!text) continue
 
+        const topic = this.classifyTopic(text, post.chat.title)
+        const severity = topic.severity
+
         reports.push(
           this.createReport({
             title: `Telegram [${post.chat.title}]: ${text.slice(0, 80)}...`,
-            content: `**Channel**: ${post.chat.title}\n**Chat ID**: ${post.chat.id}\n**Posted**: ${new Date(post.date * 1000).toISOString()}\n\n${text}`,
-            severity: 'low',
+            content: `**Channel**: ${post.chat.title}\n**Chat ID**: ${post.chat.id}\n**Topic**: ${topic.label}\n**Posted**: ${new Date(post.date * 1000).toISOString()}\n\n${text}`,
+            severity,
             sourceName: `Telegram: ${post.chat.title}`,
-            verificationScore: 20
+            verificationScore: topic.verified ? 60 : 20
           })
         )
       }
@@ -72,5 +75,41 @@ export class TelegramChannelCollector extends BaseCollector {
     }
 
     return reports
+  }
+
+  // Topic classification based on World Monitor's curated Telegram channel taxonomy
+  private classifyTopic(text: string, channelTitle: string): { label: string; severity: import('@common/types/intel').ThreatLevel; verified: boolean } {
+    const t = (text + ' ' + channelTitle).toLowerCase()
+
+    // Verified OSINT channels (higher trust)
+    const verifiedChannels = ['bellingcat', 'aurora intel', 'bno news', 'liveuamap', 'osintdefender', 'war monitor', 'nexta', 'deepstate']
+    const isVerified = verifiedChannels.some((ch) => channelTitle.toLowerCase().includes(ch))
+
+    // Breaking news detection
+    if (/\b(breaking|urgent|alert|just in|confirmed)\b/i.test(text)) {
+      return { label: 'Breaking', severity: 'high', verified: isVerified }
+    }
+
+    // Conflict/military
+    if (/\b(attack|strike|missile|drone|artillery|air raid|explosion|killed|casualties|wounded)\b/i.test(text)) {
+      return { label: 'Conflict', severity: 'high', verified: isVerified }
+    }
+
+    // Air raid / sirens
+    if (/\b(siren|air alert|air raid|alarm|shelter|intercept)\b/i.test(text)) {
+      return { label: 'Alert', severity: 'critical', verified: isVerified }
+    }
+
+    // Political / sanctions
+    if (/\b(sanction|diplomat|summit|treaty|ceasefire|negotiate|election|president|minister)\b/i.test(text)) {
+      return { label: 'Politics', severity: 'medium', verified: isVerified }
+    }
+
+    // OSINT / intelligence
+    if (/\b(osint|intel|satellite|imagery|geolocated|verified|footage|confirmed)\b/i.test(text)) {
+      return { label: 'OSINT', severity: 'medium', verified: isVerified }
+    }
+
+    return { label: 'General', severity: 'low', verified: isVerified }
   }
 }

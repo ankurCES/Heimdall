@@ -1,6 +1,7 @@
 import { BaseCollector } from '../BaseCollector'
 import type { IntelReport, ThreatLevel } from '@common/types/intel'
 import { squawkClassifier } from '../../services/sigint/SquawkClassifier'
+import { militaryAircraftClassifier } from '../../services/sigint/MilitaryAircraftClassifier'
 import log from 'electron-log'
 
 // ADS-B via adsb.lol — free, no auth
@@ -29,11 +30,11 @@ export class AdsbLolCollector extends BaseCollector {
       for (const ac of data.ac.slice(0, 50)) {
         if (!ac.lat || !ac.lon) continue
 
-        // Classify squawk
+        // Classify squawk + military hex range
         const squawk = squawkClassifier.classify(ac.squawk)
+        const milClass = militaryAircraftClassifier.classify(ac.hex, ac.flight)
         const isEmergency = ac.emergency && ac.emergency !== 'none'
-        const isMilitary = ac.category === 'A7' || squawk.category === 'military' ||
-          (ac.flight && /^RCH|REACH|EVIL|DARK|JAKE|TOPCAT|DOOM/.test(ac.flight.trim()))
+        const isMilitary = milClass.isMilitary || ac.category === 'A7' || squawk.category === 'military'
 
         let severity: ThreatLevel = squawk.severity
         if (isEmergency) severity = 'critical'
@@ -43,9 +44,13 @@ export class AdsbLolCollector extends BaseCollector {
           ? `\n\n## Squawk Analysis\n**Code**: ${squawk.code}\n**Classification**: ${squawk.meaning}\n**Category**: ${squawk.category.toUpperCase()}\n**Description**: ${squawk.description}`
           : ''
 
+        const milSection = milClass.isMilitary
+          ? `\n\n## Military Classification\n**Country**: ${milClass.country}\n**Operator**: ${milClass.operator}\n**Confidence**: ${(milClass.confidence * 100).toFixed(0)}%\n**Method**: ${milClass.method === 'hex_range' ? 'ICAO Hex Range' : 'Callsign Match'}`
+          : ''
+
         reports.push(this.createReport({
           title: `ADS-B: ${(ac.flight || ac.hex).trim()} ${ac.t || ''} [${squawk.meaning}]`,
-          content: `**Callsign**: ${ac.flight?.trim() || 'N/A'}\n**Hex**: ${ac.hex}\n**Type**: ${ac.t || 'Unknown'}\n**Registration**: ${ac.r || 'N/A'}\n**Altitude**: ${ac.alt_baro || 'N/A'} ft\n**Speed**: ${ac.gs || 'N/A'} kts\n**Squawk**: ${ac.squawk || 'N/A'}\n**Category**: ${ac.category || 'N/A'}${isEmergency ? `\n\n**EMERGENCY**: ${ac.emergency}` : ''}${squawkSection}`,
+          content: `**Callsign**: ${ac.flight?.trim() || 'N/A'}\n**Hex**: ${ac.hex}\n**Type**: ${ac.t || 'Unknown'}\n**Registration**: ${ac.r || 'N/A'}\n**Altitude**: ${ac.alt_baro || 'N/A'} ft\n**Speed**: ${ac.gs || 'N/A'} kts\n**Squawk**: ${ac.squawk || 'N/A'}\n**Category**: ${ac.category || 'N/A'}${isMilitary ? `\n**Military**: YES (${milClass.operator || squawk.category})` : ''}${isEmergency ? `\n\n**EMERGENCY**: ${ac.emergency}` : ''}${squawkSection}${milSection}`,
           severity,
           sourceUrl: `https://globe.adsb.fi/?icao=${ac.hex}`,
           sourceName: `ADS-B [${squawk.meaning}]`,

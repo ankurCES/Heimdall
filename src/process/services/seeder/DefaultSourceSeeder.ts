@@ -464,6 +464,15 @@ const FREE_SOURCES: SeedSource[] = [
     type: 'chokepoint',
     schedule: '0 */2 * * *', // every 2 hours
     config: {}
+  },
+
+  // ── Phase D+E: Climate + Enhanced Intel ───────────────────────────
+  {
+    name: 'Climate Anomaly Detection (15 Zones)',
+    discipline: 'geoint',
+    type: 'climate-anomaly',
+    schedule: '0 */6 * * *', // every 6 hours
+    config: {}
   }
 ]
 
