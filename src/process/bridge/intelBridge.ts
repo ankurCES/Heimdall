@@ -123,7 +123,7 @@ export function registerIntelBridge(): void {
       "SELECT latitude, longitude, created_at FROM intel_reports WHERE source_name = 'ISS Tracker' AND latitude IS NOT NULL AND longitude IS NOT NULL ORDER BY created_at ASC"
     ).all() as Array<{ latitude: number; longitude: number; created_at: number }>
 
-    if (issRows.length >= 2) {
+    if (issRows.length >= 1) {
       trajectories.push({
         id: 'iss',
         label: 'ISS (International Space Station)',

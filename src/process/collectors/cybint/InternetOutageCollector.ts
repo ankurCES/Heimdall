@@ -6,6 +6,7 @@ import log from 'electron-log'
 // Uses IODA (Internet Outage Detection and Analysis) from Georgia Tech / CAIDA
 // Free, no auth required
 
+// IODA v2 API deprecated — use Cloudflare Radar as primary
 const IODA_API = 'https://api.ioda.inetintel.cc.gatech.edu/v2'
 
 // Country centroids for geo-tagging
@@ -52,8 +53,8 @@ export class InternetOutageCollector extends BaseCollector {
         { timeout: 20000 }
       )
 
-      if (!data?.data) {
-        // Fallback: try alternative public outage source
+      if (!data?.data || !Array.isArray(data.data) || data.data.length === 0) {
+        // IODA may be down or changed — use Cloudflare Radar as primary
         await this.collectFromDowndetector(reports)
         return reports
       }

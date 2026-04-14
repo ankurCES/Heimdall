@@ -78,10 +78,13 @@ export class AirportDelayCollector extends BaseCollector {
 
   private async checkAirport(code: string): Promise<IntelReport | null> {
     try {
-      const data = await this.fetchJson<FaaStatus>(
-        `${FAA_API}/${code}`,
-        { timeout: 10000 }
-      )
+      // Use direct fetch — FAA ASWS has SSL/TLS quirks with Node fetch
+      const response = await fetch(`${FAA_API}/${code}`, {
+        headers: { Accept: 'application/json', 'User-Agent': 'Heimdall/0.1.0' },
+        signal: AbortSignal.timeout(10000)
+      })
+      if (!response.ok) return null
+      const data = await response.json() as FaaStatus
 
       if (!data) return null
 

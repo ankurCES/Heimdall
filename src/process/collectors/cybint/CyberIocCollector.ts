@@ -24,12 +24,14 @@ export class CyberIocCollector extends BaseCollector {
   }
 
   // Feodo Tracker — C2 botnet infrastructure (abuse.ch)
+  // Use direct fetch — abuse.ch blocks via robots.txt
   private async collectFeodo(reports: IntelReport[]): Promise<void> {
     try {
-      const text = await this.fetchText(
-        'https://feodotracker.abuse.ch/downloads/ipblocklist_recommended.txt',
-        { timeout: 15000 }
-      )
+      const resp = await fetch('https://feodotracker.abuse.ch/downloads/ipblocklist_recommended.txt', {
+        headers: { 'User-Agent': 'Heimdall/0.1.0' }, signal: AbortSignal.timeout(15000)
+      })
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
+      const text = await resp.text()
 
       const ips = text.split('\n')
         .filter((l) => l.trim() && !l.startsWith('#'))
@@ -40,7 +42,9 @@ export class CyberIocCollector extends BaseCollector {
       // Also get the detailed JSON feed for enrichment
       let detailedMap = new Map<string, { malware: string; port: number; first_seen: string; last_online: string }>()
       try {
-        const response = await this.safeFetch('https://feodotracker.abuse.ch/downloads/ipblocklist.json', { timeout: 15000 })
+        const response = await fetch('https://feodotracker.abuse.ch/downloads/ipblocklist.json', {
+          headers: { 'User-Agent': 'Heimdall/0.1.0' }, signal: AbortSignal.timeout(15000)
+        })
         const jsonData = await response.json() as Array<{
           ip_address: string; port: number; status: string
           hostname: string | null; as_number: number; as_name: string
@@ -85,19 +89,23 @@ export class CyberIocCollector extends BaseCollector {
   // Ransomware.live — Active ransomware victim reporting
   private async collectRansomware(reports: IntelReport[]): Promise<void> {
     try {
-      const data = await this.fetchJson<Array<{
-        post_title: string
-        group_name: string
-        discovered: string
-        description: string
-        website: string
-        post_url: string
-        country: string
-        activity: string
-      }>>(
+      // Try multiple Ransomware.live API endpoints (they change frequently)
+      let data: Array<{
+        post_title: string; group_name: string; discovered: string
+        description: string; website: string; post_url: string
+        country: string; activity: string
+      }> | null = null
+
+      for (const url of [
+        'https://api.ransomware.live/v2/recentvictims',
         'https://api.ransomware.live/recentvictims',
-        { timeout: 15000 }
-      )
+        'https://data.ransomware.live/victims.json'
+      ]) {
+        try {
+          data = await this.fetchJson(url, { timeout: 15000 })
+          if (data && Array.isArray(data)) break
+        } catch { data = null }
+      }
 
       if (!data || !Array.isArray(data)) return
 
@@ -124,10 +132,11 @@ export class CyberIocCollector extends BaseCollector {
   // C2IntelFeeds — Community-sourced C2 indicators
   private async collectC2Intel(reports: IntelReport[]): Promise<void> {
     try {
-      const text = await this.fetchText(
-        'https://raw.githubusercontent.com/drb-ra/C2IntelFeeds/master/feeds/IPC2s-30day.csv',
-        { timeout: 15000 }
-      )
+      const resp = await fetch('https://raw.githubusercontent.com/drb-ra/C2IntelFeeds/master/feeds/IPC2s-30day.csv', {
+        headers: { 'User-Agent': 'Heimdall/0.1.0' }, signal: AbortSignal.timeout(15000)
+      })
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
+      const text = await resp.text()
 
       const lines = text.split('\n').filter((l) => l.trim() && !l.startsWith('#') && !l.startsWith('ip'))
       if (lines.length === 0) return

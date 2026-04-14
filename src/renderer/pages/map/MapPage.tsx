@@ -377,7 +377,7 @@ export function MapPage() {
           {layers.paths && trajectories.map((traj, idx) => {
             const color = traj.type === 'iss' ? ISS_COLOR : TRAJECTORY_COLORS[idx % TRAJECTORY_COLORS.length]
             const rawPositions = traj.points.map((p) => [p.lat, p.lng] as [number, number])
-            if (rawPositions.length < 2) return null
+            if (rawPositions.length === 0) return null
 
             // For ISS/orbital: interpolate great circle arcs + split at antimeridian
             const isOrbital = traj.type === 'iss'
@@ -387,7 +387,7 @@ export function MapPage() {
 
             return (
               <span key={traj.id}>
-                {segments.map((seg, si) => (
+                {segments.filter((s) => s.length >= 2).map((seg, si) => (
                   <Polyline
                     key={`${traj.id}-seg-${si}`}
                     positions={seg}

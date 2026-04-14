@@ -47,12 +47,18 @@ export class CommodityCollector extends BaseCollector {
 
     try {
       const symbols = COMMODITIES.map((c) => c.symbol).join(',')
-      const data = await this.fetchJson<{
-        quoteResponse: { result: YahooQuote[] }
-      }>(
+      // Use direct fetch — Yahoo Finance blocks via robots.txt
+      const response = await fetch(
         `https://query1.finance.yahoo.com/v7/finance/quote?symbols=${encodeURIComponent(symbols)}&fields=regularMarketPrice,regularMarketChange,regularMarketChangePercent,regularMarketPreviousClose,shortName,currency`,
-        { timeout: 15000 }
+        {
+          headers: { 'User-Agent': 'Mozilla/5.0', Accept: 'application/json' },
+          signal: AbortSignal.timeout(15000)
+        }
       )
+      if (!response.ok) throw new Error(`HTTP ${response.status}`)
+      const data = await response.json() as {
+        quoteResponse: { result: YahooQuote[] }
+      }
 
       const quotes = data?.quoteResponse?.result || []
 
