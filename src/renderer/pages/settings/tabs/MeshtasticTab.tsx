@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
-import { Radio, Check, Loader2, Wifi, Usb, Cloud, RefreshCw } from 'lucide-react'
+import { Radio, Check, Loader2, Wifi, Usb, Cloud, RefreshCw, Send } from 'lucide-react'
 import { Button } from '@renderer/components/ui/button'
 import { Input } from '@renderer/components/ui/input'
 import { Label } from '@renderer/components/ui/label'
@@ -270,13 +270,13 @@ export function MeshtasticTab() {
         </CardContent>
       </Card>
 
-      <div className="flex items-center gap-3">
+      <div className="flex items-center gap-3 flex-wrap">
         <Button onClick={handleSave} disabled={saving || didSave}>
           {didSave ? <><Check className="h-4 w-4 mr-2" /> Saved</> : 'Save Meshtastic Settings'}
         </Button>
         <Button
           variant="outline"
-          onClick={() => test('Meshtastic', config)}
+          onClick={() => test('Meshtastic', { ...config, sendTestMessage: false })}
           disabled={testing || (!config.address && config.connectionType === 'tcp')}
         >
           {testing ? (
@@ -284,6 +284,13 @@ export function MeshtasticTab() {
           ) : (
             <><Radio className="h-4 w-4 mr-2" /> Test Connection</>
           )}
+        </Button>
+        <Button
+          variant="outline"
+          onClick={() => test('Meshtastic', { ...config, sendTestMessage: true })}
+          disabled={testing || (!config.address && config.connectionType === 'tcp')}
+        >
+          <Send className="h-4 w-4 mr-2" /> Send Test Message
         </Button>
         {result && (
           <Badge variant={result.success ? 'success' : 'error'}>

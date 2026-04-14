@@ -35,7 +35,6 @@ export function registerTestConnectionBridge(): void {
         return { success: false, message: 'Bot token is required' }
       }
 
-      // Validate token format: number:alphanumeric
       const tokenRegex = /^\d+:[A-Za-z0-9_-]+$/
       if (!tokenRegex.test(config.botToken)) {
         return { success: false, message: 'Invalid bot token format. Expected: 123456789:ABCdef...' }
@@ -43,19 +42,54 @@ export function registerTestConnectionBridge(): void {
 
       log.info('Telegram test connection requested')
 
-      // Quick API validation via getMe
-      const response = await fetch(
-        `https://api.telegram.org/bot${config.botToken}/getMe`
-      )
-      const data = await response.json()
+      // Step 1: Validate bot token via getMe
+      const meResponse = await fetch(`https://api.telegram.org/bot${config.botToken}/getMe`, {
+        signal: AbortSignal.timeout(10000)
+      })
+      const meData = await meResponse.json() as { ok: boolean; result?: { username: string }; description?: string }
 
-      if (data.ok) {
-        return {
-          success: true,
-          message: `Connected to bot: @${data.result.username}`
+      if (!meData.ok) {
+        return { success: false, message: `Telegram API error: ${meData.description}` }
+      }
+
+      const botName = meData.result?.username || 'unknown'
+
+      // Step 2: Send test message to each configured chat ID
+      const chatIds = config.chatIds as string[] || []
+      if (chatIds.length === 0) {
+        return { success: true, message: `Bot @${botName} connected. Add chat IDs to send test messages.` }
+      }
+
+      const results: string[] = []
+      for (const chatId of chatIds) {
+        try {
+          const msgResponse = await fetch(`https://api.telegram.org/bot${config.botToken}/sendMessage`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              chat_id: chatId,
+              text: `\u{1F6E1}\u{FE0F} *Heimdall Test Message*\n\nBot @${botName} is connected and working\\.\n_This is a test from Heimdall Intelligence Monitor\\._`,
+              parse_mode: 'MarkdownV2'
+            }),
+            signal: AbortSignal.timeout(10000)
+          })
+          const msgData = await msgResponse.json() as { ok: boolean; description?: string }
+          if (msgData.ok) {
+            results.push(`\u2705 ${chatId}`)
+          } else {
+            results.push(`\u274C ${chatId}: ${msgData.description}`)
+          }
+        } catch (err) {
+          results.push(`\u274C ${chatId}: ${err}`)
         }
-      } else {
-        return { success: false, message: `Telegram API error: ${data.description}` }
+      }
+
+      const allOk = results.every((r) => r.startsWith('\u2705'))
+      return {
+        success: allOk,
+        message: allOk
+          ? `@${botName} \u2014 test message sent to ${chatIds.length} chat(s)`
+          : `@${botName} \u2014 ${results.join(', ')}`
       }
     } catch (err) {
       log.error('Telegram test failed:', err)
@@ -84,13 +118,49 @@ export function registerTestConnectionBridge(): void {
       log.info('Meshtastic test connection requested', { connectionType })
 
       if (connectionType === 'tcp') {
+        // Step 1: Test TCP connection
+        let addr = address
+        if (!addr.startsWith('http')) addr = `http://${addr}`
+
+        // Step 2: Try Meshtastic HTTP API — get node info
+        try {
+          const infoResp = await fetch(`${addr}/api/v1/fromradio?all=false`, {
+            signal: AbortSignal.timeout(5000)
+          })
+
+          if (infoResp.ok) {
+            // Step 3: Send test message via HTTP API
+            const sendTestMessage = config.sendTestMessage !== false
+            if (sendTestMessage) {
+              try {
+                const msgResp = await fetch(`${addr}/api/v1/sendtext`, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                    text: 'Heimdall test - mesh node connected',
+                    channelIndex: config.channelIndex || 0
+                  }),
+                  signal: AbortSignal.timeout(5000)
+                })
+                if (msgResp.ok) {
+                  return { success: true, message: `Connected to ${address} \u2014 test message sent on CH${config.channelIndex || 0}` }
+                }
+              } catch {}
+              // sendtext might not be available on all firmware versions
+              return { success: true, message: `Connected to ${address} (HTTP API responding)` }
+            }
+            return { success: true, message: `Connected to Meshtastic node at ${address}` }
+          }
+        } catch {}
+
+        // Fallback: raw TCP socket test
         const net = await import('net')
         return new Promise((resolve) => {
           const socket = new net.Socket()
           socket.setTimeout(5000)
           socket.on('connect', () => {
             socket.destroy()
-            resolve({ success: true, message: `TCP connection to ${address}:${port} successful` })
+            resolve({ success: true, message: `TCP connection to ${address}:${port} successful (raw socket)` })
           })
           socket.on('timeout', () => { socket.destroy(); resolve({ success: false, message: `Connection to ${address}:${port} timed out` }) })
           socket.on('error', (err) => resolve({ success: false, message: `Connection failed: ${err.message}` }))
