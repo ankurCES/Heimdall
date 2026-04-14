@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback, useRef } from 'react'
-import { MapContainer, TileLayer, Marker, Popup, Tooltip, CircleMarker } from 'react-leaflet'
+import { MapContainer, TileLayer, Marker, Popup, Tooltip, CircleMarker, Polyline } from 'react-leaflet'
 import L from 'leaflet'
 import { Map as MapIcon, Filter, RefreshCw, Loader2 } from 'lucide-react'
 import { Button } from '@renderer/components/ui/button'
@@ -33,6 +33,15 @@ const DISCIPLINE_ICONS: Record<string, string> = {
   agency: '🏛️', imint: '📷'
 }
 
+const TRAJECTORY_COLORS = [
+  '#06b6d4', '#8b5cf6', '#ec4899', '#14b8a6', '#f43f5e',
+  '#6366f1', '#22c55e', '#e879f9', '#0ea5e9', '#fb923c'
+]
+const ISS_COLOR = '#f59e0b'
+
+interface TrajectoryPoint { lat: number; lng: number; time: number }
+interface Trajectory { id: string; label: string; type: 'adsb' | 'iss'; points: TrajectoryPoint[] }
+
 function makeDivIcon(emoji: string, color: string, size: number = 24): L.DivIcon {
   return L.divIcon({
     html: `<div style="width:${size}px;height:${size}px;display:flex;align-items:center;justify-content:center;font-size:${size * 0.6}px;border-radius:50%;border:2px solid ${color};background:rgba(15,23,42,0.85);box-shadow:0 0 6px ${color}40;">${emoji}</div>`,
@@ -64,9 +73,19 @@ export function MapPage() {
   const [filterSeverity, setFilterSeverity] = useState<string>('all')
   const [layers, setLayers] = useState<Record<string, boolean>>({
     osint: true, cybint: true, finint: true, socmint: true,
-    geoint: true, sigint: true, rumint: true, ci: true, agency: true, imint: true, mesh: true
+    geoint: true, sigint: true, rumint: true, ci: true, agency: true, imint: true, mesh: true, paths: true
   })
   const [meshNodes, setMeshNodes] = useState<Array<{ node_id: string; long_name: string | null; latitude: number | null; longitude: number | null; battery_level: number | null; last_seen: number }>>([])
+  const [trajectories, setTrajectories] = useState<Trajectory[]>([])
+
+  const loadTrajectories = useCallback(async () => {
+    try {
+      const result = await window.heimdall.invoke('intel:getTrajectories') as { trajectories: Trajectory[] }
+      setTrajectories(result.trajectories || [])
+    } catch (err) {
+      console.error('Failed to load trajectories:', err)
+    }
+  }, [])
 
   const loadMeshNodes = useCallback(async () => {
     try {
@@ -98,9 +117,10 @@ export function MapPage() {
   useEffect(() => {
     loadGeoReports()
     loadMeshNodes()
-    const interval = setInterval(() => { loadGeoReports(); loadMeshNodes() }, 30000)
+    loadTrajectories()
+    const interval = setInterval(() => { loadGeoReports(); loadMeshNodes(); loadTrajectories() }, 30000)
     return () => clearInterval(interval)
-  }, [loadGeoReports, loadMeshNodes])
+  }, [loadGeoReports, loadMeshNodes, loadTrajectories])
 
   // Subscribe to new reports
   useEffect(() => {
@@ -154,7 +174,8 @@ export function MapPage() {
                 { key: 'ci', icon: '🔒', label: 'CI — Counter-Intel' },
                 { key: 'agency', icon: '🏛️', label: 'Agency — Law Enforcement' },
                 { key: 'imint', icon: '📷', label: 'IMINT — Imagery' },
-                { key: 'mesh', icon: '📻', label: 'Meshtastic — Mesh Nodes' }
+                { key: 'mesh', icon: '📻', label: 'Meshtastic — Mesh Nodes' },
+                { key: 'paths', icon: '✈️', label: 'Trajectory Paths' }
               ]).map(({ key, icon, label }) => (
                 <div
                   key={key}
@@ -245,6 +266,39 @@ export function MapPage() {
                   <span style={{ fontSize: 10 }}>{emoji} {node.long_name || node.node_id}{isSelf ? ' (You)' : ''}</span>
                 </Tooltip>
               </Marker>
+            )
+          })}
+
+          {/* Trajectory paths — dotted bold lines */}
+          {layers.paths && trajectories.map((traj, idx) => {
+            const color = traj.type === 'iss' ? ISS_COLOR : TRAJECTORY_COLORS[idx % TRAJECTORY_COLORS.length]
+            const positions = traj.points.map((p) => [p.lat, p.lng] as [number, number])
+            if (positions.length < 2) return null
+            const lastPt = positions[positions.length - 1]
+            return (
+              <span key={traj.id}>
+                <Polyline
+                  positions={positions}
+                  pathOptions={{
+                    color,
+                    weight: 3,
+                    opacity: 0.75,
+                    dashArray: '8 6',
+                    lineCap: 'round',
+                    lineJoin: 'round'
+                  }}
+                />
+                {/* Endpoint marker — latest position */}
+                <CircleMarker
+                  center={lastPt}
+                  radius={5}
+                  pathOptions={{ color, fillColor: color, fillOpacity: 1, weight: 2 }}
+                >
+                  <Tooltip direction="top" offset={[0, -8]} className="custom-tooltip">
+                    <span style={{ fontSize: 10 }}>{traj.type === 'iss' ? '🛰️' : '✈️'} {traj.label} ({traj.points.length} pts)</span>
+                  </Tooltip>
+                </CircleMarker>
+              </span>
             )
           })}
 

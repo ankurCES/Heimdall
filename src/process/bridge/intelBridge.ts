@@ -110,6 +110,57 @@ export function registerIntelBridge(): void {
     }
   })
 
+  // Trajectory data for ADS-B aircraft and ISS
+  ipcMain.handle('intel:getTrajectories', () => {
+    const db = getDatabase()
+
+    interface TrajectoryPoint { lat: number; lng: number; time: number }
+    interface Trajectory { id: string; label: string; type: 'adsb' | 'iss'; points: TrajectoryPoint[] }
+    const trajectories: Trajectory[] = []
+
+    // ISS trajectory
+    const issRows = db.prepare(
+      "SELECT latitude, longitude, created_at FROM intel_reports WHERE source_name = 'ISS Tracker' AND latitude IS NOT NULL AND longitude IS NOT NULL ORDER BY created_at ASC"
+    ).all() as Array<{ latitude: number; longitude: number; created_at: number }>
+
+    if (issRows.length >= 2) {
+      trajectories.push({
+        id: 'iss',
+        label: 'ISS (International Space Station)',
+        type: 'iss',
+        points: issRows.map((r) => ({ lat: r.latitude, lng: r.longitude, time: r.created_at }))
+      })
+    }
+
+    // ADS-B trajectories — group by callsign extracted from title
+    const adsbRows = db.prepare(
+      "SELECT title, latitude, longitude, created_at FROM intel_reports WHERE source_name LIKE 'ADS-B%' AND latitude IS NOT NULL AND longitude IS NOT NULL ORDER BY created_at ASC"
+    ).all() as Array<{ title: string; latitude: number; longitude: number; created_at: number }>
+
+    const adsbGroups = new Map<string, TrajectoryPoint[]>()
+    for (const row of adsbRows) {
+      // Extract callsign from title pattern "ADS-B: {callsign} ..."
+      const match = row.title.match(/ADS-B:\s*(\S+)/)
+      const callsign = match ? match[1] : 'UNKNOWN'
+      if (!adsbGroups.has(callsign)) adsbGroups.set(callsign, [])
+      adsbGroups.get(callsign)!.push({ lat: row.latitude, lng: row.longitude, time: row.created_at })
+    }
+
+    for (const [callsign, points] of adsbGroups) {
+      if (points.length >= 2) {
+        trajectories.push({
+          id: `adsb-${callsign}`,
+          label: `ADS-B: ${callsign}`,
+          type: 'adsb',
+          points
+        })
+      }
+    }
+
+    log.info(`Trajectories: ${trajectories.length} paths (ISS: ${issRows.length} pts, ADS-B: ${adsbGroups.size} aircraft)`)
+    return { trajectories }
+  })
+
   log.info('Intel bridge registered')
 }
 
