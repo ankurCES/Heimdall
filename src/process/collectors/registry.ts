@@ -25,6 +25,7 @@ import { EdgarCollector } from './finint/EdgarCollector'
 import { SanctionsCollector } from './finint/SanctionsCollector'
 import { CommodityCollector } from './finint/CommodityCollector'
 import { MfapiCollector } from './finint/MfapiCollector'
+import { AlpacaStockCollector, AlpacaCryptoCollector } from './finint/AlpacaCollector'
 
 // SOCMINT
 import { TwitterCollector } from './socmint/TwitterCollector'
@@ -100,6 +101,8 @@ export function registerAllCollectors(): void {
   collectorManager.registerFactory('sanctions', () => new SanctionsCollector())
   collectorManager.registerFactory('commodity', () => new CommodityCollector())
   collectorManager.registerFactory('mfapi', () => new MfapiCollector())
+  collectorManager.registerFactory('alpaca-stock', () => new AlpacaStockCollector())
+  collectorManager.registerFactory('alpaca-crypto', () => new AlpacaCryptoCollector())
 
   // SOCMINT (3)
   collectorManager.registerFactory('twitter', () => new TwitterCollector())

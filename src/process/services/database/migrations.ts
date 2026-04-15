@@ -116,6 +116,35 @@ const migrations: Migration[] = [
       }
       log.info(`Migration 005: updated ${migrated} source configs to use settings:apikeys refs`)
     }
+  },
+  {
+    version: '006',
+    name: 'alpaca_dedicated_collector_types',
+    up: (db) => {
+      // Convert existing Alpaca sources from generic 'api-endpoint' to dedicated
+      // 'alpaca-stock' / 'alpaca-crypto' collector types so symbols can be parsed
+      // from JSON object keys (which generic ApiEndpointCollector can't do).
+      const stockSrc = db.prepare(
+        "SELECT id, config FROM sources WHERE name LIKE '%Alpaca: Stock%' AND type = 'api-endpoint'"
+      ).get() as { id: string; config: string } | undefined
+      if (stockSrc) {
+        const newConfig = JSON.stringify({ symbols: ['AAPL', 'MSFT', 'GOOGL', 'AMZN', 'META', 'NVDA', 'TSLA', 'SPY', 'QQQ'] })
+        db.prepare('UPDATE sources SET type = ?, config = ?, updated_at = ? WHERE id = ?')
+          .run('alpaca-stock', newConfig, timestamp(), stockSrc.id)
+      }
+
+      const cryptoSrc = db.prepare(
+        "SELECT id, config FROM sources WHERE name LIKE '%Alpaca: Crypto%' AND type = 'api-endpoint'"
+      ).get() as { id: string; config: string } | undefined
+      if (cryptoSrc) {
+        const newConfig = JSON.stringify({ symbols: ['BTC/USD', 'ETH/USD', 'SOL/USD'] })
+        db.prepare('UPDATE sources SET type = ?, config = ?, updated_at = ? WHERE id = ?')
+          .run('alpaca-crypto', newConfig, timestamp(), cryptoSrc.id)
+      }
+
+      const updated = (stockSrc ? 1 : 0) + (cryptoSrc ? 1 : 0)
+      log.info(`Migration 006: converted ${updated} Alpaca sources to dedicated collector types`)
+    }
   }
 ]
 

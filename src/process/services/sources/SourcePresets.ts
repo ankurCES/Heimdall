@@ -420,24 +420,11 @@ export const SOURCE_PRESETS: SourcePreset[] = [
   {
     id: 'alpaca-stock-snapshots',
     name: 'Alpaca: Stock Snapshots (FAANG+)',
-    discipline: 'finint', type: 'api-endpoint',
+    discipline: 'finint', type: 'alpaca-stock',
     category: 'US Stocks (Alpaca)',
     description: 'Latest snapshots for FAANG + key US stocks. Requires Alpaca keys in Settings → API Keys → Markets.',
     config: {
-      url: 'https://data.alpaca.markets/v2/stocks/snapshots?symbols=AAPL,MSFT,GOOGL,AMZN,META,NVDA,TSLA,SPY,QQQ',
-      headers: {
-        'APCA-API-KEY-ID': 'settings:apikeys.alpaca_key_id',
-        'APCA-API-SECRET-KEY': 'settings:apikeys.alpaca_secret'
-      },
-      jsonPath: '$.snapshots.*',
-      fieldMap: {
-        title: 'symbol',
-        content: 'latestTrade.p',
-        sourceUrl: 'symbol',
-        severity: 'dailyBar.c'
-      },
-      discipline: 'finint',
-      defaultSeverity: 'info'
+      symbols: ['AAPL', 'MSFT', 'GOOGL', 'AMZN', 'META', 'NVDA', 'TSLA', 'SPY', 'QQQ']
     },
     schedule: '*/15 9-16 * * 1-5', // Every 15min during US market hours
     url: 'https://docs.alpaca.markets/reference/stocksnapshots-1'
@@ -470,23 +457,11 @@ export const SOURCE_PRESETS: SourcePreset[] = [
   {
     id: 'alpaca-crypto-snapshots',
     name: 'Alpaca: Crypto Snapshots (BTC/ETH/SOL)',
-    discipline: 'finint', type: 'api-endpoint',
+    discipline: 'finint', type: 'alpaca-crypto',
     category: 'US Stocks (Alpaca)',
     description: 'Latest crypto snapshots. Requires Alpaca keys in Settings → API Keys → Markets.',
     config: {
-      url: 'https://data.alpaca.markets/v1beta3/crypto/us/snapshots?symbols=BTC%2FUSD,ETH%2FUSD,SOL%2FUSD',
-      headers: {
-        'APCA-API-KEY-ID': 'settings:apikeys.alpaca_key_id',
-        'APCA-API-SECRET-KEY': 'settings:apikeys.alpaca_secret'
-      },
-      jsonPath: '$.snapshots.*',
-      fieldMap: {
-        title: 'symbol',
-        content: 'latestTrade.p',
-        sourceUrl: 'symbol'
-      },
-      discipline: 'finint',
-      defaultSeverity: 'info'
+      symbols: ['BTC/USD', 'ETH/USD', 'SOL/USD']
     },
     schedule: '*/5 * * * *', // Crypto trades 24/7
     url: 'https://docs.alpaca.markets/reference/cryptosnapshots-1'
