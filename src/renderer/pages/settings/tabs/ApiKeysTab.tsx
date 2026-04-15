@@ -29,7 +29,11 @@ const API_KEY_CONFIGS: ApiKeyConfig[] = [
   { service: 'virustotal', label: 'VirusTotal API Key', description: 'CYBINT — malware analysis', category: 'Threat Intel' },
   { service: 'gnews', label: 'GNews API Key', description: 'OSINT — global news search (100 req/day free)', category: 'News & Data' },
   { service: 'datagov', label: 'Data.gov API Key', description: 'FBI Crime Data Explorer (free at api.data.gov/signup)', category: 'Government Data' },
-  { service: 'obsidian', label: 'Obsidian Local REST API Key', description: 'Connect to Obsidian vault for intel visualization', category: 'Integrations' }
+  { service: 'obsidian', label: 'Obsidian Local REST API Key', description: 'Connect to Obsidian vault for intel visualization', category: 'Integrations' },
+  { service: 'alpaca_key_id', label: 'Alpaca API Key ID', description: 'US stock market data (free at alpaca.markets/signup)', category: 'Markets' },
+  { service: 'alpaca_secret', label: 'Alpaca API Secret', description: 'US stock market data — paired with Key ID', category: 'Markets' },
+  { service: 'finnhub', label: 'Finnhub API Key', description: 'Stock quotes, fundamentals, news (free tier 60 calls/min)', category: 'Markets' },
+  { service: 'polygon', label: 'Polygon.io API Key', description: 'Stocks, options, crypto data (free tier available)', category: 'Markets' }
 ]
 
 function ApiKeyRow({ config }: { config: ApiKeyConfig }) {

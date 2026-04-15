@@ -274,7 +274,7 @@ export const SOURCE_PRESETS: SourcePreset[] = [
     description: 'Open Threat Exchange pulses (requires API key in headers)',
     config: {
       url: 'https://otx.alienvault.com/api/v1/pulses/subscribed?limit=20',
-      headers: { 'X-OTX-API-KEY': 'YOUR_API_KEY_HERE' },
+      headers: { 'X-OTX-API-KEY': 'settings:apikeys.otx' },
       jsonPath: '$.results[*]',
       fieldMap: {
         title: 'name',
@@ -422,12 +422,12 @@ export const SOURCE_PRESETS: SourcePreset[] = [
     name: 'Alpaca: Stock Snapshots (FAANG+)',
     discipline: 'finint', type: 'api-endpoint',
     category: 'US Stocks (Alpaca)',
-    description: 'Latest snapshots for FAANG + key US stocks. Requires Alpaca API key (free at alpaca.markets).',
+    description: 'Latest snapshots for FAANG + key US stocks. Requires Alpaca keys in Settings → API Keys → Markets.',
     config: {
       url: 'https://data.alpaca.markets/v2/stocks/snapshots?symbols=AAPL,MSFT,GOOGL,AMZN,META,NVDA,TSLA,SPY,QQQ',
       headers: {
-        'APCA-API-KEY-ID': 'YOUR_KEY_ID',
-        'APCA-API-SECRET-KEY': 'YOUR_SECRET'
+        'APCA-API-KEY-ID': 'settings:apikeys.alpaca_key_id',
+        'APCA-API-SECRET-KEY': 'settings:apikeys.alpaca_secret'
       },
       jsonPath: '$.snapshots.*',
       fieldMap: {
@@ -447,12 +447,12 @@ export const SOURCE_PRESETS: SourcePreset[] = [
     name: 'Alpaca: Real-time Stock News',
     discipline: 'finint', type: 'api-endpoint',
     category: 'US Stocks (Alpaca)',
-    description: 'Latest market news from Benzinga via Alpaca. Requires Alpaca API key.',
+    description: 'Latest market news from Benzinga via Alpaca. Requires Alpaca keys in Settings → API Keys → Markets.',
     config: {
       url: 'https://data.alpaca.markets/v1beta1/news?limit=20&sort=desc',
       headers: {
-        'APCA-API-KEY-ID': 'YOUR_KEY_ID',
-        'APCA-API-SECRET-KEY': 'YOUR_SECRET'
+        'APCA-API-KEY-ID': 'settings:apikeys.alpaca_key_id',
+        'APCA-API-SECRET-KEY': 'settings:apikeys.alpaca_secret'
       },
       jsonPath: '$.news[*]',
       fieldMap: {
@@ -472,12 +472,12 @@ export const SOURCE_PRESETS: SourcePreset[] = [
     name: 'Alpaca: Crypto Snapshots (BTC/ETH/SOL)',
     discipline: 'finint', type: 'api-endpoint',
     category: 'US Stocks (Alpaca)',
-    description: 'Latest crypto snapshots. Requires Alpaca API key.',
+    description: 'Latest crypto snapshots. Requires Alpaca keys in Settings → API Keys → Markets.',
     config: {
       url: 'https://data.alpaca.markets/v1beta3/crypto/us/snapshots?symbols=BTC%2FUSD,ETH%2FUSD,SOL%2FUSD',
       headers: {
-        'APCA-API-KEY-ID': 'YOUR_KEY_ID',
-        'APCA-API-SECRET-KEY': 'YOUR_SECRET'
+        'APCA-API-KEY-ID': 'settings:apikeys.alpaca_key_id',
+        'APCA-API-SECRET-KEY': 'settings:apikeys.alpaca_secret'
       },
       jsonPath: '$.snapshots.*',
       fieldMap: {

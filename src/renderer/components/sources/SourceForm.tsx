@@ -211,7 +211,10 @@ function ApiConfigForm({ config, update }: { config: Record<string, unknown>; up
         <Label className="text-xs">Headers (JSON)</Label>
         <Input value={typeof config.headers === 'object' ? JSON.stringify(config.headers) : String(config.headers || '')}
           onChange={(e) => { try { update('headers', JSON.parse(e.target.value)) } catch { update('headers', e.target.value) } }}
-          placeholder='{"X-API-Key": "abc"}' />
+          placeholder='{"X-API-Key": "settings:apikeys.alpaca_key_id"}' />
+        <p className="text-[10px] text-muted-foreground">
+          Use <code className="font-mono bg-muted px-1 rounded">settings:apikeys.&lt;name&gt;</code> for secrets — resolved from Settings → API Keys at runtime
+        </p>
       </div>
       <div className="border-t border-border pt-3">
         <p className="text-xs font-medium mb-2">Field Mapping (path within each record)</p>

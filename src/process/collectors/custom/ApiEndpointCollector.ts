@@ -28,6 +28,8 @@ interface ApiConfig {
   url: string
   method?: 'GET' | 'POST'
   headers?: Record<string, string>
+  // Header values starting with 'settings:apikeys.X' get resolved from
+  // SettingsService at runtime — keeps API keys out of source config
   body?: string
   jsonPath?: string
   fieldMap?: {
@@ -62,15 +64,18 @@ export class ApiEndpointCollector extends BaseCollector {
     const defaultSeverity = cfg.defaultSeverity || 'info'
 
     try {
+      // Resolve header values like 'settings:apikeys.alpaca_key_id' from SettingsService
+      const resolvedHeaders = await this.resolveHeaders(cfg.headers || {})
+
       const response = cfg.bypassRobots
         ? await fetch(cfg.url, {
             method: cfg.method || 'GET',
-            headers: { 'User-Agent': 'Heimdall/0.1.0', Accept: 'application/json', ...cfg.headers },
+            headers: { 'User-Agent': 'Heimdall/0.1.0', Accept: 'application/json', ...resolvedHeaders },
             body: cfg.body,
             signal: AbortSignal.timeout(20000)
           })
         : await this.safeFetch(cfg.url, {
-            headers: { Accept: 'application/json', ...cfg.headers },
+            headers: { Accept: 'application/json', ...resolvedHeaders },
             timeout: 20000
           })
 
@@ -139,6 +144,36 @@ export class ApiEndpointCollector extends BaseCollector {
     }
 
     return reports
+  }
+
+  // Resolve header values starting with 'settings:apikeys.X' from SettingsService
+  // e.g., 'settings:apikeys.alpaca_key_id' -> the value stored in Settings → API Keys
+  private async resolveHeaders(headers: Record<string, string>): Promise<Record<string, string>> {
+    const resolved: Record<string, string> = {}
+    let settingsService: { get: (key: string) => string | undefined } | null = null
+
+    for (const [name, value] of Object.entries(headers)) {
+      if (typeof value === 'string' && value.startsWith('settings:')) {
+        if (!settingsService) {
+          try {
+            const mod = await import('../../services/settings/SettingsService')
+            settingsService = mod.settingsService as never
+          } catch {
+            log.warn(`ApiEndpoint: settings reference but service unavailable`)
+            continue
+          }
+        }
+        const key = value.replace(/^settings:/, '')
+        const secret = settingsService?.get<string>(key as never) || ''
+        if (!secret) {
+          log.warn(`ApiEndpoint: empty secret for ${key} (configure in Settings → API Keys)`)
+        }
+        resolved[name] = secret
+      } else {
+        resolved[name] = value
+      }
+    }
+    return resolved
   }
 
   // Extract value from object using dot path (e.g., 'location.lat') or JSONPath ($.foo.bar)
