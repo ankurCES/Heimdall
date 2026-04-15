@@ -3,10 +3,29 @@ import { useState, useEffect } from 'react'
 import { Menu, X } from 'lucide-react'
 import { Sidebar } from './Sidebar'
 import { ErrorBoundary } from '../ErrorBoundary'
+import { ClassificationBanner, type Classification, isClassification } from '../ClassificationBanner'
 
 export function Layout() {
   const [mobileOpen, setMobileOpen] = useState(false)
+  const [clearance, setClearance] = useState<Classification>('UNCLASSIFIED')
   const location = useLocation()
+
+  // Read current user clearance once at mount and after settings change.
+  // The banner reflects the user's clearance — the highest classification
+  // they're allowed to view in this session — not the per-page maximum,
+  // which is a future enhancement. This matches the SCIF convention of
+  // marking the room with the highest cleared level present.
+  useEffect(() => {
+    const load = async () => {
+      try {
+        const value = await window.heimdall.invoke('settings:get', { key: 'security.clearance' })
+        if (isClassification(value)) setClearance(value)
+      } catch {}
+    }
+    void load()
+    const id = setInterval(load, 30_000) // pick up Settings changes
+    return () => clearInterval(id)
+  }, [])
 
   // Close mobile drawer on route change
   useEffect(() => {
@@ -14,7 +33,13 @@ export function Layout() {
   }, [location.pathname])
 
   return (
-    <div className="flex h-screen w-screen overflow-hidden">
+    <div className="flex flex-col h-screen w-screen overflow-hidden">
+      {/* Top + bottom classification banner — SCIF convention. The user's
+          current clearance level is shown; raising clearance via Settings
+          surfaces immediately. */}
+      <ClassificationBanner level={clearance} />
+
+      <div className="flex flex-1 overflow-hidden">
       {/* Desktop sidebar (always visible >= md) */}
       <div className="hidden md:flex">
         <Sidebar />
@@ -52,6 +77,10 @@ export function Layout() {
           </ErrorBoundary>
         </div>
       </main>
+      </div>
+
+      {/* Bottom banner mirrors the top — SCIF convention. */}
+      <ClassificationBanner level={clearance} />
     </div>
   )
 }

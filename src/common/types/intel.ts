@@ -38,6 +38,8 @@ export interface IntelReport {
   credibility: number | null
   /** STANAG 2511 source reliability A–F, joined from the source row. */
   sourceReliability: 'A' | 'B' | 'C' | 'D' | 'E' | 'F' | null
+  /** US/NATO classification level. Defaults to UNCLASSIFIED. */
+  classification: 'UNCLASSIFIED' | 'CONFIDENTIAL' | 'SECRET' | 'TOP SECRET'
   reviewed: boolean
   createdAt: number
   updatedAt: number

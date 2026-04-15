@@ -1,11 +1,33 @@
 import { useEffect, useState, useCallback } from 'react'
-import { Activity, RefreshCw, Search, Tag, Link2, Shield } from 'lucide-react'
+import { Activity, RefreshCw, Search, Tag, Link2, Shield, Lock, ShieldCheck, ShieldAlert, Loader2 } from 'lucide-react'
 import { Button } from '@renderer/components/ui/button'
 import { Badge } from '@renderer/components/ui/badge'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@renderer/components/ui/card'
 import { Input } from '@renderer/components/ui/input'
 import { ipc } from '@renderer/lib/ipc'
 import { formatRelativeTime } from '@renderer/lib/utils'
+import { ClassificationBadge } from '@renderer/components/ClassificationBanner'
+
+interface ChainEntry {
+  id: string
+  sequence: number
+  action: string
+  actor?: string
+  entity_type?: string
+  entity_id?: string
+  classification?: string
+  payload?: Record<string, unknown>
+  timestamp: number
+  prev_hash: string
+  this_hash: string
+}
+
+interface VerifyResult {
+  ok: boolean
+  totalRows: number
+  firstMismatchSequence?: number
+  message: string
+}
 
 export function AuditPage() {
   const [entries, setEntries] = useState<Array<Record<string, unknown>>>([])
@@ -13,7 +35,7 @@ export function AuditPage() {
   const [loading, setLoading] = useState(false)
   const [topTags, setTopTags] = useState<Array<{ tag: string; count: number }>>([])
   const [topEntities, setTopEntities] = useState<Array<{ type: string; value: string; count: number }>>([])
-  const [activeTab, setActiveTab] = useState<'audit' | 'tags' | 'entities'>('audit')
+  const [activeTab, setActiveTab] = useState<'audit' | 'tags' | 'entities' | 'chain'>('audit')
 
   const invoke = useCallback((ch: string, p?: unknown) => window.heimdall.invoke(ch, p), [])
 
@@ -59,10 +81,11 @@ export function AuditPage() {
           </p>
         </div>
         <div className="flex gap-2">
-          {(['tags', 'entities', 'audit'] as const).map((tab) => (
+          {(['tags', 'entities', 'audit', 'chain'] as const).map((tab) => (
             <Button key={tab} variant={activeTab === tab ? 'default' : 'outline'} size="sm" onClick={() => setActiveTab(tab)}>
               {tab === 'tags' ? <><Tag className="h-3.5 w-3.5 mr-1.5" />Tags</> :
                tab === 'entities' ? <><Shield className="h-3.5 w-3.5 mr-1.5" />Entities</> :
+               tab === 'chain' ? <><Lock className="h-3.5 w-3.5 mr-1.5" />Tamper-Evident Chain</> :
                <><Activity className="h-3.5 w-3.5 mr-1.5" />Audit Log</>}
             </Button>
           ))}
@@ -172,6 +195,122 @@ export function AuditPage() {
           </CardContent>
         </Card>
       )}
+
+      {activeTab === 'chain' && <TamperEvidentChainPanel />}
     </div>
+  )
+}
+
+/**
+ * Tamper-evident audit chain (Theme 10.4).
+ *
+ * Lists every classification override, source-rating change, deletion, and
+ * other security-relevant action with the running cryptographic chain hash.
+ * Verify button walks the chain and reports the first mismatch.
+ */
+function TamperEvidentChainPanel() {
+  const [entries, setEntries] = useState<ChainEntry[]>([])
+  const [total, setTotal] = useState(0)
+  const [loading, setLoading] = useState(false)
+  const [verifying, setVerifying] = useState(false)
+  const [verifyResult, setVerifyResult] = useState<VerifyResult | null>(null)
+
+  const load = async () => {
+    setLoading(true)
+    try {
+      const result = await window.heimdall.invoke('audit:chain:list', { limit: 200, offset: 0 }) as { total: number; entries: ChainEntry[] }
+      setEntries(result.entries || [])
+      setTotal(result.total || 0)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  useEffect(() => { void load() }, [])
+
+  const verify = async () => {
+    setVerifying(true)
+    setVerifyResult(null)
+    try {
+      const result = await window.heimdall.invoke('audit:chain:verify') as VerifyResult
+      setVerifyResult(result)
+    } finally {
+      setVerifying(false)
+    }
+  }
+
+  return (
+    <Card>
+      <CardHeader>
+        <div className="flex items-center justify-between">
+          <div>
+            <CardTitle className="text-base flex items-center gap-2">
+              <Lock className="h-4 w-4" /> Tamper-Evident Chain
+            </CardTitle>
+            <CardDescription>
+              {total} security-relevant actions in a hash-chain. Every row's hash includes the previous row's hash —
+              tampering with history breaks the chain and is detectable on verify.
+            </CardDescription>
+          </div>
+          <div className="flex items-center gap-2">
+            <Button size="sm" variant="outline" onClick={load} disabled={loading}>
+              <RefreshCw className={loading ? 'h-3.5 w-3.5 animate-spin' : 'h-3.5 w-3.5'} />
+            </Button>
+            <Button size="sm" onClick={verify} disabled={verifying || total === 0}>
+              {verifying ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" /> : <ShieldCheck className="h-3.5 w-3.5 mr-1.5" />}
+              Verify Chain
+            </Button>
+          </div>
+        </div>
+      </CardHeader>
+      <CardContent>
+        {verifyResult && (
+          <div className={`mb-3 p-3 rounded-md border text-xs ${verifyResult.ok
+            ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300'
+            : 'border-red-500/40 bg-red-500/10 text-red-300'}`}>
+            <div className="flex items-center gap-2 font-semibold mb-1">
+              {verifyResult.ok ? <ShieldCheck className="h-4 w-4" /> : <ShieldAlert className="h-4 w-4" />}
+              {verifyResult.ok ? 'Chain Intact' : 'TAMPER DETECTED'}
+            </div>
+            <p>{verifyResult.message}</p>
+            {verifyResult.firstMismatchSequence && (
+              <p className="mt-1 font-mono">First mismatch at sequence #{verifyResult.firstMismatchSequence}</p>
+            )}
+          </div>
+        )}
+
+        {entries.length === 0 ? (
+          <p className="text-sm text-muted-foreground text-center py-8">
+            Chain is empty. Security-relevant actions (classification changes, deletions, source rating changes) will appear here.
+          </p>
+        ) : (
+          <div className="space-y-1 max-h-[60vh] overflow-auto pr-1">
+            {entries.map((e) => (
+              <div key={e.id} className="border border-border/50 rounded p-2 text-xs hover:bg-accent/30">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="font-mono text-muted-foreground/70">#{e.sequence}</span>
+                  <Badge variant="outline" className="text-[9px] py-0 px-1.5 font-mono">{e.action}</Badge>
+                  {e.classification && <ClassificationBadge level={e.classification as 'UNCLASSIFIED' | 'CONFIDENTIAL' | 'SECRET' | 'TOP SECRET'} />}
+                  {e.entity_type && (
+                    <span className="text-muted-foreground/80">
+                      {e.entity_type}: <span className="font-mono">{(e.entity_id || '').slice(0, 12)}</span>
+                    </span>
+                  )}
+                  <span className="text-muted-foreground ml-auto">{formatRelativeTime(e.timestamp)}</span>
+                </div>
+                {e.payload && Object.keys(e.payload).length > 0 && (
+                  <pre className="mt-1.5 text-[10px] text-muted-foreground/80 font-mono overflow-x-auto">
+                    {JSON.stringify(e.payload, null, 0).slice(0, 200)}
+                  </pre>
+                )}
+                <div className="mt-1 text-[9px] text-muted-foreground/50 font-mono truncate" title={e.this_hash}>
+                  hash {e.this_hash.slice(0, 16)}… ← prev {e.prev_hash.slice(0, 12)}…
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </CardContent>
+    </Card>
   )
 }

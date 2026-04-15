@@ -14,6 +14,7 @@ import { DISCIPLINE_LABELS, type Discipline, type ThreatLevel, type IntelReport 
 import { formatRelativeTime } from '@renderer/lib/utils'
 import { cn } from '@renderer/lib/utils'
 import { StanagBadge } from '@renderer/components/StanagBadge'
+import { ClassificationBadge, isClassification, isCleared, type Classification } from '@renderer/components/ClassificationBanner'
 
 const SEVERITY_BADGE: Record<ThreatLevel, { variant: 'destructive' | 'warning' | 'default' | 'secondary' | 'outline'; label: string }> = {
   critical: { variant: 'destructive', label: 'CRITICAL' },
@@ -199,6 +200,7 @@ export function FeedPage() {
                       <div className="flex items-center gap-2 mt-1">
                         <Badge variant={sevBadge.variant} className="text-[9px] py-0 px-1.5">{sevBadge.label}</Badge>
                         <Badge variant="outline" className="text-[9px] py-0 px-1.5 font-mono">{report.discipline}</Badge>
+                        <ClassificationBadge level={report.classification} />
                         <StanagBadge reliability={report.sourceReliability} credibility={report.credibility} />
                         <span className="text-[10px] text-muted-foreground">{report.sourceName}</span>
                         <span className="text-[10px] text-muted-foreground ml-auto">{formatRelativeTime(report.createdAt)}</span>

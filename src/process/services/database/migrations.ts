@@ -673,6 +673,72 @@ const migrations: Migration[] = [
 
       log.info(`Migration 013: rated ${rated} sources; backfilled credibility on ${credResult.changes} reports`)
     }
+  },
+  {
+    version: '014',
+    name: 'classification_and_audit_chain',
+    up: (db) => {
+      // ─────────────────────────────────────────────────────────────────────
+      //  Classification levels (Theme 10.1)
+      // ─────────────────────────────────────────────────────────────────────
+      // Every analyst-facing artifact gets a classification level matching
+      // the US/NATO scheme: UNCLASSIFIED < CONFIDENTIAL < SECRET < TOP SECRET.
+      // The UI gates rendering by the user's clearance setting (single-user
+      // for now; multi-user RBAC deferred to Theme 10.10).
+      //
+      // Every existing row defaults to UNCLASSIFIED so analysts can start
+      // overriding upward; nothing existing gets accidentally hidden.
+      const tables = [
+        'intel_reports',
+        'preliminary_reports',
+        'humint_reports',
+        'recommended_actions',
+        'intel_gaps',
+        'chat_sessions'
+      ]
+      for (const tbl of tables) {
+        try { db.exec(`ALTER TABLE ${tbl} ADD COLUMN classification TEXT DEFAULT 'UNCLASSIFIED'`) } catch {}
+        // Backfill anything that ended up NULL (older rows)
+        db.prepare(`UPDATE ${tbl} SET classification = 'UNCLASSIFIED' WHERE classification IS NULL`).run()
+      }
+
+      // Default user clearance: UNCLASSIFIED. Settings page lets the analyst
+      // bump it; export gates compare doc.classification > user.clearance.
+      const now = timestamp()
+      db.prepare(
+        'INSERT OR IGNORE INTO settings (key, value, updated_at) VALUES (?, ?, ?)'
+      ).run('security.clearance', JSON.stringify('UNCLASSIFIED'), now)
+
+      // ─────────────────────────────────────────────────────────────────────
+      //  Hash-chained tamper-evident audit log (Theme 10.4)
+      // ─────────────────────────────────────────────────────────────────────
+      // Each row's hash chains over the previous row's hash. Tampering with
+      // any historical row breaks the chain — verify() walks the table and
+      // recomputes hashes; first mismatch is the tamper point.
+      //
+      // sequence is monotonic (no gaps) for cheap chain validation.
+      // payload is a JSON blob of any structured details for the action.
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS audit_log_chained (
+          id TEXT PRIMARY KEY,
+          sequence INTEGER NOT NULL UNIQUE,
+          action TEXT NOT NULL,
+          actor TEXT,
+          entity_type TEXT,
+          entity_id TEXT,
+          classification TEXT,
+          payload TEXT,
+          timestamp INTEGER NOT NULL,
+          prev_hash TEXT NOT NULL,
+          this_hash TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_audit_chain_seq ON audit_log_chained(sequence);
+        CREATE INDEX IF NOT EXISTS idx_audit_chain_entity ON audit_log_chained(entity_type, entity_id);
+        CREATE INDEX IF NOT EXISTS idx_audit_chain_ts ON audit_log_chained(timestamp DESC);
+      `)
+
+      log.info(`Migration 014: classification column added to ${tables.length} tables; audit_log_chained created with hash-chain integrity`)
+    }
   }
 ]
 

@@ -8,6 +8,7 @@ import { TelegramSubscriberCollector } from '../collectors/custom/TelegramSubscr
 import { GitHubRepoCollector } from '../collectors/custom/GitHubRepoCollector'
 import { RssCollector } from '../collectors/osint/RssCollector'
 import { generateId, timestamp } from '@common/utils/id'
+import { auditChainService } from '../services/audit/AuditChainService'
 import type { Source } from '@common/types/intel'
 import log from 'electron-log'
 
@@ -51,6 +52,13 @@ export function registerSourcesBridge(): void {
       if (v === null || (typeof v === 'string' && (valid as readonly string[]).includes(v))) {
         fields.push('admiralty_reliability = ?'); values.push(v)
         fields.push('admiralty_reliability_set_at = ?'); values.push(now)
+        // Source-rating changes are security-relevant — chain log
+        const before = db.prepare('SELECT admiralty_reliability FROM sources WHERE id = ?').get(id) as { admiralty_reliability: string | null } | undefined
+        auditChainService.append('source.setReliability', {
+          entityType: 'source',
+          entityId: id,
+          payload: { from: before?.admiralty_reliability ?? null, to: v }
+        })
       }
     }
 
@@ -65,7 +73,16 @@ export function registerSourcesBridge(): void {
   })
 
   ipcMain.handle(IPC_CHANNELS.SOURCES_DELETE, (_event, params: { id: string }) => {
+    // Chain-log destructive actions
     const db = getDatabase()
+    const src = db.prepare('SELECT name, type FROM sources WHERE id = ?').get(params.id) as { name: string; type: string } | undefined
+    if (src) {
+      auditChainService.append('source.delete', {
+        entityType: 'source',
+        entityId: params.id,
+        payload: { name: src.name, type: src.type }
+      })
+    }
     db.prepare('DELETE FROM sources WHERE id = ?').run(params.id)
   })
 

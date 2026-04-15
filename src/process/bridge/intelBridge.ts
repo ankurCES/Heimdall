@@ -1,8 +1,15 @@
 import { ipcMain } from 'electron'
 import { IPC_CHANNELS } from '@common/adapter/ipcBridge'
 import { getDatabase } from '../services/database'
+import { auditChainService } from '../services/audit/AuditChainService'
 import type { IntelReport, ThreatLevel } from '@common/types/intel'
 import log from 'electron-log'
+
+const VALID_CLASSIFICATIONS = ['UNCLASSIFIED', 'CONFIDENTIAL', 'SECRET', 'TOP SECRET'] as const
+type Classification = typeof VALID_CLASSIFICATIONS[number]
+function isClassification(s: unknown): s is Classification {
+  return typeof s === 'string' && (VALID_CLASSIFICATIONS as readonly string[]).includes(s)
+}
 
 export function registerIntelBridge(): void {
   ipcMain.handle(IPC_CHANNELS.INTEL_GET_REPORTS, (_event, params) => {
@@ -90,6 +97,32 @@ export function registerIntelBridge(): void {
       }
     })
     tx()
+    // Tamper-evident audit (Theme 10.4)
+    auditChainService.append('intel.markReviewed', {
+      entityType: 'intel_report',
+      payload: { ids: params.ids, count: params.ids.length }
+    })
+  })
+
+  // Set classification on an intel report. Tamper-evident chain entry per change.
+  ipcMain.handle('intel:setClassification', (_event, params: { id: string; classification: Classification }) => {
+    if (!isClassification(params.classification)) {
+      throw new Error(`Invalid classification: ${params.classification}`)
+    }
+    const db = getDatabase()
+    const before = db.prepare('SELECT classification FROM intel_reports WHERE id = ?').get(params.id) as { classification: string } | undefined
+    if (!before) throw new Error(`Intel report not found: ${params.id}`)
+
+    db.prepare('UPDATE intel_reports SET classification = ?, updated_at = ? WHERE id = ?')
+      .run(params.classification, Date.now(), params.id)
+
+    auditChainService.append('intel.setClassification', {
+      entityType: 'intel_report',
+      entityId: params.id,
+      classification: params.classification,
+      payload: { from: before.classification, to: params.classification }
+    })
+    return { ok: true, from: before.classification, to: params.classification }
   })
 
   ipcMain.handle(IPC_CHANNELS.INTEL_GET_DASHBOARD_STATS, () => {
@@ -344,6 +377,7 @@ interface RawReport {
   verification_score: number
   credibility: number | null
   source_reliability: string | null
+  classification: string | null
   reviewed: number
   created_at: number
   updated_at: number
@@ -368,6 +402,7 @@ function mapReport(row: RawReport): IntelReport {
     verificationScore: row.verification_score,
     credibility: row.credibility,
     sourceReliability,
+    classification: (isClassification(row.classification) ? row.classification : 'UNCLASSIFIED'),
     reviewed: row.reviewed === 1,
     createdAt: row.created_at,
     updatedAt: row.updated_at

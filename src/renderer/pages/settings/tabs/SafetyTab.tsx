@@ -1,12 +1,14 @@
 import { useState, useEffect } from 'react'
-import { ShieldCheck, Check } from 'lucide-react'
+import { ShieldCheck, Check, Lock } from 'lucide-react'
 import { Button } from '@renderer/components/ui/button'
 import { Input } from '@renderer/components/ui/input'
 import { Label } from '@renderer/components/ui/label'
 import { Switch } from '@renderer/components/ui/switch'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@renderer/components/ui/card'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@renderer/components/ui/select'
 import { useSetting } from '@renderer/hooks/useSettings'
 import type { SafetyConfig } from '@common/types/settings'
+import { CLASSIFICATION_LEVELS, type Classification, isClassification } from '@renderer/components/ClassificationBanner'
 
 const DEFAULT_SAFETY: SafetyConfig = {
   rateLimitPerDomain: 30,
@@ -132,6 +134,89 @@ export function SafetyTab() {
       <Button onClick={handleSave} disabled={saving || didSave}>
         {didSave ? <><Check className="h-4 w-4 mr-2" /> Saved</> : 'Save Safety Settings'}
       </Button>
+
+      <ClearanceCard />
     </div>
+  )
+}
+
+/**
+ * User clearance level (single-user mode). Sets the highest classification
+ * the analyst is allowed to view in this session. The top + bottom
+ * classification banners on every page reflect this value.
+ *
+ * Multi-user RBAC + per-user clearance is Theme 10.10 — for now Heimdall
+ * is single-user and the operating environment is presumed to enforce
+ * physical access control to the host.
+ */
+function ClearanceCard() {
+  const [clearance, setClearance] = useState<Classification>('UNCLASSIFIED')
+  const [saving, setSaving] = useState(false)
+  const [savedAt, setSavedAt] = useState<number | null>(null)
+
+  useEffect(() => {
+    void (async () => {
+      try {
+        const v = await window.heimdall.invoke('settings:get', { key: 'security.clearance' })
+        if (isClassification(v)) setClearance(v)
+      } catch {}
+    })()
+  }, [])
+
+  const handle = async (next: Classification) => {
+    setClearance(next)
+    setSaving(true)
+    try {
+      await window.heimdall.invoke('settings:set', { key: 'security.clearance', value: next })
+      setSavedAt(Date.now())
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <Card>
+      <CardHeader>
+        <div className="flex items-center gap-2">
+          <Lock className="h-5 w-5 text-muted-foreground" />
+          <CardTitle className="text-base">Security Clearance</CardTitle>
+        </div>
+        <CardDescription>
+          The highest classification level you are cleared to view in this session.
+          Banners on every page reflect this value. Reports above your clearance
+          remain in the database but are filtered from list views and detail panes.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        <div className="space-y-2">
+          <Label>Current Clearance</Label>
+          <Select value={clearance} onValueChange={(v) => handle(v as Classification)}>
+            <SelectTrigger className="w-56"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              {CLASSIFICATION_LEVELS.map((lvl) => (
+                <SelectItem key={lvl} value={lvl}>{lvl}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          {saving && <p className="text-xs text-muted-foreground">Saving…</p>}
+          {savedAt && !saving && (
+            <p className="text-xs text-emerald-400">
+              <Check className="inline h-3 w-3 mr-1" />
+              Clearance set to {clearance} — banners refresh within 30 s
+            </p>
+          )}
+        </div>
+        <div className="text-xs text-muted-foreground border-t border-border pt-3">
+          <p className="font-semibold mb-1">Order (lowest to highest):</p>
+          <ul className="list-disc list-inside space-y-0.5">
+            <li><span className="font-mono">UNCLASSIFIED</span> — public information; no clearance required</li>
+            <li><span className="font-mono">CONFIDENTIAL</span> — could damage national security if disclosed</li>
+            <li><span className="font-mono">SECRET</span> — could cause serious damage to national security</li>
+            <li><span className="font-mono">TOP SECRET</span> — could cause exceptionally grave damage</li>
+          </ul>
+          <p className="mt-3 italic">Every classification change is recorded in the tamper-evident audit chain (Audit Log → Tamper-Evident Chain).</p>
+        </div>
+      </CardContent>
+    </Card>
   )
 }

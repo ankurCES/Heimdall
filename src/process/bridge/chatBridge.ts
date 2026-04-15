@@ -6,6 +6,7 @@ import { vectorDbService } from '../services/vectordb/VectorDbService'
 import { syncManager } from '../services/sync/SyncManager'
 import { getDatabase } from '../services/database'
 import { reportExtractor } from '../services/enrichment/ReportExtractor'
+import { auditChainService } from '../services/audit/AuditChainService'
 import { watchTermsService } from '../services/watch/WatchTermsService'
 import { generateId, timestamp } from '@common/utils/id'
 import log from 'electron-log'
@@ -49,8 +50,16 @@ export function registerChatBridge(): void {
 
   ipcMain.handle('chat:deleteSession', (_event, params: { id: string }) => {
     const db = getDatabase()
+    const meta = db.prepare('SELECT title, classification FROM chat_sessions WHERE id = ?').get(params.id) as { title: string; classification: string } | undefined
+    const msgCount = (db.prepare('SELECT COUNT(*) AS c FROM chat_messages WHERE session_id = ?').get(params.id) as { c: number }).c
     db.prepare('DELETE FROM chat_messages WHERE session_id = ?').run(params.id)
     db.prepare('DELETE FROM chat_sessions WHERE id = ?').run(params.id)
+    auditChainService.append('chat.deleteSession', {
+      entityType: 'chat_session',
+      entityId: params.id,
+      classification: meta?.classification,
+      payload: { title: meta?.title, messageCount: msgCount }
+    })
   })
 
   // ── Chat Messages ──────────────────────────────────────────────────
