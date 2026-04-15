@@ -97,12 +97,18 @@ export class ThreatFeedCollector extends BaseCollector {
     const reports: IntelReport[] = []
 
     try {
-      // Use direct fetch — abuse.ch blocks via robots.txt
+      // abuse.ch added Auth-Key requirement in 2024 — get free key at auth.abuse.ch
+      const authKey = settingsService.get<string>('apikeys.abusech') || ''
+      const headers: Record<string, string> = { 'User-Agent': 'Heimdall/0.1.0', Accept: 'application/json' }
+      if (authKey) headers['Auth-Key'] = authKey
+
       const response = await fetch(`${URLHAUS_API}/urls/recent/`, {
-        method: 'GET',
-        headers: { 'User-Agent': 'Heimdall/0.1.0', Accept: 'application/json' },
-        signal: AbortSignal.timeout(15000)
+        method: 'GET', headers, signal: AbortSignal.timeout(15000)
       })
+      if (response.status === 401) {
+        log.debug('URLhaus: HTTP 401 — configure abuse.ch Auth-Key in Settings → API Keys (free at auth.abuse.ch)')
+        return reports
+      }
       if (!response.ok) throw new Error(`HTTP ${response.status}`)
       const data = await response.json() as { urls: UrlhausEntry[] }
 

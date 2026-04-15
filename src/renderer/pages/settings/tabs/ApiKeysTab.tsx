@@ -24,6 +24,7 @@ const API_KEY_CONFIGS: ApiKeyConfig[] = [
   { service: 'reddit_client_id', label: 'Reddit Client ID', description: 'SOCMINT — subreddit monitoring', category: 'Social Media' },
   { service: 'reddit_client_secret', label: 'Reddit Client Secret', description: 'SOCMINT — OAuth2 auth', category: 'Social Media' },
   { service: 'otx', label: 'AlienVault OTX API Key', description: 'CYBINT — threat intelligence feeds', category: 'Threat Intel' },
+  { service: 'abusech', label: 'abuse.ch Auth-Key', description: 'URLhaus + Feodo Tracker (free at auth.abuse.ch)', category: 'Threat Intel' },
   { service: 'shodan', label: 'Shodan API Key', description: 'CYBINT — device/network scanning', category: 'Threat Intel' },
   { service: 'hibp', label: 'HaveIBeenPwned API Key', description: 'CI — breach monitoring', category: 'Threat Intel' },
   { service: 'virustotal', label: 'VirusTotal API Key', description: 'CYBINT — malware analysis', category: 'Threat Intel' },
