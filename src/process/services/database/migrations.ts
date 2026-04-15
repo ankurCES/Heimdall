@@ -471,6 +471,59 @@ const migrations: Migration[] = [
 
       log.info(`Migration 010: rewrote source_report_ids on ${rewrittenReports} preliminary reports (tool_logs scan), added ${linksAdded} preliminary→intel links`)
     }
+  },
+  {
+    version: '011',
+    name: 'sync_preliminary_source_ids_to_intel_links',
+    up: (db) => {
+      // Several existing preliminary_reports have a valid source_report_ids
+      // JSON array (20+ ids) but only 10 matching preliminary_reference rows
+      // in intel_links — a direct consequence of the old .slice(0, 10) cap
+      // in chatBridge.ts. This migration reads source_report_ids for every
+      // preliminary report and inserts any missing preliminary_reference
+      // links, verifying each target exists in intel_reports so we never
+      // write a dangling edge.
+      const prelims = db.prepare(
+        "SELECT id, source_report_ids FROM preliminary_reports WHERE source_report_ids IS NOT NULL AND source_report_ids != '[]'"
+      ).all() as Array<{ id: string; source_report_ids: string }>
+
+      const insertStmt = db.prepare(
+        "INSERT INTO intel_links (id, source_report_id, target_report_id, link_type, strength, reason, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)"
+      )
+      const existsLinkStmt = db.prepare(
+        'SELECT 1 FROM intel_links WHERE source_report_id = ? AND target_report_id = ? AND link_type = ?'
+      )
+
+      let touched = 0
+      let added = 0
+      for (const prelim of prelims) {
+        let ids: string[] = []
+        try { ids = JSON.parse(prelim.source_report_ids || '[]') } catch {}
+        if (ids.length === 0) continue
+
+        // Verify each target exists in intel_reports
+        const placeholders = ids.map(() => '?').join(',')
+        const verified = (db.prepare(
+          `SELECT id FROM intel_reports WHERE id IN (${placeholders})`
+        ).all(...ids) as Array<{ id: string }>).map((r) => r.id)
+        if (verified.length === 0) continue
+
+        let addedForThis = 0
+        for (const srcId of verified) {
+          if (existsLinkStmt.get(prelim.id, srcId, 'preliminary_reference')) continue
+          insertStmt.run(
+            `mig11_${prelim.id.slice(0, 8)}_${srcId.slice(0, 8)}_${added}`,
+            prelim.id, srcId, 'preliminary_reference', 0.8,
+            'Backfilled from source_report_ids column',
+            timestamp()
+          )
+          added++
+          addedForThis++
+        }
+        if (addedForThis > 0) touched++
+      }
+      log.info(`Migration 011: added ${added} missing preliminary→intel links across ${touched} preliminary reports`)
+    }
   }
 ]
 
