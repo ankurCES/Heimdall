@@ -50,7 +50,11 @@ const testChannels = [
   'entity:resolve', 'entity:latest', 'entity:top', 'entity:types',
   'entity:aliases', 'entity:reports',
   'ci:analyze', 'ci:latest', 'ci:top', 'ci:for_report',
-  'ci:state_media', 'ci:bias_list'
+  'ci:state_media', 'ci:bias_list',
+  'cybint:tactics', 'cybint:techniques', 'cybint:tag_techniques',
+  'cybint:top_techniques', 'cybint:reports_for_technique',
+  'cybint:sync_kev', 'cybint:kev_count', 'cybint:kev_in_corpus',
+  'cybint:latest_run'
 ]
 const allowedChannels = [...Object.values(IPC_CHANNELS), ...testChannels]
 const chatEvents = ['chat:chunk', 'chat:done', 'chat:error']

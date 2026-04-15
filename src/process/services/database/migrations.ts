@@ -1241,6 +1241,73 @@ const migrations: Migration[] = [
 
       log.info('Migration 021: deception_scores + source_bias_flags + counterintel_runs tables created')
     }
+  },
+  {
+    version: '022',
+    name: 'cybint',
+    up: (db) => {
+      // Theme 7 — CYBINT depth. MITRE ATT&CK + KEV/EPSS cache + per-report
+      // mappings. The ATT&CK technique table is seeded from code on first
+      // use (see CybintService.seedTechniques) so deployers can extend it
+      // without a migration.
+      //
+      // kev_entries mirrors the CISA Known Exploited Vulnerabilities
+      // catalog; synced on demand via cybintBridge.
+      //
+      // report_attack_map / report_cve_map are many-to-many.
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS attack_techniques (
+          id TEXT PRIMARY KEY,
+          name TEXT NOT NULL,
+          tactic TEXT NOT NULL,
+          description TEXT,
+          is_sub INTEGER NOT NULL DEFAULT 0,
+          parent_id TEXT,
+          seeded_at INTEGER NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_attack_tactic ON attack_techniques(tactic);
+
+        CREATE TABLE IF NOT EXISTS report_attack_map (
+          report_id TEXT NOT NULL,
+          technique_id TEXT NOT NULL,
+          confidence REAL NOT NULL DEFAULT 0.5,
+          matched_via TEXT NOT NULL,
+          created_at INTEGER NOT NULL,
+          PRIMARY KEY (report_id, technique_id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_ram_technique ON report_attack_map(technique_id);
+
+        CREATE TABLE IF NOT EXISTS kev_entries (
+          cve_id TEXT PRIMARY KEY,
+          vendor_project TEXT,
+          product TEXT,
+          vulnerability_name TEXT,
+          date_added TEXT,
+          short_description TEXT,
+          required_action TEXT,
+          due_date TEXT,
+          known_ransomware_use INTEGER NOT NULL DEFAULT 0,
+          cwes TEXT,
+          notes TEXT,
+          fetched_at INTEGER NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_kev_vendor ON kev_entries(vendor_project);
+        CREATE INDEX IF NOT EXISTS idx_kev_ransomware ON kev_entries(known_ransomware_use);
+
+        CREATE TABLE IF NOT EXISTS cybint_runs (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          kind TEXT NOT NULL,
+          started_at INTEGER NOT NULL,
+          finished_at INTEGER,
+          items_processed INTEGER,
+          items_written INTEGER,
+          duration_ms INTEGER,
+          error TEXT
+        );
+      `)
+
+      log.info('Migration 022: attack_techniques + report_attack_map + kev_entries + cybint_runs tables created')
+    }
   }
 ]
 
