@@ -22,6 +22,7 @@ import { registerEntityBridge } from './entityBridge'
 import { registerCounterintelBridge } from './counterintelBridge'
 import { registerCybintBridge } from './cybintBridge'
 import { registerSafetyBridge } from './safetyBridge'
+import { registerInjectionBridge } from './injectionBridge'
 import log from 'electron-log'
 
 export function registerAllBridges(): void {
@@ -49,5 +50,6 @@ export function registerAllBridges(): void {
   registerCounterintelBridge()
   registerCybintBridge()
   registerSafetyBridge()
+  registerInjectionBridge()
   log.info('All IPC bridges registered')
 }

@@ -17,9 +17,12 @@ export class IntelRagService {
       params.push(`%${kw}%`, `%${kw}%`)
     }
 
+    // Theme F — filter out quarantined rows before they ever reach an
+    // LLM context window. Analysts can still see them in the Quarantine
+    // UI; they just don't poison the agent's reasoning loop.
     const rows = db
       .prepare(
-        `SELECT * FROM intel_reports WHERE ${conditions} ORDER BY created_at DESC LIMIT ?`
+        `SELECT * FROM intel_reports WHERE ${conditions} AND (quarantined IS NULL OR quarantined = 0) ORDER BY created_at DESC LIMIT ?`
       )
       .all(...params, limit) as Array<Record<string, unknown>>
 

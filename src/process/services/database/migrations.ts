@@ -1308,6 +1308,52 @@ const migrations: Migration[] = [
 
       log.info('Migration 022: attack_techniques + report_attack_map + kev_entries + cybint_runs tables created')
     }
+  },
+  {
+    version: '023',
+    name: 'prompt_injection_screening',
+    up: (db) => {
+      // Theme F (cross-cutting) — prompt-injection ingest screener.
+      //
+      // Every intel_reports row flagged by the screener gets a row in
+      // injection_flags with the matched rule(s), severity, and an
+      // action taken (quarantine / annotate). The main process tags
+      // high-severity rows as quarantined=1 on intel_reports so the
+      // agent orchestrator can filter them out of LLM context.
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS injection_flags (
+          report_id TEXT PRIMARY KEY,
+          severity TEXT NOT NULL,
+          action TEXT NOT NULL,
+          matched_rules TEXT NOT NULL DEFAULT '[]',
+          flagged_at INTEGER NOT NULL,
+          released_at INTEGER,
+          released_by TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_inj_severity ON injection_flags(severity);
+        CREATE INDEX IF NOT EXISTS idx_inj_action ON injection_flags(action);
+
+        CREATE TABLE IF NOT EXISTS injection_runs (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          started_at INTEGER NOT NULL,
+          finished_at INTEGER,
+          reports_scanned INTEGER,
+          reports_flagged INTEGER,
+          duration_ms INTEGER,
+          error TEXT
+        );
+      `)
+
+      // quarantined boolean on intel_reports so LLM paths can WHERE it out.
+      try {
+        db.exec(`ALTER TABLE intel_reports ADD COLUMN quarantined INTEGER NOT NULL DEFAULT 0`)
+      } catch { /* idempotent */ }
+      try {
+        db.exec(`CREATE INDEX IF NOT EXISTS idx_reports_quarantined ON intel_reports(quarantined)`)
+      } catch { /* idempotent */ }
+
+      log.info('Migration 023: injection_flags + injection_runs + quarantined column')
+    }
   }
 ]
 
