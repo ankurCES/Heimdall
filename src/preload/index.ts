@@ -20,7 +20,8 @@ const testChannels = [
   'meshtastic:getNodes', 'meshtastic:getNodeCount', 'meshtastic:getMessages', 'meshtastic:getRecommendedMode', 'meshtastic:pullDeviceData', 'meshtastic:checkCli', 'meshtastic:discover',
   'sync:getJobs', 'sync:runJob', 'sync:runAll', 'sync:isRunning',
   'watch:getTerms', 'watch:addTerm', 'watch:toggleTerm', 'watch:removeTerm', 'watch:scan',
-  'intel:getTrajectories'
+  'intel:getTrajectories',
+  'sources:test', 'sources:listPresets'
 ]
 const allowedChannels = [...Object.values(IPC_CHANNELS), ...testChannels]
 const chatEvents = ['chat:chunk', 'chat:done', 'chat:error']

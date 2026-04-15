@@ -61,6 +61,11 @@ import { ForumCollector } from './rumint/ForumCollector'
 import { HibpCollector } from './ci/HibpCollector'
 import { BreachFeedCollector } from './ci/BreachFeedCollector'
 
+// Custom (user-addable)
+import { ApiEndpointCollector } from './custom/ApiEndpointCollector'
+import { TelegramSubscriberCollector } from './custom/TelegramSubscriberCollector'
+import { GitHubRepoCollector } from './custom/GitHubRepoCollector'
+
 // Agency
 import { InterpolCollector } from './agency/InterpolCollector'
 import { FbiCollector } from './agency/FbiCollector'
@@ -136,4 +141,9 @@ export function registerAllCollectors(): void {
   collectorManager.registerFactory('europol', () => new EuropolCollector())
   collectorManager.registerFactory('unsc', () => new UnscCollector())
   collectorManager.registerFactory('security-advisory', () => new SecurityAdvisoryCollector())
+
+  // Custom (user-addable)
+  collectorManager.registerFactory('api-endpoint', () => new ApiEndpointCollector())
+  collectorManager.registerFactory('telegram-subscriber', () => new TelegramSubscriberCollector())
+  collectorManager.registerFactory('github-repo', () => new GitHubRepoCollector())
 }

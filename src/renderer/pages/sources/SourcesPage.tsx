@@ -2,8 +2,9 @@ import { useEffect, useState } from 'react'
 import { useSourceStore } from '@renderer/stores/sourceStore'
 import {
   Database, Play, Pause, RefreshCw, AlertCircle,
-  Clock, CheckCircle, Loader2
+  Clock, CheckCircle, Loader2, Plus, Trash2
 } from 'lucide-react'
+import { AddSourceModal } from '@renderer/components/sources/AddSourceModal'
 import { Button } from '@renderer/components/ui/button'
 import { Badge } from '@renderer/components/ui/badge'
 import { Card, CardContent, CardHeader, CardTitle } from '@renderer/components/ui/card'
@@ -21,6 +22,17 @@ const DISCIPLINE_COLORS: Record<string, string> = {
 export function SourcesPage() {
   const { sources, loading, fetchSources } = useSourceStore()
   const [collectingIds, setCollectingIds] = useState<Set<string>>(new Set())
+  const [addModalOpen, setAddModalOpen] = useState(false)
+
+  const handleDelete = async (sourceId: string, name: string) => {
+    if (!confirm(`Delete source "${name}"? This cannot be undone.`)) return
+    try {
+      await ipc.sources.delete(sourceId)
+      fetchSources()
+    } catch (err) {
+      alert(`Delete failed: ${err}`)
+    }
+  }
 
   useEffect(() => {
     fetchSources()
@@ -74,11 +86,23 @@ export function SourcesPage() {
             {errorCount > 0 && `, ${errorCount} with errors`}
           </p>
         </div>
-        <Button variant="outline" size="sm" onClick={fetchSources} disabled={loading}>
-          <RefreshCw className={cn('h-4 w-4 mr-2', loading && 'animate-spin')} />
-          Refresh
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button variant="outline" size="sm" onClick={fetchSources} disabled={loading}>
+            <RefreshCw className={cn('h-4 w-4 mr-2', loading && 'animate-spin')} />
+            Refresh
+          </Button>
+          <Button size="sm" onClick={() => setAddModalOpen(true)}>
+            <Plus className="h-4 w-4 mr-2" />
+            Add Source
+          </Button>
+        </div>
       </div>
+
+      <AddSourceModal
+        open={addModalOpen}
+        onClose={() => setAddModalOpen(false)}
+        onAdded={fetchSources}
+      />
 
       {/* Stats */}
       <div className="grid grid-cols-4 gap-3">
@@ -200,6 +224,14 @@ export function SourcesPage() {
                       checked={source.enabled}
                       onCheckedChange={() => handleToggle(source)}
                     />
+                    <Button
+                      size="sm" variant="ghost"
+                      className="h-7 w-7 p-0 text-muted-foreground hover:text-destructive"
+                      title="Delete source"
+                      onClick={() => handleDelete(source.id, source.name)}
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </Button>
                   </div>
                 )
               })}
