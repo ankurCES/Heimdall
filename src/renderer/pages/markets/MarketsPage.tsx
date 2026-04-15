@@ -1,7 +1,7 @@
 import { useEffect, useState, useMemo, useCallback } from 'react'
 import {
   TrendingUp, RefreshCw, Loader2, X, ExternalLink, AlertTriangle,
-  FileText, Target, Activity, ArrowUp, ArrowDown
+  FileText, Target, Activity, ArrowUp, ArrowDown, Database
 } from 'lucide-react'
 import { Button } from '@renderer/components/ui/button'
 import { Badge } from '@renderer/components/ui/badge'
@@ -63,6 +63,8 @@ export function MarketsPage() {
   const [normalize, setNormalize] = useState(true)
   const [drawerTicker, setDrawerTicker] = useState<string | null>(null)
   const [drawerData, setDrawerData] = useState<{ history: Array<{ price: number; change_pct: number; recorded_at: number }>; significantMoves: Array<{ price: number; change_pct: number; recorded_at: number }>; relatedIntel: IntelItem[] } | null>(null)
+  const [backfilling, setBackfilling] = useState(false)
+  const [backfillProgress, setBackfillProgress] = useState<{ done: number; total: number; current: string; rows: number } | null>(null)
 
   const fetchAll = useCallback(async () => {
     setLoading(true)
@@ -99,6 +101,47 @@ export function MarketsPage() {
     const interval = setInterval(fetchAll, 60000)
     return () => clearInterval(interval)
   }, [fetchAll])
+
+  // Subscribe to backfill progress events
+  useEffect(() => {
+    let totalSeen = 0
+    let doneCount = 0
+    let totalRows = 0
+    const unsub = window.heimdall.on('markets:backfillProgress', (event: unknown) => {
+      const e = event as { source: string; ticker: string; status: string; rows?: number }
+      totalSeen++
+      if (e.status === 'done' || e.status === 'error') {
+        doneCount++
+        if (e.rows) totalRows += e.rows
+      }
+      setBackfillProgress({ done: doneCount, total: totalSeen, current: `${e.source}/${e.ticker}`, rows: totalRows })
+    })
+    // Check if backfill is in progress on mount
+    void window.heimdall.invoke('markets:backfillStatus').then((s: unknown) => {
+      const status = s as { running: boolean }
+      setBackfilling(status.running)
+    })
+    return unsub
+  }, [])
+
+  const handleBackfill = async () => {
+    if (!confirm('Backfill 5 years of historical data for all configured tickers? This may take 1-2 minutes and uses bandwidth.')) return
+    setBackfilling(true)
+    setBackfillProgress({ done: 0, total: 0, current: 'Starting...', rows: 0 })
+    try {
+      await window.heimdall.invoke('markets:backfillHistory', { years: 5 })
+      // Backfill runs async — UI updates via progress events
+      // After 30s, refresh + clear
+      setTimeout(() => {
+        setBackfilling(false)
+        fetchAll()
+        fetchHistory(selectedTickers, range)
+      }, 90000)
+    } catch (err) {
+      alert(`Backfill failed: ${err}`)
+      setBackfilling(false)
+    }
+  }
 
   useEffect(() => {
     fetchHistory(selectedTickers, range)
@@ -184,10 +227,24 @@ export function MarketsPage() {
             {quotes.length} commodities tracked
           </Badge>
         </div>
-        <Button variant="outline" size="sm" onClick={fetchAll} disabled={loading}>
-          <RefreshCw className={cn('h-3.5 w-3.5 mr-2', loading && 'animate-spin')} />
-          Refresh
-        </Button>
+        <div className="flex items-center gap-2">
+          {backfilling && backfillProgress && (
+            <Badge variant="outline" className="text-[10px]">
+              Backfill: {backfillProgress.done}/{backfillProgress.total} • {backfillProgress.rows} rows • {backfillProgress.current}
+            </Badge>
+          )}
+          <Button variant="outline" size="sm" onClick={handleBackfill} disabled={backfilling}>
+            {backfilling ? (
+              <><Loader2 className="h-3.5 w-3.5 mr-2 animate-spin" />Backfilling...</>
+            ) : (
+              <><Database className="h-3.5 w-3.5 mr-2" />Backfill 5Y History</>
+            )}
+          </Button>
+          <Button variant="outline" size="sm" onClick={fetchAll} disabled={loading}>
+            <RefreshCw className={cn('h-3.5 w-3.5 mr-2', loading && 'animate-spin')} />
+            Refresh
+          </Button>
+        </div>
       </div>
 
       {/* Empty state */}

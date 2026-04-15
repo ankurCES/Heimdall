@@ -23,11 +23,12 @@ const testChannels = [
   'intel:getTrajectories', 'intel:getSourceTypes',
   'sources:test', 'sources:listPresets', 'sources:syncAll',
   'markets:getLatestQuotes', 'markets:getHistory', 'markets:getKpis',
-  'markets:getMarketIntel', 'markets:getCommodityDetail'
+  'markets:getMarketIntel', 'markets:getCommodityDetail',
+  'markets:backfillHistory', 'markets:backfillStatus'
 ]
 const allowedChannels = [...Object.values(IPC_CHANNELS), ...testChannels]
 const chatEvents = ['chat:chunk', 'chat:done', 'chat:error']
-const syncEvents = ['sync:progress', 'enrichment:progress', 'watch:hits']
+const syncEvents = ['sync:progress', 'enrichment:progress', 'watch:hits', 'markets:backfillProgress']
 const allowedEvents = [...Object.values(IPC_EVENTS), ...chatEvents, ...syncEvents]
 
 const api = {

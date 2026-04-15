@@ -1,5 +1,6 @@
 import { ipcMain } from 'electron'
 import { getDatabase } from '../services/database'
+import { marketBackfillService } from '../services/markets/MarketBackfillService'
 import log from 'electron-log'
 
 interface MarketQuote {
@@ -177,6 +178,24 @@ export function registerMarketsBridge(): void {
       log.warn(`markets:getCommodityDetail failed: ${err}`)
       return { history: [], significantMoves: [], relatedIntel: [] }
     }
+  })
+
+  // Backfill 5 years of historical data for all configured tickers
+  ipcMain.handle('markets:backfillHistory', async (_event, params?: { years?: number }) => {
+    const years = params?.years || 5
+    log.info(`markets:backfillHistory triggered (${years}y)`)
+    if (marketBackfillService.isRunning()) {
+      return { running: true, message: 'Backfill already in progress' }
+    }
+    // Fire-and-forget — UI listens to markets:backfillProgress events
+    marketBackfillService.backfillAll(years)
+      .then((r) => log.info(`Backfill complete: ${r.totalRows} rows from ${r.sources} sources (${r.failures} failed)`))
+      .catch((err) => log.error(`Backfill error: ${err}`))
+    return { running: true, message: `Started ${years}y backfill — listen to markets:backfillProgress events` }
+  })
+
+  ipcMain.handle('markets:backfillStatus', () => {
+    return { running: marketBackfillService.isRunning() }
   })
 
   log.info('Markets bridge registered')
