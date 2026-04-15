@@ -22,13 +22,72 @@ const SEVERITY_BADGE: Record<ThreatLevel, { variant: 'destructive' | 'warning' |
   info: { variant: 'outline', label: 'INFO' }
 }
 
+// Friendly labels for source types
+const SOURCE_TYPE_LABELS: Record<string, string> = {
+  'rss': 'RSS Feed',
+  'telegram-channel': 'Telegram (Bot API)',
+  'telegram-subscriber': 'Telegram (Public)',
+  'github-repo': 'GitHub',
+  'api-endpoint': 'Custom API',
+  'twitter': 'Twitter/X',
+  'reddit': 'Reddit',
+  'gdelt': 'GDELT',
+  'gnews': 'GNews',
+  'cve': 'CVE/NVD',
+  'threat-feed': 'Threat Feed',
+  'cyber-ioc': 'Cyber IOC',
+  'sans-isc': 'SANS ISC',
+  'dns-whois': 'DNS/WHOIS',
+  'edgar': 'SEC EDGAR',
+  'sanctions': 'Sanctions',
+  'commodity': 'Commodities',
+  'usgs-earthquake': 'USGS Earthquake',
+  'noaa-weather': 'NOAA Weather',
+  'nasa-firms': 'NASA FIRMS',
+  'nasa-eonet': 'NASA EONET',
+  'gdacs': 'GDACS',
+  'radiation': 'Radiation',
+  'climate-anomaly': 'Climate',
+  'sentinel': 'Sentinel Sat',
+  'adsb': 'ADS-B',
+  'adsb-lol': 'ADS-B (LOL)',
+  'satellite': 'Satellite/ISS',
+  'fcc': 'FCC',
+  'ais-maritime': 'Maritime AIS',
+  'meshtastic': 'Meshtastic',
+  'airport-delay': 'Airport Delays',
+  'chokepoint': 'Chokepoints',
+  'forum': 'Forums',
+  'hibp': 'HIBP',
+  'breach-feed': 'Breach Feed',
+  'interpol': 'Interpol',
+  'fbi': 'FBI',
+  'europol': 'Europol',
+  'unsc': 'UN Security Council',
+  'security-advisory': 'Travel Advisory',
+  'internet-outage': 'Internet Outage',
+  'prediction-market': 'Prediction Market',
+  'traffic-camera': 'Traffic Camera',
+  'public-camera': 'Public Camera',
+  'factbook': 'CIA Factbook',
+  'public-records': 'Public Records',
+  'academic': 'Academic (arXiv)',
+  'government-data': 'Government Data',
+  'fbi-crime-stats': 'FBI Crime Stats',
+  'uk-police-crime': 'UK Police Crime'
+}
+
 export function FeedPage() {
   const { reports, total, loading, filters, fetchReports, setFilters, markReviewed } = useIntelStore()
   const [searchInput, setSearchInput] = useState('')
   const [selectedReport, setSelectedReport] = useState<IntelReport | null>(null)
+  const [sourceTypes, setSourceTypes] = useState<Array<{ type: string; count: number }>>([])
 
   useEffect(() => {
     fetchReports()
+    void window.heimdall.invoke('intel:getSourceTypes').then((rows: unknown) => {
+      setSourceTypes(rows as Array<{ type: string; count: number }>)
+    })
   }, [fetchReports])
 
   const handleSearch = () => {
@@ -81,6 +140,22 @@ export function FeedPage() {
               <SelectItem value="info">Info</SelectItem>
             </SelectContent>
           </Select>
+          <Select
+            value={filters.sourceType || 'all'}
+            onValueChange={(v) => setFilters({ ...filters, sourceType: v === 'all' ? undefined : v })}
+          >
+            <SelectTrigger className="w-40 h-8 text-xs">
+              <SelectValue placeholder="Source Type" />
+            </SelectTrigger>
+            <SelectContent className="max-h-72">
+              <SelectItem value="all">All Source Types</SelectItem>
+              {sourceTypes.map(({ type, count }) => (
+                <SelectItem key={type} value={type}>
+                  {SOURCE_TYPE_LABELS[type] || type} ({count})
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
           <Button size="sm" variant="ghost" onClick={() => { setFilters({}); setSearchInput('') }}>
             <X className="h-3.5 w-3.5" />
           </Button>
@@ -88,7 +163,7 @@ export function FeedPage() {
 
         {/* Results count */}
         <div className="px-3 py-1.5 text-xs text-muted-foreground border-b border-border">
-          {total} reports {filters.discipline || filters.severity || filters.search ? '(filtered)' : ''}
+          {total} reports {(filters.discipline || filters.severity || filters.search || filters.sourceType) ? '(filtered)' : ''}
         </div>
 
         {/* Feed list with virtual scroll */}

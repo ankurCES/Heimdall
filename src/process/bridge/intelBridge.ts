@@ -7,41 +7,66 @@ import log from 'electron-log'
 export function registerIntelBridge(): void {
   ipcMain.handle(IPC_CHANNELS.INTEL_GET_REPORTS, (_event, params) => {
     const db = getDatabase()
-    const { offset = 0, limit = 50, discipline, severity, search, reviewed } = params
+    const { offset = 0, limit = 50, discipline, severity, search, reviewed, sourceType, sourceId } = params
 
     const conditions: string[] = []
     const values: unknown[] = []
+    let needsJoin = false
 
     if (discipline) {
-      conditions.push('discipline = ?')
+      conditions.push('r.discipline = ?')
       values.push(discipline)
     }
     if (severity) {
-      conditions.push('severity = ?')
+      conditions.push('r.severity = ?')
       values.push(severity)
     }
     if (search) {
-      conditions.push('(title LIKE ? OR content LIKE ?)')
+      conditions.push('(r.title LIKE ? OR r.content LIKE ?)')
       values.push(`%${search}%`, `%${search}%`)
     }
     if (reviewed !== undefined) {
-      conditions.push('reviewed = ?')
+      conditions.push('r.reviewed = ?')
       values.push(reviewed ? 1 : 0)
     }
+    if (sourceType) {
+      conditions.push('s.type = ?')
+      values.push(sourceType)
+      needsJoin = true
+    }
+    if (sourceId) {
+      conditions.push('r.source_id = ?')
+      values.push(sourceId)
+    }
 
+    const join = needsJoin ? 'LEFT JOIN sources s ON r.source_id = s.id' : ''
     const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : ''
 
     const total = (
-      db.prepare(`SELECT COUNT(*) as count FROM intel_reports ${where}`).get(...values) as { count: number }
+      db.prepare(`SELECT COUNT(*) as count FROM intel_reports r ${join} ${where}`).get(...values) as { count: number }
     ).count
 
     const reports = db
       .prepare(
-        `SELECT * FROM intel_reports ${where} ORDER BY created_at DESC LIMIT ? OFFSET ?`
+        `SELECT r.* FROM intel_reports r ${join} ${where} ORDER BY r.created_at DESC LIMIT ? OFFSET ?`
       )
       .all(...values, limit, offset)
 
     return { reports: mapReports(reports as RawReport[]), total }
+  })
+
+  // List distinct source types currently in use (for filter dropdowns)
+  ipcMain.handle('intel:getSourceTypes', () => {
+    const db = getDatabase()
+    const rows = db.prepare(`
+      SELECT s.type, COUNT(r.id) as count
+      FROM sources s
+      LEFT JOIN intel_reports r ON r.source_id = s.id
+      GROUP BY s.type
+      HAVING count > 0
+      ORDER BY count DESC
+    `).all() as Array<{ type: string; count: number }>
+    return rows
   })
 
   ipcMain.handle(IPC_CHANNELS.INTEL_GET_REPORT, (_event, params: { id: string }) => {

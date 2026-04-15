@@ -7,6 +7,8 @@ interface IntelFilters {
   severity?: string
   search?: string
   reviewed?: boolean
+  sourceType?: string
+  sourceId?: string
 }
 
 interface IntelState {
