@@ -46,21 +46,49 @@ export class CommodityCollector extends BaseCollector {
     const reports: IntelReport[] = []
 
     try {
-      const symbols = COMMODITIES.map((c) => c.symbol).join(',')
-      // Use direct fetch — Yahoo Finance blocks via robots.txt
-      const response = await fetch(
-        `https://query1.finance.yahoo.com/v7/finance/quote?symbols=${encodeURIComponent(symbols)}&fields=regularMarketPrice,regularMarketChange,regularMarketChangePercent,regularMarketPreviousClose,shortName,currency`,
-        {
-          headers: { 'User-Agent': 'Mozilla/5.0', Accept: 'application/json' },
-          signal: AbortSignal.timeout(15000)
+      // Yahoo Finance v7/quote endpoint now requires crumb auth (HTTP 401).
+      // Use v8/chart endpoint per-symbol instead — works without auth.
+      const quotes: YahooQuote[] = []
+      const fetchOne = async (symbol: string): Promise<YahooQuote | null> => {
+        try {
+          const resp = await fetch(
+            `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?interval=1d&range=2d`,
+            {
+              headers: { 'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36', Accept: 'application/json' },
+              signal: AbortSignal.timeout(10000)
+            }
+          )
+          if (!resp.ok) return null
+          const j = await resp.json() as { chart?: { result?: Array<{ meta?: { symbol?: string; regularMarketPrice?: number; chartPreviousClose?: number; previousClose?: number; currency?: string; longName?: string; shortName?: string } }> } }
+          const meta = j?.chart?.result?.[0]?.meta
+          if (!meta || meta.regularMarketPrice == null) return null
+          const prev = meta.chartPreviousClose ?? meta.previousClose ?? meta.regularMarketPrice
+          const change = meta.regularMarketPrice - prev
+          const pct = prev !== 0 ? (change / prev) * 100 : 0
+          return {
+            symbol: meta.symbol || symbol,
+            shortName: meta.shortName || meta.longName || symbol,
+            regularMarketPrice: meta.regularMarketPrice,
+            regularMarketChange: change,
+            regularMarketChangePercent: pct,
+            regularMarketPreviousClose: prev,
+            currency: meta.currency || 'USD'
+          }
+        } catch {
+          return null
         }
-      )
-      if (!response.ok) throw new Error(`HTTP ${response.status}`)
-      const data = await response.json() as {
-        quoteResponse: { result: YahooQuote[] }
       }
 
-      const quotes = data?.quoteResponse?.result || []
+      // Fetch in parallel batches of 5 to avoid overwhelming the API
+      for (let i = 0; i < COMMODITIES.length; i += 5) {
+        const batch = COMMODITIES.slice(i, i + 5)
+        const results = await Promise.all(batch.map((c) => fetchOne(c.symbol)))
+        for (const q of results) {
+          if (q) quotes.push(q)
+        }
+      }
+
+      if (quotes.length === 0) throw new Error('No quotes fetched from Yahoo Finance')
 
       // Group by category for summary reports
       const byCategory = new Map<string, Array<{ name: string; price: number; change: number; pct: number }>>()

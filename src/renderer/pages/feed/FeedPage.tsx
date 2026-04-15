@@ -41,6 +41,7 @@ const SOURCE_TYPE_LABELS: Record<string, string> = {
   'edgar': 'SEC EDGAR',
   'sanctions': 'Sanctions',
   'commodity': 'Commodities',
+  'mfapi': 'Indian Mutual Funds',
   'usgs-earthquake': 'USGS Earthquake',
   'noaa-weather': 'NOAA Weather',
   'nasa-firms': 'NASA FIRMS',

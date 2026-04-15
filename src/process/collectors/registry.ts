@@ -24,6 +24,7 @@ import { SansIscCollector } from './cybint/SansIscCollector'
 import { EdgarCollector } from './finint/EdgarCollector'
 import { SanctionsCollector } from './finint/SanctionsCollector'
 import { CommodityCollector } from './finint/CommodityCollector'
+import { MfapiCollector } from './finint/MfapiCollector'
 
 // SOCMINT
 import { TwitterCollector } from './socmint/TwitterCollector'
@@ -98,6 +99,7 @@ export function registerAllCollectors(): void {
   collectorManager.registerFactory('edgar', () => new EdgarCollector())
   collectorManager.registerFactory('sanctions', () => new SanctionsCollector())
   collectorManager.registerFactory('commodity', () => new CommodityCollector())
+  collectorManager.registerFactory('mfapi', () => new MfapiCollector())
 
   // SOCMINT (3)
   collectorManager.registerFactory('twitter', () => new TwitterCollector())

@@ -357,6 +357,139 @@ export const SOURCE_PRESETS: SourcePreset[] = [
     description: 'Mandiant (Google Cloud) threat research and APT analysis',
     config: { feeds: [{ url: 'https://www.mandiant.com/resources/blog/rss.xml', name: 'Mandiant' }] },
     schedule: '0 */6 * * *'
+  },
+
+  // ═══════════════════════════════════════════════════════════════
+  // INDIAN MUTUAL FUNDS (MFAPI) — popular schemes
+  // ═══════════════════════════════════════════════════════════════
+  {
+    id: 'mfapi-large-cap',
+    name: 'MFAPI: Large Cap Funds (HDFC/ICICI/SBI)',
+    discipline: 'finint', type: 'mfapi',
+    category: 'Indian Mutual Funds',
+    description: 'NAV tracking for top Indian large-cap mutual funds',
+    config: {
+      schemeCodes: [
+        { code: 125497, alias: 'HDFC Top 100 Direct' },
+        { code: 120586, alias: 'ICICI Pru Bluechip Direct' },
+        { code: 119598, alias: 'SBI BlueChip Direct' },
+        { code: 118989, alias: 'HDFC Mid-Cap Direct' },
+        { code: 120465, alias: 'Mirae Large Cap Direct' }
+      ]
+    },
+    schedule: '0 18 * * 1-5', // Weekdays 6pm IST (after market close)
+    url: 'https://www.mfapi.in/'
+  },
+  {
+    id: 'mfapi-flexi-cap',
+    name: 'MFAPI: Flexi/Multi-Cap Funds',
+    discipline: 'finint', type: 'mfapi',
+    category: 'Indian Mutual Funds',
+    description: 'NAV tracking for top Indian flexi-cap and multi-cap funds',
+    config: {
+      schemeCodes: [
+        { code: 122639, alias: 'Parag Parikh Flexi Cap Direct' },
+        { code: 120505, alias: 'Kotak Flexicap Direct' },
+        { code: 118825, alias: 'HDFC Flexi Cap Direct' },
+        { code: 119226, alias: 'Quant Flexi Cap Direct' }
+      ]
+    },
+    schedule: '0 18 * * 1-5',
+    url: 'https://www.mfapi.in/'
+  },
+  {
+    id: 'mfapi-debt-funds',
+    name: 'MFAPI: Debt & Liquid Funds',
+    discipline: 'finint', type: 'mfapi',
+    category: 'Indian Mutual Funds',
+    description: 'NAV tracking for popular Indian debt and liquid funds',
+    config: {
+      schemeCodes: [
+        { code: 119551, alias: 'HDFC Liquid Direct' },
+        { code: 118825, alias: 'ICICI Pru Liquid Direct' },
+        { code: 119226, alias: 'SBI Magnum Income Direct' }
+      ]
+    },
+    schedule: '0 18 * * 1-5',
+    url: 'https://www.mfapi.in/'
+  },
+
+  // ═══════════════════════════════════════════════════════════════
+  // ALPACA MARKETS (US Stocks) — requires API key
+  // ═══════════════════════════════════════════════════════════════
+  {
+    id: 'alpaca-stock-snapshots',
+    name: 'Alpaca: Stock Snapshots (FAANG+)',
+    discipline: 'finint', type: 'api-endpoint',
+    category: 'US Stocks (Alpaca)',
+    description: 'Latest snapshots for FAANG + key US stocks. Requires Alpaca API key (free at alpaca.markets).',
+    config: {
+      url: 'https://data.alpaca.markets/v2/stocks/snapshots?symbols=AAPL,MSFT,GOOGL,AMZN,META,NVDA,TSLA,SPY,QQQ',
+      headers: {
+        'APCA-API-KEY-ID': 'YOUR_KEY_ID',
+        'APCA-API-SECRET-KEY': 'YOUR_SECRET'
+      },
+      jsonPath: '$.snapshots.*',
+      fieldMap: {
+        title: 'symbol',
+        content: 'latestTrade.p',
+        sourceUrl: 'symbol',
+        severity: 'dailyBar.c'
+      },
+      discipline: 'finint',
+      defaultSeverity: 'info'
+    },
+    schedule: '*/15 9-16 * * 1-5', // Every 15min during US market hours
+    url: 'https://docs.alpaca.markets/reference/stocksnapshots-1'
+  },
+  {
+    id: 'alpaca-news',
+    name: 'Alpaca: Real-time Stock News',
+    discipline: 'finint', type: 'api-endpoint',
+    category: 'US Stocks (Alpaca)',
+    description: 'Latest market news from Benzinga via Alpaca. Requires Alpaca API key.',
+    config: {
+      url: 'https://data.alpaca.markets/v1beta1/news?limit=20&sort=desc',
+      headers: {
+        'APCA-API-KEY-ID': 'YOUR_KEY_ID',
+        'APCA-API-SECRET-KEY': 'YOUR_SECRET'
+      },
+      jsonPath: '$.news[*]',
+      fieldMap: {
+        title: 'headline',
+        content: 'summary',
+        sourceUrl: 'url',
+        timestamp: 'created_at'
+      },
+      discipline: 'finint',
+      defaultSeverity: 'info'
+    },
+    schedule: '*/15 * * * *',
+    url: 'https://docs.alpaca.markets/reference/news-3'
+  },
+  {
+    id: 'alpaca-crypto-snapshots',
+    name: 'Alpaca: Crypto Snapshots (BTC/ETH/SOL)',
+    discipline: 'finint', type: 'api-endpoint',
+    category: 'US Stocks (Alpaca)',
+    description: 'Latest crypto snapshots. Requires Alpaca API key.',
+    config: {
+      url: 'https://data.alpaca.markets/v1beta3/crypto/us/snapshots?symbols=BTC%2FUSD,ETH%2FUSD,SOL%2FUSD',
+      headers: {
+        'APCA-API-KEY-ID': 'YOUR_KEY_ID',
+        'APCA-API-SECRET-KEY': 'YOUR_SECRET'
+      },
+      jsonPath: '$.snapshots.*',
+      fieldMap: {
+        title: 'symbol',
+        content: 'latestTrade.p',
+        sourceUrl: 'symbol'
+      },
+      discipline: 'finint',
+      defaultSeverity: 'info'
+    },
+    schedule: '*/5 * * * *', // Crypto trades 24/7
+    url: 'https://docs.alpaca.markets/reference/cryptosnapshots-1'
   }
 ]
 
