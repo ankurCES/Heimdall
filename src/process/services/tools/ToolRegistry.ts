@@ -3,7 +3,6 @@ import { getDatabase } from '../database'
 import { vectorDbService } from '../vectordb/VectorDbService'
 import { intelRagService } from '../llm/IntelRagService'
 import { intelEnricher } from '../enrichment/IntelEnricher'
-import { kuzuService } from '../graphdb/KuzuService'
 import { resolveNodesById } from '../../bridge/enrichmentBridge'
 import { generateId, timestamp } from '@common/utils/id'
 import log from 'electron-log'
@@ -300,7 +299,7 @@ class ToolRegistryImpl {
       return { output: `Report created: ${params.title} (ID: ${id.slice(0, 8)})`, data: { id } }
     })
 
-    // ── Graph Query (Kuzu-powered with SQLite fallback) ──
+    // ── Graph Query (SQLite-backed; for richer traversal use graph_neighborhood) ──
     this.register({
       name: 'graph_query',
       description: 'Query the intelligence relationship graph using Cypher. Supports: connections (default), shortest_path between two reports, neighbors_2hop for multi-hop traversal, entity_pattern to find reports sharing a specific entity.',
@@ -314,32 +313,10 @@ class ToolRegistryImpl {
       }, required: ['report_id'] },
       requiresApproval: false
     }, async (params) => {
-      const queryType = (params.query_type as string) || 'connections'
-
-      if (kuzuService.isReady()) {
-        try {
-          if (queryType === 'shortest_path' && params.target_id) {
-            const result = await kuzuService.getShortestPath(params.report_id as string, params.target_id as string)
-            const nodeList = result.nodes.map((n) => `${n.id.slice(0, 8)} "${n.title}" [${n.discipline}]`).join(' → ')
-            return { output: result.nodes.length > 0 ? `Path: ${nodeList} (${result.links.length} hops)` : 'No path found.', data: result }
-          }
-          if (queryType === 'neighbors_2hop') {
-            const result = await kuzuService.getNeighbors(params.report_id as string, 2)
-            return { output: `Found ${result.nodes.length} nodes within 2 hops:\n${result.nodes.slice(0, 10).map((n) => `  ${n.id.slice(0, 8)} "${n.title}" [${n.discipline}/${n.severity}]`).join('\n')}`, data: result }
-          }
-          if (queryType === 'entity_pattern' && params.entity_value) {
-            const result = await kuzuService.getPatternMatch(params.entity_type as string || 'ip', params.entity_value as string)
-            return { output: `${result.nodes.length - 1} reports share entity "${params.entity_value}":\n${result.nodes.filter((n) => n.type !== 'entity').slice(0, 10).map((n) => `  ${n.id.slice(0, 8)} "${n.title}" [${n.discipline}]`).join('\n')}`, data: result }
-          }
-          // Default: connections
-          const result = await kuzuService.getGraph({ reportId: params.report_id as string, linkType: params.link_type as string, limit: 20 })
-          return { output: result.links.map((l) => `→ ${l.target.slice(0, 8)} [${l.type}] strength=${l.strength}`).join('\n') || 'No connections found.', data: result }
-        } catch (err) {
-          log.debug(`Kuzu graph_query failed: ${err}`)
-        }
-      }
-
-      // SQLite fallback
+      // SQLite-only graph traversal. The historical Kuzu path was removed
+      // alongside the npm package in v0.4 — see migration 012. Use
+      // graph_neighborhood (1–2 hop) for neighbor traversal beyond a single
+      // hop; this tool returns direct connections for backward compat.
       const links = intelEnricher.getLinks(params.report_id as string)
       const filtered = params.link_type ? links.filter((l) => l.linkType === params.link_type) : links
       return {

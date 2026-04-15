@@ -86,7 +86,7 @@ export function AboutTab() {
       {/* Footer */}
       <div className="border-t border-border mt-8 pt-4 text-center">
         <p className="text-[10px] text-muted-foreground/60">
-          Built with Electron + React + TypeScript + Kuzu + Vectra
+          Built with Electron + React + TypeScript + SQLite + Vectra
         </p>
       </div>
     </div>

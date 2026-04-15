@@ -15,8 +15,8 @@ import { agentOrchestrator } from './agents/AgentOrchestrator'
 import { intelPipeline } from './services/vectordb/IntelPipeline'
 import { enrichmentOrchestrator } from './services/enrichment/EnrichmentOrchestrator'
 import { resourceManager } from './services/resource/ResourceManager'
-import { kuzuService } from './services/graphdb/KuzuService'
-import { graphSync } from './services/graphdb/GraphSync'
+// Kuzu graph DB removed — buggy native module, dormant for entire history,
+// SQLite handled every graph query in practice. See migration 012.
 
 log.transports.file.level = 'info'
 log.transports.console.level = 'debug'
@@ -68,28 +68,10 @@ async function initializeDeferred(): Promise<void> {
   // Start background enrichment orchestrator (Multica-style)
   enrichmentOrchestrator.start()
 
-  // Kuzu graph database — opt-in via the `graphSync.enabled` setting (set by
-  // migration 003). Disabled by default because the native module has caused
-  // process crashes when accessed concurrently with collectors. The SQLite
-  // graph fallback handles every relationship query without it.
-  const kuzuEnabled = settingsService.get<string>('graphSync.enabled') === 'true'
-    && process.env.HEIMDALL_ENABLE_KUZU !== 'false'
-  if (kuzuEnabled) {
-    try {
-      await kuzuService.initialize()
-      if (kuzuService.isReady()) {
-        setTimeout(() => {
-          graphSync.fullSync()
-            .then((r) => log.info(`Kuzu graph sync complete: ${r.nodes} nodes, ${r.links} links`))
-            .catch((err) => log.warn(`Kuzu graph sync failed (non-fatal): ${err}`))
-        }, 60000)
-      }
-    } catch (err) {
-      log.warn(`Kuzu initialization failed, using SQLite-only graph: ${err}`)
-    }
-  } else {
-    log.info('Kuzu graph DB disabled — using SQLite graph queries (stable). Set graphSync.enabled=true to opt in.')
-  }
+  // Graph DB: SQLite-only. Kuzu was removed in v0.4 — its native module was
+  // unstable and dormant in practice. SQLite indices on intel_links handle
+  // every graph query the app runs (Theme 4 features in the roadmap will
+  // add in-memory graphology when scale demands it).
 
   // Start resource manager (memory cleanup, WAL checkpoint, cache pruning)
   resourceManager.start()
@@ -202,7 +184,6 @@ if (!gotTheLock) {
     cleanedUp = true
     log.info('Heimdall shutting down — running cleanup')
     try { resourceManager.stop() } catch (err) { log.debug(`resourceManager.stop: ${err}`) }
-    kuzuService.close().catch(() => {})
     try { enrichmentOrchestrator.stop() } catch (err) { log.debug(`enrichmentOrchestrator.stop: ${err}`) }
     try { intelPipeline.stop() } catch (err) { log.debug(`intelPipeline.stop: ${err}`) }
     try { agentOrchestrator.stop() } catch (err) { log.debug(`agentOrchestrator.stop: ${err}`) }

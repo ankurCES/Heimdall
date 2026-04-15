@@ -1,6 +1,5 @@
 import { ipcMain } from 'electron'
 import { intelEnricher } from '../services/enrichment/IntelEnricher'
-import { kuzuService } from '../services/graphdb/KuzuService'
 import { getDatabase } from '../services/database'
 import log from 'electron-log'
 
@@ -386,24 +385,10 @@ export function registerEnrichmentBridge(): void {
     }
   })
 
-  // Get graph data for relationship visualization — Kuzu-first with SQLite fallback
+  // Get graph data for relationship visualization (SQLite-backed)
   ipcMain.handle('enrichment:getGraph', async (_event, params?: {
     reportId?: string; discipline?: string; linkType?: string; limit?: number
   }) => {
-    // Try Kuzu first
-    if (kuzuService.isReady()) {
-      try {
-        const result = await kuzuService.getGraph(params)
-        if (result.nodes.length > 0 || result.links.length > 0) {
-          return result
-        }
-        // If Kuzu returned empty, fall through to SQLite (may not be synced yet)
-      } catch (err) {
-        log.warn(`Kuzu graph query failed, falling back to SQLite: ${err}`)
-      }
-    }
-
-    // Fallback: existing SQLite implementation
     return getGraphFromSQLite(params)
   })
 

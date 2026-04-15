@@ -7,7 +7,6 @@ import { syncManager } from '../services/sync/SyncManager'
 import { getDatabase } from '../services/database'
 import { reportExtractor } from '../services/enrichment/ReportExtractor'
 import { watchTermsService } from '../services/watch/WatchTermsService'
-import { kuzuService } from '../services/graphdb/KuzuService'
 import { generateId, timestamp } from '@common/utils/id'
 import log from 'electron-log'
 
@@ -287,18 +286,6 @@ export function registerChatBridge(): void {
       }
     })
     insertLinksTx(verifiedSourceIds.slice(0, 200))
-
-    // Kuzu dual-write for preliminary report (fire-and-forget)
-    if (kuzuService.isReady()) {
-      (async () => {
-        try {
-          await kuzuService.upsertPreliminaryReport({ id: reportId, title: extracted.title, status: 'preliminary', created_at: now })
-          for (const srcId of verifiedSourceIds.slice(0, 200)) {
-            await kuzuService.createLink(reportId, srcId, 'preliminary_reference', 0.8)
-          }
-        } catch {}
-      })()
-    }
 
     // Tag the preliminary report
     const tags = ['preliminary-report', `status:preliminary`]

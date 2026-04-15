@@ -1,6 +1,5 @@
 import { getDatabase } from '../database'
 import { generateId, timestamp } from '@common/utils/id'
-import { kuzuService } from '../graphdb/KuzuService'
 import type { IntelReport } from '@common/types/intel'
 import log from 'electron-log'
 
@@ -92,8 +91,7 @@ export class IntelEnricher {
     // 3. Find links to existing reports (shared entities)
     this.findLinks(report, entities, db, now)
 
-    // 3b. Dual-write to Kuzu graph (fire-and-forget)
-    this.writeToKuzu(report, entities, tags).catch(() => {})
+    // (Kuzu dual-write removed in v0.4 — SQLite is the only graph store.)
 
     // 4. Corroboration score — how many independent sources report similar content
     const corroborationScore = this.calculateCorroboration(report, entities, tags, db)
@@ -107,37 +105,6 @@ export class IntelEnricher {
         report.id, `corroboration:${corroborationScore >= 20 ? 'high' : corroborationScore >= 10 ? 'medium' : 'low'}`,
         corroborationScore / 30, 'enricher', now
       )
-    }
-  }
-
-  private async writeToKuzu(
-    report: IntelReport,
-    entities: Array<{ type: string; value: string; confidence: number }>,
-    tags: Array<{ tag: string; confidence: number }>
-  ): Promise<void> {
-    if (!kuzuService.isReady()) return
-    try {
-      // Upsert report node
-      await kuzuService.upsertIntelReport({
-        id: report.id, title: report.title, discipline: report.discipline,
-        severity: report.severity, source: report.sourceName,
-        verification: report.verificationScore, created_at: report.createdAt
-      })
-
-      // Upsert entities + HAS_ENTITY edges
-      for (const entity of entities.slice(0, 20)) {
-        const entityId = `${entity.type}:${entity.value}`
-        await kuzuService.upsertEntity({ id: entityId, type: entity.type, value: entity.value })
-        await kuzuService.createHasEntity(report.id, entityId)
-      }
-
-      // Upsert tags + HAS_TAG edges
-      for (const t of tags.slice(0, 20)) {
-        await kuzuService.upsertTag(t.tag)
-        await kuzuService.createHasTag(report.id, t.tag, t.confidence)
-      }
-    } catch (err) {
-      log.debug(`Kuzu dual-write failed: ${String(err).slice(0, 100)}`)
     }
   }
 
@@ -256,10 +223,6 @@ export class IntelEnricher {
           'shared_entity', strength,
           `Shared ${entity.type}: ${entity.value}`, now
         )
-        // Kuzu dual-write (fire-and-forget)
-        if (kuzuService.isReady()) {
-          kuzuService.createLink(report.id, match.report_id, 'shared_entity', strength).catch(() => {})
-        }
       }
     }
 
@@ -276,9 +239,6 @@ export class IntelEnricher {
         `Same discipline (${report.discipline}) within 1 hour`,
         now
       )
-      if (kuzuService.isReady()) {
-        kuzuService.createLink(report.id, match.id, 'temporal', 0.3).catch(() => {})
-      }
     }
   }
 

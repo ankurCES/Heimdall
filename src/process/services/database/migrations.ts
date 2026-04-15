@@ -524,6 +524,20 @@ const migrations: Migration[] = [
       }
       log.info(`Migration 011: added ${added} missing preliminary→intel links across ${touched} preliminary reports`)
     }
+  },
+  {
+    version: '012',
+    name: 'remove_kuzu_remnants',
+    up: (db) => {
+      // Kuzu graph DB removed in v0.4. The native module was dormant for the
+      // app's entire history (every code path falls back to SQLite) and added
+      // ~80 MB of native binaries plus a rebuild step. This migration cleans
+      // up the orphan settings rows + the never-populated graph_sync_log
+      // table so the schema reflects reality.
+      const r1 = db.prepare("DELETE FROM settings WHERE key IN ('graphSync.enabled', 'graphSync.lastSynced')").run()
+      const r2 = db.prepare("DROP TABLE IF EXISTS graph_sync_log").run()
+      log.info(`Migration 012: removed ${r1.changes} kuzu settings rows; dropped graph_sync_log table (${r2.changes} effect)`)
+    }
   }
 ]
 
