@@ -79,37 +79,60 @@ export class TelegramSubscriberCollector extends BaseCollector {
   }
 
   // Parse Telegram public preview HTML — extract message blocks
+  // The HTML structure uses data-post on a tgme_widget_message div but
+  // there's no clean closing — we slice between consecutive data-post
+  // attributes to get each message block.
   private parseChannelPage(html: string): Array<{ text: string; date?: string; views?: string; url?: string }> {
     const posts: Array<{ text: string; date?: string; views?: string; url?: string }> = []
 
-    // Match each <div class="tgme_widget_message ...">...</div>
-    const messageRegex = /<div class="tgme_widget_message[^"]*"[^>]*data-post="([^"]+)"[^>]*>([\s\S]*?)<\/div>\s*(?=<div class="tgme_widget_message|<\/section)/g
-    let match
-    while ((match = messageRegex.exec(html)) !== null) {
-      const dataPost = match[1] // e.g., 'bellingcat/12345'
-      const block = match[2]
+    // Find all data-post positions
+    const dataPostRegex = /data-post="([^"]+)"/g
+    const positions: Array<{ dataPost: string; index: number }> = []
+    let m
+    while ((m = dataPostRegex.exec(html)) !== null) {
+      positions.push({ dataPost: m[1], index: m.index })
+    }
 
-      // Extract text from <div class="tgme_widget_message_text...">
-      const textMatch = block.match(/<div class="tgme_widget_message_text[^"]*"[^>]*>([\s\S]*?)<\/div>/)
-      if (!textMatch) continue
-      const text = textMatch[1]
-        .replace(/<br\s*\/?>/gi, '\n')
-        .replace(/<a [^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/g, '$2 ($1)')
-        .replace(/<[^>]*>/g, '')
-        .replace(/&nbsp;/g, ' ')
-        .replace(/&amp;/g, '&')
-        .replace(/&lt;/g, '<')
-        .replace(/&gt;/g, '>')
-        .replace(/&quot;/g, '"')
-        .replace(/&#39;/g, "'")
-        .trim()
+    // Slice between consecutive data-post positions and parse each block
+    for (let i = 0; i < positions.length; i++) {
+      const start = positions[i].index
+      const end = i < positions.length - 1 ? positions[i + 1].index : Math.min(start + 8000, html.length)
+      const block = html.slice(start, end)
+      const dataPost = positions[i].dataPost
+
+      // Try to find text in tgme_widget_message_text class — handle nested divs
+      let text = ''
+      const textStart = block.indexOf('tgme_widget_message_text')
+      if (textStart >= 0) {
+        // Find the opening > of this tag
+        const tagOpenEnd = block.indexOf('>', textStart)
+        if (tagOpenEnd > 0) {
+          // Slice up to next tgme_widget_message_footer or message bottom
+          const footerStart = block.indexOf('tgme_widget_message_footer', tagOpenEnd)
+          const rawText = block.slice(tagOpenEnd + 1, footerStart > 0 ? footerStart : Math.min(tagOpenEnd + 4000, block.length))
+          text = rawText
+            .replace(/<br\s*\/?>/gi, '\n')
+            .replace(/<a [^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/g, '$2 ($1)')
+            .replace(/<[^>]*>/g, '')
+            .replace(/&nbsp;/g, ' ')
+            .replace(/&amp;/g, '&')
+            .replace(/&lt;/g, '<')
+            .replace(/&gt;/g, '>')
+            .replace(/&quot;/g, '"')
+            .replace(/&#39;/g, "'")
+            .trim()
+        }
+      }
+
+      // Skip empty messages (could be media-only without text)
+      if (!text || text.length < 3) continue
 
       // Extract date
       const dateMatch = block.match(/<time[^>]*datetime="([^"]+)"/)
       const date = dateMatch?.[1]
 
       // Extract view count
-      const viewsMatch = block.match(/<span class="tgme_widget_message_views">([^<]+)<\/span>/)
+      const viewsMatch = block.match(/tgme_widget_message_views[^>]*>([^<]+)</)
       const views = viewsMatch?.[1]
 
       posts.push({ text, date, views, url: `https://t.me/${dataPost}` })
