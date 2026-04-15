@@ -20,7 +20,7 @@ const testChannels = [
   'meshtastic:getNodes', 'meshtastic:getNodeCount', 'meshtastic:getMessages', 'meshtastic:getRecommendedMode', 'meshtastic:pullDeviceData', 'meshtastic:checkCli', 'meshtastic:discover',
   'sync:getJobs', 'sync:runJob', 'sync:runAll', 'sync:isRunning',
   'watch:getTerms', 'watch:addTerm', 'watch:toggleTerm', 'watch:removeTerm', 'watch:scan',
-  'intel:getTrajectories', 'intel:getSourceTypes',
+  'intel:getTrajectories', 'intel:getSourceTypes', 'intel:getDashboardExtras',
   'sources:test', 'sources:listPresets', 'sources:syncAll',
   'markets:getLatestQuotes', 'markets:getHistory', 'markets:getKpis',
   'markets:getMarketIntel', 'markets:getCommodityDetail',

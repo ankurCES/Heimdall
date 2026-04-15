@@ -135,6 +135,135 @@ export function registerIntelBridge(): void {
     }
   })
 
+  // Extended dashboard stats: hourly trend, geo heat, top entities/sources, market summary
+  ipcMain.handle('intel:getDashboardExtras', () => {
+    const db = getDatabase()
+    const now = Date.now()
+    const dayAgo = now - 24 * 60 * 60 * 1000
+    const weekAgo = now - 7 * 24 * 60 * 60 * 1000
+
+    // Hourly trend — 24 hourly buckets
+    const hourlyRows = db.prepare(`
+      SELECT (created_at / 3600000) AS hour_bucket, severity, COUNT(*) AS c
+      FROM intel_reports
+      WHERE created_at >= ?
+      GROUP BY hour_bucket, severity
+    `).all(dayAgo) as Array<{ hour_bucket: number; severity: string; c: number }>
+
+    const startHour = Math.floor(dayAgo / 3600000)
+    const hourlyTrend: Array<{ hour: number; critical: number; high: number; medium: number; low: number; info: number }> = []
+    for (let h = 0; h < 24; h++) {
+      hourlyTrend.push({ hour: (startHour + h) * 3600000, critical: 0, high: 0, medium: 0, low: 0, info: 0 })
+    }
+    for (const r of hourlyRows) {
+      const idx = r.hour_bucket - startHour
+      if (idx >= 0 && idx < 24) {
+        const bucket = hourlyTrend[idx]
+        if (r.severity in bucket) (bucket as Record<string, number>)[r.severity] = r.c
+      }
+    }
+
+    // Geo points for mini map (recent geo-tagged critical/high)
+    const geoPoints = db.prepare(`
+      SELECT id, latitude, longitude, severity, title, source_name
+      FROM intel_reports
+      WHERE latitude IS NOT NULL AND longitude IS NOT NULL
+        AND latitude != 0 AND longitude != 0
+        AND created_at >= ?
+      ORDER BY
+        CASE severity
+          WHEN 'critical' THEN 1
+          WHEN 'high' THEN 2
+          WHEN 'medium' THEN 3
+          WHEN 'low' THEN 4
+          ELSE 5
+        END,
+        created_at DESC
+      LIMIT 200
+    `).all(dayAgo) as Array<{ id: string; latitude: number; longitude: number; severity: string; title: string; source_name: string }>
+
+    // Top entities (last 7 days)
+    const topEntities = db.prepare(`
+      SELECT entity_type, entity_value, COUNT(DISTINCT report_id) AS mentions
+      FROM intel_entities
+      WHERE created_at >= ?
+        AND entity_type IN ('threat_actor', 'malware', 'country', 'organization', 'cve')
+      GROUP BY entity_type, entity_value
+      ORDER BY mentions DESC
+      LIMIT 12
+    `).all(weekAgo) as Array<{ entity_type: string; entity_value: string; mentions: number }>
+
+    // Top sources by 24h volume
+    const topSources = db.prepare(`
+      SELECT source_name, discipline, COUNT(*) AS reports
+      FROM intel_reports
+      WHERE created_at >= ?
+      GROUP BY source_name
+      ORDER BY reports DESC
+      LIMIT 8
+    `).all(dayAgo) as Array<{ source_name: string; discipline: string; reports: number }>
+
+    // Market summary — top 5 movers from latest market_quotes
+    let marketSummary: Array<{ ticker: string; name: string; price: number; change_pct: number; category: string }> = []
+    try {
+      marketSummary = db.prepare(`
+        SELECT q.ticker, q.name, q.price, q.change_pct, q.category
+        FROM market_quotes q
+        INNER JOIN (
+          SELECT ticker, MAX(recorded_at) AS max_t
+          FROM market_quotes
+          GROUP BY ticker
+        ) latest ON q.ticker = latest.ticker AND q.recorded_at = latest.max_t
+        WHERE q.change_pct IS NOT NULL
+        ORDER BY ABS(q.change_pct) DESC
+        LIMIT 8
+      `).all() as Array<{ ticker: string; name: string; price: number; change_pct: number; category: string }>
+    } catch {}
+
+    // Recent activity timeline (last 30 events)
+    const timeline = db.prepare(`
+      SELECT id, title, severity, discipline, source_name, created_at
+      FROM intel_reports
+      WHERE severity IN ('critical', 'high')
+      ORDER BY created_at DESC
+      LIMIT 25
+    `).all() as Array<{ id: string; title: string; severity: string; discipline: string; source_name: string; created_at: number }>
+
+    // Source health
+    const sourceHealth = db.prepare(`
+      SELECT
+        COUNT(*) AS total,
+        SUM(CASE WHEN enabled = 1 THEN 1 ELSE 0 END) AS enabled_count,
+        SUM(CASE WHEN last_error IS NOT NULL THEN 1 ELSE 0 END) AS error_count,
+        SUM(CASE WHEN last_collected_at >= ? THEN 1 ELSE 0 END) AS active_24h
+      FROM sources
+    `).get(dayAgo) as { total: number; enabled_count: number; error_count: number; active_24h: number }
+
+    // Total entities/tags counts (knowledge graph size)
+    const entityCount = (db.prepare('SELECT COUNT(DISTINCT entity_value) AS c FROM intel_entities').get() as { c: number }).c
+    const tagCount = (db.prepare('SELECT COUNT(DISTINCT tag) AS c FROM intel_tags').get() as { c: number }).c
+    const linkCount = (db.prepare('SELECT COUNT(*) AS c FROM intel_links').get() as { c: number }).c
+
+    // 7-day total for header trend indicator
+    const reportsLast7d = (db.prepare('SELECT COUNT(*) AS c FROM intel_reports WHERE created_at >= ?').get(weekAgo) as { c: number }).c
+    const reportsPrev7d = (db.prepare(
+      'SELECT COUNT(*) AS c FROM intel_reports WHERE created_at >= ? AND created_at < ?'
+    ).get(weekAgo - 7 * 24 * 60 * 60 * 1000, weekAgo) as { c: number }).c
+    const trendPct = reportsPrev7d > 0 ? Math.round(((reportsLast7d - reportsPrev7d) / reportsPrev7d) * 100) : 0
+
+    return {
+      hourlyTrend,
+      geoPoints,
+      topEntities,
+      topSources,
+      marketSummary,
+      timeline,
+      sourceHealth,
+      knowledgeGraph: { entities: entityCount, tags: tagCount, links: linkCount },
+      trend: { last7d: reportsLast7d, prev7d: reportsPrev7d, pct: trendPct }
+    }
+  })
+
   // Trajectory data for ADS-B aircraft and ISS
   ipcMain.handle('intel:getTrajectories', () => {
     const db = getDatabase()
