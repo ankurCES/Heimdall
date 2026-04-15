@@ -10,6 +10,7 @@ import { Label } from '@renderer/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@renderer/components/ui/select'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@renderer/components/ui/dialog'
 import { ClassificationBadge, CLASSIFICATION_LEVELS, type Classification } from '@renderer/components/ClassificationBanner'
+import { ExportMenu } from '@renderer/components/ExportMenu'
 import { cn, formatRelativeTime } from '@renderer/lib/utils'
 
 /**
@@ -252,6 +253,7 @@ function SessionView({ session, onChanged, loading }: { session: AchSession; onC
             <p className="text-xs text-muted-foreground mt-1">{session.question}</p>
           )}
         </div>
+        <ExportMenu source_type="ach" source_id={session.id} />
       </div>
 
       {/* Analysis summary */}

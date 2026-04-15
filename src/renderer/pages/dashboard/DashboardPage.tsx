@@ -16,6 +16,7 @@ import { DISCIPLINE_LABELS } from '@common/types/intel'
 import { formatRelativeTime, cn } from '@renderer/lib/utils'
 import { ClassificationBadge } from '@renderer/components/ClassificationBanner'
 import { MarkdownRenderer } from '@renderer/components/MarkdownRenderer'
+import { ExportMenu } from '@renderer/components/ExportMenu'
 import { FileText as FileIcon, Loader2 } from 'lucide-react'
 import {
   Chart as ChartJS,
@@ -462,6 +463,7 @@ function DpbButton() {
               <Button size="sm" variant="ghost" onClick={generate} disabled={generating}>
                 {generating ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : 'Refresh'}
               </Button>
+              {brief && <ExportMenu source_type="dpb" source_id={brief.id} />}
             </DialogTitle>
           </DialogHeader>
           <div className="flex-1 overflow-auto pr-2 pb-2">

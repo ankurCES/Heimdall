@@ -37,7 +37,8 @@ const testChannels = [
   'ach:sessions:list', 'ach:sessions:get', 'ach:sessions:create', 'ach:sessions:update', 'ach:sessions:delete',
   'ach:hypotheses:add', 'ach:hypotheses:update', 'ach:hypotheses:delete',
   'ach:evidence:add', 'ach:evidence:update', 'ach:evidence:delete',
-  'ach:scores:set', 'ach:scores:clear', 'ach:agent:generateHypotheses'
+  'ach:scores:set', 'ach:scores:clear', 'ach:agent:generateHypotheses',
+  'export:write'
 ]
 const allowedChannels = [...Object.values(IPC_CHANNELS), ...testChannels]
 const chatEvents = ['chat:chunk', 'chat:done', 'chat:error']

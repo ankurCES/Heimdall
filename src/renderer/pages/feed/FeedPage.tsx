@@ -15,6 +15,7 @@ import { formatRelativeTime } from '@renderer/lib/utils'
 import { cn } from '@renderer/lib/utils'
 import { StanagBadge } from '@renderer/components/StanagBadge'
 import { ClassificationBadge, isClassification, isCleared, type Classification } from '@renderer/components/ClassificationBanner'
+import { ExportMenu } from '@renderer/components/ExportMenu'
 
 const SEVERITY_BADGE: Record<ThreatLevel, { variant: 'destructive' | 'warning' | 'default' | 'secondary' | 'outline'; label: string }> = {
   critical: { variant: 'destructive', label: 'CRITICAL' },
@@ -314,7 +315,7 @@ function ReportDetail({ report, onMarkReviewed }: { report: IntelReport; onMarkR
       </div>
 
       {/* Actions */}
-      <div className="flex gap-2 pt-2 border-t border-border">
+      <div className="flex gap-2 pt-2 border-t border-border flex-wrap">
         {report.sourceUrl && (
           <Button size="sm" variant="outline" onClick={() => window.open(report.sourceUrl!, '_blank')}>
             <ExternalLink className="h-3.5 w-3.5 mr-1.5" />
@@ -327,6 +328,7 @@ function ReportDetail({ report, onMarkReviewed }: { report: IntelReport; onMarkR
             Mark Reviewed
           </Button>
         )}
+        <ExportMenu source_type="intel" source_id={report.id} />
       </div>
     </div>
   )
