@@ -409,14 +409,27 @@ export function MapPage() {
             )
           })}
 
-          {/* Trajectory paths — smooth dotted bold lines */}
+          {/* Trajectory paths — smooth dotted bold lines. Trajectory points
+              are filtered to the active time window so only the recent orbit
+              shows (prevents the map clogging with overlapping historic ISS
+              tracks), and slider scrubbing moves the path with time. */}
           {layers.paths && trajectories.map((traj, idx) => {
             const color = traj.type === 'iss' ? ISS_COLOR : TRAJECTORY_COLORS[idx % TRAJECTORY_COLORS.length]
-            const rawPositions = traj.points.map((p) => [p.lat, p.lng] as [number, number])
-            if (rawPositions.length === 0) return null
-
-            // For ISS/orbital: interpolate great circle arcs + split at antimeridian
             const isOrbital = traj.type === 'iss'
+
+            // Compute the time window to render this trajectory in.
+            // - ISS: at most ~100 min regardless of the global window (one orbit)
+            // - ADS-B: full configured window
+            const orbitCapMs = 100 * 60 * 1000
+            const effectiveWindow = isOrbital ? Math.min(timeWindowMs, orbitCapMs) : timeWindowMs
+            const lo = liveMode ? sliderTime - effectiveWindow : sliderTime - effectiveWindow / 2
+            const hi = liveMode ? sliderTime : sliderTime + effectiveWindow / 2
+
+            const visiblePoints = traj.points.filter((p) => p.time >= lo && p.time <= hi)
+            if (visiblePoints.length === 0) return null
+
+            const rawPositions = visiblePoints.map((p) => [p.lat, p.lng] as [number, number])
+
             const interpolated = isOrbital ? interpolateGreatCircle(rawPositions, 12) : rawPositions
             const segments = isOrbital ? splitAtAntimeridian(interpolated) : [interpolated]
             const lastPt = rawPositions[rawPositions.length - 1]
@@ -438,14 +451,14 @@ export function MapPage() {
                     smoothFactor={isOrbital ? 1.5 : 1.0}
                   />
                 ))}
-                {/* Endpoint marker — latest position */}
+                {/* Endpoint marker — latest position in the visible window */}
                 <CircleMarker
                   center={lastPt}
                   radius={5}
                   pathOptions={{ color, fillColor: color, fillOpacity: 1, weight: 2 }}
                 >
                   <Tooltip direction="top" offset={[0, -8]} className="custom-tooltip">
-                    <span style={{ fontSize: 10 }}>{isOrbital ? '🛰️' : '✈️'} {traj.label} ({traj.points.length} pts)</span>
+                    <span style={{ fontSize: 10 }}>{isOrbital ? '🛰️' : '✈️'} {traj.label} ({visiblePoints.length} pts)</span>
                   </Tooltip>
                 </CircleMarker>
               </span>
