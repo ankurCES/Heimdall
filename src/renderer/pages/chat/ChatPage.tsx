@@ -12,6 +12,7 @@ import { Switch } from '@renderer/components/ui/switch'
 import { Label } from '@renderer/components/ui/label'
 import { MarkdownRenderer } from '@renderer/components/MarkdownRenderer'
 import { IcdProbabilityHints } from '@renderer/components/IcdProbabilityHints'
+import { AnalystCouncilPanel } from '@renderer/components/AnalystCouncilPanel'
 import { ThinkingBlocks } from '@renderer/components/ThinkingBlock'
 import { TagEntityPicker } from '@renderer/components/TagEntityPicker'
 import { cn } from '@renderer/lib/utils'
@@ -422,6 +423,15 @@ export function ChatPage() {
                         estimative-probability alternatives. Renders nothing
                         if the message is clean. */}
                     <IcdProbabilityHints content={msg.content} />
+                    {/* Multi-Agent Analyst Council — only offered for
+                        substantive messages (avoid running on short
+                        clarifications / one-liners). */}
+                    {msg.content.length > 400 && (
+                      <AnalystCouncilPanel
+                        content={msg.content}
+                        sessionId={activeSessionId}
+                      />
+                    )}
                   </div>
                   {msg.content.length > 200 && (
                     <div className="border-t border-border/50 px-4 py-2 flex items-center justify-between">

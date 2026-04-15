@@ -739,6 +739,74 @@ const migrations: Migration[] = [
 
       log.info(`Migration 014: classification column added to ${tables.length} tables; audit_log_chained created with hash-chain integrity`)
     }
+  },
+  {
+    version: '015',
+    name: 'analyst_council',
+    up: (db) => {
+      // Multi-Agent Analyst Council (Cross-cutting A in the agency roadmap).
+      //
+      // Each "run" is a debate triggered by an analyst over a topic + a
+      // bundle of source intel. Five specialized agent roles independently
+      // reason over the input then a Synthesis agent reconciles.
+      //
+      //   skeptic         — finds single-source claims, hedge words,
+      //                     unsupported assumptions
+      //   red_team        — adopts adversary's perspective; argues against
+      //                     the analyst's hypothesis on its own terms
+      //   counter_intel   — flags coordinated narratives, suspicious
+      //                     source overlap, deception heuristics
+      //   citation_audit  — verifies every claim back to a primary source;
+      //                     flags hallucinated facts
+      //   synthesis       — reconciles the four into the analyst-ready
+      //                     final assessment + estimative-probability
+      //                     judgment in ICD 203 language
+      //
+      // The full transcript is itself an analytical product — fully
+      // auditable, defensible in cross-examination.
+
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS analyst_council_runs (
+          id TEXT PRIMARY KEY,
+          session_id TEXT,
+          preliminary_report_id TEXT,
+          topic TEXT NOT NULL,
+          input_summary TEXT,
+          status TEXT NOT NULL DEFAULT 'pending',
+          classification TEXT NOT NULL DEFAULT 'UNCLASSIFIED',
+          started_at INTEGER NOT NULL,
+          completed_at INTEGER,
+          error TEXT,
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_council_runs_session ON analyst_council_runs(session_id);
+        CREATE INDEX IF NOT EXISTS idx_council_runs_prelim ON analyst_council_runs(preliminary_report_id);
+        CREATE INDEX IF NOT EXISTS idx_council_runs_started ON analyst_council_runs(started_at DESC);
+
+        CREATE TABLE IF NOT EXISTS analyst_council_outputs (
+          id TEXT PRIMARY KEY,
+          run_id TEXT NOT NULL,
+          role TEXT NOT NULL,
+          conclusion TEXT,
+          key_findings TEXT,
+          concerns TEXT,
+          confidence TEXT,
+          citations TEXT,
+          model_used TEXT,
+          tokens_used INTEGER,
+          duration_ms INTEGER,
+          status TEXT NOT NULL DEFAULT 'pending',
+          error TEXT,
+          created_at INTEGER NOT NULL,
+          FOREIGN KEY (run_id) REFERENCES analyst_council_runs(id) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS idx_council_outputs_run ON analyst_council_outputs(run_id);
+        CREATE INDEX IF NOT EXISTS idx_council_outputs_role ON analyst_council_outputs(role);
+      `)
+
+      log.info('Migration 015: analyst_council_runs + analyst_council_outputs tables created')
+    }
   }
 ]
 

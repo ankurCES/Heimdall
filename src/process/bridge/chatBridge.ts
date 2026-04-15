@@ -7,6 +7,7 @@ import { syncManager } from '../services/sync/SyncManager'
 import { getDatabase } from '../services/database'
 import { reportExtractor } from '../services/enrichment/ReportExtractor'
 import { auditChainService } from '../services/audit/AuditChainService'
+import { analystCouncilService } from '../services/llm/AnalystCouncil'
 import { watchTermsService } from '../services/watch/WatchTermsService'
 import { generateId, timestamp } from '@common/utils/id'
 import log from 'electron-log'
@@ -634,6 +635,26 @@ export function registerChatBridge(): void {
     ).all(...vals) as Array<{ date: string; count: number }>
 
     return { data, timeline: timeData }
+  })
+
+  // Multi-Agent Analyst Council (Cross-cutting A)
+  ipcMain.handle('council:run', async (_event, params: {
+    topic: string
+    inputContent: string
+    sessionId?: string
+    preliminaryReportId?: string
+    classification?: string
+    connectionId?: string
+  }) => {
+    return analystCouncilService.run(params)
+  })
+
+  ipcMain.handle('council:get', (_event, params: { id: string }) => {
+    return analystCouncilService.get(params.id)
+  })
+
+  ipcMain.handle('council:list', (_event, params: { sessionId?: string; preliminaryReportId?: string; limit?: number } = {}) => {
+    return analystCouncilService.list(params)
   })
 
   log.info('Chat bridge registered')

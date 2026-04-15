@@ -28,7 +28,8 @@ const testChannels = [
   'analytics:listReports', 'analytics:getReport', 'analytics:saveReport',
   'analytics:deleteReport', 'analytics:duplicateReport', 'analytics:queryWidget',
   'intel:setClassification',
-  'audit:chain:list', 'audit:chain:verify'
+  'audit:chain:list', 'audit:chain:verify',
+  'council:run', 'council:get', 'council:list'
 ]
 const allowedChannels = [...Object.values(IPC_CHANNELS), ...testChannels]
 const chatEvents = ['chat:chunk', 'chat:done', 'chat:error']
