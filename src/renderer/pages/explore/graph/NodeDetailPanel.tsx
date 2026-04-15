@@ -184,11 +184,11 @@ export function NodeDetailPanel({ node, linkedItems, linkColors, onClose, onSele
             <div className="flex justify-between gap-2">
               <span className="text-muted-foreground shrink-0">ID</span>
               <button
-                onClick={() => { navigator.clipboard.writeText(node.id); toast.success('ID copied') }}
+                onClick={() => { navigator.clipboard.writeText(String(node.id ?? '')); toast.success('ID copied') }}
                 className="font-mono text-[9px] text-right hover:text-foreground text-muted-foreground"
                 title="Click to copy"
               >
-                {node.id.slice(0, 24)}{node.id.length > 24 ? '…' : ''}
+                {String(node.id ?? '').slice(0, 24)}{(node.id || '').length > 24 ? '…' : ''}
               </button>
             </div>
           </CardContent>
@@ -211,12 +211,16 @@ export function NodeDetailPanel({ node, linkedItems, linkColors, onClose, onSele
           <div>
             <div className="text-[10px] uppercase tracking-wider text-muted-foreground/70 mb-1.5">Entities</div>
             <div className="flex flex-wrap gap-1">
-              {details.entities.slice(0, 15).map((e, i) => (
-                <Badge key={i} variant="outline" className="text-[9px] py-0 px-1.5" title={`${e.entity_type} (conf ${Math.round(e.confidence * 100)}%)`}>
-                  <span className="text-muted-foreground/70 mr-1">{e.entity_type}:</span>
-                  {e.entity_value.slice(0, 30)}
-                </Badge>
-              ))}
+              {details.entities.slice(0, 15).map((e, i) => {
+                const val = String(e.entity_value ?? '')
+                const conf = typeof e.confidence === 'number' ? Math.round(e.confidence * 100) : 0
+                return (
+                  <Badge key={i} variant="outline" className="text-[9px] py-0 px-1.5" title={`${e.entity_type || '?'} (conf ${conf}%)`}>
+                    <span className="text-muted-foreground/70 mr-1">{e.entity_type || '?'}:</span>
+                    {val.slice(0, 30)}
+                  </Badge>
+                )
+              })}
             </div>
           </div>
         )}
@@ -251,7 +255,9 @@ export function NodeDetailPanel({ node, linkedItems, linkColors, onClose, onSele
             </div>
             <div className="flex flex-wrap gap-1">
               {details.humintSourceIds.slice(0, 20).map((sid, i) => {
-                const linked = linkedItems.find((li) => li.node.id === sid)
+                const safeSid = String(sid ?? '')
+                const linked = linkedItems.find((li) => li.node.id === safeSid)
+                const linkedTitle = linked ? String(linked.node.title ?? '') : ''
                 return (
                   <button
                     key={i}
@@ -263,9 +269,9 @@ export function NodeDetailPanel({ node, linkedItems, linkColors, onClose, onSele
                         ? 'border-yellow-500/40 bg-yellow-500/10 text-yellow-400 hover:bg-yellow-500/20 cursor-pointer'
                         : 'border-border text-muted-foreground/60 cursor-default'
                     )}
-                    title={linked?.node.title || sid}
+                    title={linkedTitle || safeSid}
                   >
-                    {linked ? linked.node.title.slice(0, 32) : sid.slice(0, 16)}
+                    {linked ? linkedTitle.slice(0, 32) : safeSid.slice(0, 16)}
                   </button>
                 )
               })}

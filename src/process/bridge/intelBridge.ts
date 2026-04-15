@@ -272,10 +272,15 @@ export function registerIntelBridge(): void {
     interface Trajectory { id: string; label: string; type: 'adsb' | 'iss'; points: TrajectoryPoint[] }
     const trajectories: Trajectory[] = []
 
-    // ISS trajectory
+    // ISS trajectory — show only the most recent orbit (~92 min). The ISS
+    // completes one revolution every ~92 minutes; historical paths overlap
+    // themselves and clutter the map. Limit to the last 100 minutes so the
+    // user sees a single clean orbital track.
+    const ISS_ORBIT_MS = 100 * 60 * 1000
+    const issCutoff = Date.now() - ISS_ORBIT_MS
     const issRows = db.prepare(
-      "SELECT latitude, longitude, created_at FROM intel_reports WHERE source_name = 'ISS Tracker' AND latitude IS NOT NULL AND longitude IS NOT NULL ORDER BY created_at ASC"
-    ).all() as Array<{ latitude: number; longitude: number; created_at: number }>
+      "SELECT latitude, longitude, created_at FROM intel_reports WHERE source_name = 'ISS Tracker' AND latitude IS NOT NULL AND longitude IS NOT NULL AND created_at >= ? ORDER BY created_at ASC"
+    ).all(issCutoff) as Array<{ latitude: number; longitude: number; created_at: number }>
 
     if (issRows.length >= 1) {
       trajectories.push({

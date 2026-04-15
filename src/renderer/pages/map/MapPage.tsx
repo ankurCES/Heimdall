@@ -1,7 +1,7 @@
-import { useEffect, useState, useCallback, useRef } from 'react'
+import { useEffect, useState, useCallback, useRef, useMemo } from 'react'
 import { MapContainer, TileLayer, Marker, Popup, Tooltip, CircleMarker, Polyline } from 'react-leaflet'
 import L from 'leaflet'
-import { Map as MapIcon, Filter, RefreshCw, Loader2 } from 'lucide-react'
+import { Map as MapIcon, Filter, RefreshCw, Loader2, Play, Pause, Clock } from 'lucide-react'
 import { Button } from '@renderer/components/ui/button'
 import { Badge } from '@renderer/components/ui/badge'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@renderer/components/ui/select'
@@ -182,6 +182,15 @@ export function MapPage() {
   const [meshNodes, setMeshNodes] = useState<Array<{ node_id: string; long_name: string | null; latitude: number | null; longitude: number | null; battery_level: number | null; last_seen: number }>>([])
   const [trajectories, setTrajectories] = useState<Trajectory[]>([])
 
+  // Time slider state — filters the reports shown on the map by createdAt.
+  // - liveMode: slider tracks "now"; user can't drag. Shown intel is the
+  //   last `timeWindowMs` before now.
+  // - liveMode off: user scrubs through time. Shown intel is within
+  //   `±timeWindowMs/2` of the slider value.
+  const [liveMode, setLiveMode] = useState(true)
+  const [sliderTime, setSliderTime] = useState<number>(() => Date.now())
+  const [timeWindowMs, setTimeWindowMs] = useState<number>(24 * 60 * 60 * 1000) // default 24h
+
   const loadTrajectories = useCallback(async () => {
     try {
       const result = await window.heimdall.invoke('intel:getTrajectories') as { trajectories: Trajectory[] }
@@ -240,10 +249,37 @@ export function MapPage() {
     return unsub
   }, [])
 
+  // Time range bounds — the earliest createdAt in current reports, up to now.
+  const timeRange = useMemo(() => {
+    if (reports.length === 0) return { min: Date.now() - 24 * 60 * 60 * 1000, max: Date.now() }
+    let min = Infinity
+    for (const r of reports) if (r.createdAt < min) min = r.createdAt
+    return { min: isFinite(min) ? min : Date.now() - 24 * 60 * 60 * 1000, max: Date.now() }
+  }, [reports])
+
+  // Keep sliderTime pinned to "now" while liveMode is on; snap into bounds
+  // when entering scrub mode.
+  useEffect(() => {
+    if (liveMode) {
+      setSliderTime(Date.now())
+      const id = setInterval(() => setSliderTime(Date.now()), 15_000)
+      return () => clearInterval(id)
+    }
+  }, [liveMode])
+
+  // Filter reports by the currently-selected time window.
+  // Live: shows [now - window, now].
+  // Scrub: shows [sliderTime - window/2, sliderTime + window/2].
+  const filteredReports = useMemo(() => {
+    const lo = liveMode ? sliderTime - timeWindowMs : sliderTime - timeWindowMs / 2
+    const hi = liveMode ? sliderTime : sliderTime + timeWindowMs / 2
+    return reports.filter((r) => r.createdAt >= lo && r.createdAt <= hi)
+  }, [reports, sliderTime, timeWindowMs, liveMode])
+
   const stats = {
-    total: reports.length,
-    critical: reports.filter((r) => r.severity === 'critical').length,
-    high: reports.filter((r) => r.severity === 'high').length
+    total: filteredReports.length,
+    critical: filteredReports.filter((r) => r.severity === 'critical').length,
+    high: filteredReports.filter((r) => r.severity === 'high').length
   }
 
   return (
@@ -336,7 +372,7 @@ export function MapPage() {
             url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
           />
 
-          {reports.filter((r) => layers[r.discipline] !== false).map((report) => {
+          {filteredReports.filter((r) => layers[r.discipline] !== false).map((report) => {
             const emoji = SOURCE_ICONS[report.sourceName] || DISCIPLINE_ICONS[report.discipline] || '📄'
             const color = SEVERITY_COLORS[report.severity]
             const size = SEVERITY_RADIUS[report.severity] * 3
@@ -418,6 +454,19 @@ export function MapPage() {
 
           <MapLegend />
         </MapContainer>
+
+        {/* Time window slider */}
+        <TimeSliderControl
+          reports={reports}
+          sliderTime={sliderTime}
+          setSliderTime={setSliderTime}
+          liveMode={liveMode}
+          setLiveMode={setLiveMode}
+          timeWindowMs={timeWindowMs}
+          setTimeWindowMs={setTimeWindowMs}
+          timeRange={timeRange}
+          filteredCount={stats.total}
+        />
 
         {/* Detail panel */}
         {selectedReport && (
@@ -518,6 +567,188 @@ export function MapPage() {
             <Loader2 className="h-3 w-3 animate-spin" /> Loading geo data...
           </div>
         )}
+      </div>
+    </div>
+  )
+}
+
+// ---- Time slider ----
+
+const TIME_WINDOW_PRESETS: Array<{ label: string; ms: number }> = [
+  { label: '5m',  ms: 5 * 60 * 1000 },
+  { label: '30m', ms: 30 * 60 * 1000 },
+  { label: '2h',  ms: 2 * 60 * 60 * 1000 },
+  { label: '6h',  ms: 6 * 60 * 60 * 1000 },
+  { label: '24h', ms: 24 * 60 * 60 * 1000 },
+  { label: '7d',  ms: 7 * 24 * 60 * 60 * 1000 }
+]
+
+function formatTimestamp(t: number): string {
+  const d = new Date(t)
+  const now = Date.now()
+  const sameDay = new Date(now).toDateString() === d.toDateString()
+  if (sameDay) return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+  return d.toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+}
+
+function TimeSliderControl({
+  reports, sliderTime, setSliderTime, liveMode, setLiveMode,
+  timeWindowMs, setTimeWindowMs, timeRange, filteredCount
+}: {
+  reports: Array<{ createdAt: number; severity: ThreatLevel }>
+  sliderTime: number
+  setSliderTime: (t: number) => void
+  liveMode: boolean
+  setLiveMode: (v: boolean) => void
+  timeWindowMs: number
+  setTimeWindowMs: (v: number) => void
+  timeRange: { min: number; max: number }
+  filteredCount: number
+}) {
+  const { min, max } = timeRange
+
+  // Build a histogram along the slider axis so the user can see where intel
+  // activity is densest. 80 buckets. Critical severity gets extra weight for
+  // visual emphasis.
+  const histogram = useMemo(() => {
+    const buckets = 80
+    const span = Math.max(1, max - min)
+    const bucketWidth = span / buckets
+    const counts = new Array(buckets).fill(0) as number[]
+    const critCounts = new Array(buckets).fill(0) as number[]
+    for (const r of reports) {
+      const i = Math.min(buckets - 1, Math.max(0, Math.floor((r.createdAt - min) / bucketWidth)))
+      counts[i] += 1
+      if (r.severity === 'critical') critCounts[i] += 1
+    }
+    const maxCount = Math.max(1, ...counts)
+    return counts.map((c, i) => ({
+      pct: c / maxCount,
+      critical: critCounts[i] / Math.max(1, c)
+    }))
+  }, [reports, min, max])
+
+  // Slider position as a 0..1000 integer (range inputs only accept numbers)
+  const sliderPos = Math.round(((sliderTime - min) / Math.max(1, max - min)) * 1000)
+
+  const onSliderChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const pos = parseInt(e.target.value, 10)
+    const t = min + (pos / 1000) * (max - min)
+    if (liveMode) setLiveMode(false)
+    setSliderTime(t)
+  }
+
+  return (
+    <div
+      className="absolute bottom-4 left-1/2 -translate-x-1/2 z-[1000] pointer-events-auto"
+      style={{ width: 'min(820px, calc(100vw - 48px))' }}
+    >
+      <div className="bg-card/95 backdrop-blur border border-border rounded-lg shadow-xl p-3">
+        <div className="flex items-center gap-2 mb-2">
+          {/* Live toggle */}
+          <button
+            onClick={() => setLiveMode(!liveMode)}
+            className={cn(
+              'flex items-center gap-1.5 px-2 py-1 rounded text-[11px] font-medium border',
+              liveMode
+                ? 'border-green-500/40 bg-green-500/15 text-green-400'
+                : 'border-border text-muted-foreground hover:text-foreground'
+            )}
+            title={liveMode ? 'Live — click to scrub history' : 'Paused — click to return to live'}
+          >
+            {liveMode ? <Play className="h-3 w-3 fill-current" /> : <Pause className="h-3 w-3" />}
+            {liveMode ? 'LIVE' : 'SCRUB'}
+            {liveMode && <span className="relative flex h-1.5 w-1.5"><span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75" /><span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-green-400" /></span>}
+          </button>
+
+          {/* Selected time display */}
+          <div className="flex items-center gap-1 text-xs text-muted-foreground">
+            <Clock className="h-3 w-3" />
+            <span className="font-mono text-foreground">{formatTimestamp(sliderTime)}</span>
+            <span className="mx-1">±</span>
+            <Select value={String(timeWindowMs)} onValueChange={(v) => setTimeWindowMs(parseInt(v, 10))}>
+              <SelectTrigger className="h-6 w-16 text-[10px] font-mono">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {TIME_WINDOW_PRESETS.map((p) => (
+                  <SelectItem key={p.label} value={String(p.ms)}>{p.label}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          <Badge variant="outline" className="text-[10px] font-mono ml-auto">
+            {filteredCount} visible
+          </Badge>
+
+          {!liveMode && (
+            <button
+              onClick={() => { setLiveMode(true) }}
+              className="text-[10px] text-muted-foreground hover:text-foreground underline"
+            >
+              Jump to live
+            </button>
+          )}
+        </div>
+
+        {/* Activity histogram + slider */}
+        <div className="relative h-8 bg-muted/30 rounded overflow-hidden">
+          {/* Histogram bars */}
+          <div className="absolute inset-0 flex items-end">
+            {histogram.map((bucket, i) => (
+              <div
+                key={i}
+                className="flex-1"
+                style={{
+                  height: `${Math.max(4, bucket.pct * 100)}%`,
+                  background: bucket.critical > 0.3 ? '#ef4444' : bucket.critical > 0.1 ? '#f97316' : '#3b82f6',
+                  opacity: 0.35 + bucket.pct * 0.5
+                }}
+              />
+            ))}
+          </div>
+
+          {/* Window highlight — shows the visible range */}
+          {(() => {
+            const span = Math.max(1, max - min)
+            const windowStart = (liveMode ? sliderTime - timeWindowMs : sliderTime - timeWindowMs / 2) - min
+            const windowEnd = (liveMode ? sliderTime : sliderTime + timeWindowMs / 2) - min
+            const leftPct = Math.max(0, (windowStart / span) * 100)
+            const widthPct = Math.min(100 - leftPct, ((windowEnd - windowStart) / span) * 100)
+            return (
+              <div
+                className="absolute top-0 bottom-0 bg-primary/20 border-x border-primary/50 pointer-events-none"
+                style={{ left: `${leftPct}%`, width: `${widthPct}%` }}
+              />
+            )
+          })()}
+
+          {/* Slider */}
+          <input
+            type="range"
+            min={0}
+            max={1000}
+            value={sliderPos}
+            onChange={onSliderChange}
+            disabled={liveMode}
+            className="absolute inset-0 w-full opacity-0 cursor-pointer disabled:cursor-default"
+          />
+
+          {/* Slider handle overlay */}
+          <div
+            className="absolute top-0 bottom-0 w-0.5 bg-primary pointer-events-none"
+            style={{ left: `${sliderPos / 10}%` }}
+          >
+            <div className="absolute -top-0.5 left-1/2 -translate-x-1/2 w-3 h-3 rounded-full bg-primary border-2 border-background" />
+          </div>
+        </div>
+
+        {/* Range endpoints */}
+        <div className="flex justify-between mt-1 text-[9px] font-mono text-muted-foreground">
+          <span>{formatTimestamp(min)}</span>
+          <span>{formatTimestamp(max)}</span>
+        </div>
       </div>
     </div>
   )
