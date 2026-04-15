@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
-import { Network, RefreshCw, TrendingUp, GitBranch, Users, Zap, Loader2, Clock } from 'lucide-react'
+import { Network, RefreshCw, TrendingUp, GitBranch, Users, Zap, Loader2, Search, Sparkles, Calendar, X } from 'lucide-react'
 import { Button } from '@renderer/components/ui/button'
+import { Input } from '@renderer/components/ui/input'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@renderer/components/ui/card'
 import { Badge } from '@renderer/components/ui/badge'
 import { formatRelativeTime } from '@renderer/lib/utils'
@@ -60,6 +61,21 @@ const METRIC_LABELS: Record<Metric, { title: string; hint: string; icon: typeof 
   eigenvector: { title: 'Top by Eigenvector Centrality', hint: 'Connected to other well-connected nodes — "important friends"', icon: Network }
 }
 
+interface PredictionRow {
+  node_id: string
+  label: string | null
+  score: number
+  common: number
+  community_id: number | null
+  discipline: string | null
+}
+
+function toEpoch(dateStr: string): number | null {
+  if (!dateStr) return null
+  const t = new Date(dateStr).getTime()
+  return Number.isFinite(t) ? t : null
+}
+
 export function NetworkPage() {
   const [run, setRun] = useState<NetworkRun | null>(null)
   const [top, setTop] = useState<Record<Metric, NetworkMetric[]>>({
@@ -69,6 +85,17 @@ export function NetworkPage() {
   const [loading, setLoading] = useState(false)
   const [refreshing, setRefreshing] = useState(false)
   const [error, setError] = useState<string | null>(null)
+
+  // Time-window controls (yyyy-mm-dd). Empty = no bound.
+  const [since, setSince] = useState('')
+  const [until, setUntil] = useState('')
+
+  // Link prediction state.
+  const [searchQuery, setSearchQuery] = useState('')
+  const [searchResults, setSearchResults] = useState<NetworkMetric[]>([])
+  const [selectedNode, setSelectedNode] = useState<NetworkMetric | null>(null)
+  const [predictions, setPredictions] = useState<PredictionRow[]>([])
+  const [predicting, setPredicting] = useState(false)
 
   useEffect(() => { void loadAll() }, [])
 
@@ -98,13 +125,44 @@ export function NetworkPage() {
     setRefreshing(true)
     setError(null)
     try {
-      await window.heimdall.invoke('network:refresh')
+      const window_ = { since: toEpoch(since), until: toEpoch(until) }
+      await window.heimdall.invoke('network:refresh', window_)
       await loadAll()
     } catch (err) {
       setError(String(err).replace(/^Error:\s*/, ''))
     } finally {
       setRefreshing(false)
     }
+  }
+
+  async function doSearch(q: string) {
+    setSearchQuery(q)
+    if (q.trim().length < 2) { setSearchResults([]); return }
+    try {
+      const rows = await window.heimdall.invoke('network:search', { query: q, limit: 10 }) as NetworkMetric[]
+      setSearchResults(rows)
+    } catch { /* noop */ }
+  }
+
+  async function predictFor(node: NetworkMetric) {
+    setSelectedNode(node)
+    setSearchResults([])
+    setSearchQuery(node.label || node.node_id)
+    setPredicting(true)
+    setPredictions([])
+    setError(null)
+    try {
+      const rows = await window.heimdall.invoke('network:predict', { node_id: node.node_id, limit: 20 }) as PredictionRow[]
+      setPredictions(rows)
+    } catch (err) {
+      setError(String(err).replace(/^Error:\s*/, ''))
+    } finally {
+      setPredicting(false)
+    }
+  }
+
+  const clearSelection = () => {
+    setSelectedNode(null); setPredictions([]); setSearchQuery('')
   }
 
   const empty = !run || run.node_count === 0
@@ -130,6 +188,30 @@ export function NetworkPage() {
           {run ? 'Recompute' : 'Compute now'}
         </Button>
       </div>
+
+      {/* Time window — filters intel_links by created_at before recompute. */}
+      <Card>
+        <CardContent className="p-3 flex items-center gap-3 flex-wrap text-xs">
+          <Calendar className="h-3.5 w-3.5 text-muted-foreground" />
+          <span className="text-muted-foreground">Time window:</span>
+          <label className="flex items-center gap-1.5">
+            <span className="text-muted-foreground text-[10px] uppercase tracking-wider">from</span>
+            <Input type="date" value={since} onChange={(e) => setSince(e.target.value)} className="h-7 w-36 text-xs" />
+          </label>
+          <label className="flex items-center gap-1.5">
+            <span className="text-muted-foreground text-[10px] uppercase tracking-wider">to</span>
+            <Input type="date" value={until} onChange={(e) => setUntil(e.target.value)} className="h-7 w-36 text-xs" />
+          </label>
+          {(since || until) && (
+            <Button size="sm" variant="ghost" className="h-7 text-xs" onClick={() => { setSince(''); setUntil('') }}>
+              <X className="h-3 w-3 mr-1" />Clear
+            </Button>
+          )}
+          <span className="text-muted-foreground text-[10px] ml-2">
+            Leave empty for the full graph. Recompute applies the window.
+          </span>
+        </CardContent>
+      </Card>
 
       {/* Run summary */}
       <Card>
@@ -216,6 +298,115 @@ export function NetworkPage() {
                           <td className="py-1.5 text-xs">{c.size} nodes</td>
                           <td className="py-1.5 text-xs truncate max-w-md">{c.top_label || '—'}</td>
                           <td className="py-1.5 text-right text-xs font-mono">{c.top_pagerank.toFixed(4)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          {/* Link prediction */}
+          <Card>
+            <CardHeader>
+              <div className="flex items-center gap-2">
+                <Sparkles className="h-4 w-4 text-muted-foreground" />
+                <CardTitle className="text-base">Link Prediction (Adamic-Adar)</CardTitle>
+              </div>
+              <CardDescription className="text-xs">
+                Pick a node; the service scores every 2-hop neighbour not yet
+                directly connected by the Adamic-Adar index (common neighbours
+                weighted inversely by their degree — low-degree common
+                neighbours are strong evidence, hubs are weak evidence).
+                Results are probable-but-unrecorded links worth investigating.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <div className="relative">
+                <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+                <Input
+                  value={searchQuery}
+                  onChange={(e) => void doSearch(e.target.value)}
+                  placeholder="Search a node by label or id…"
+                  className="pl-8 h-8 text-sm"
+                />
+                {selectedNode && (
+                  <Button size="sm" variant="ghost" onClick={clearSelection}
+                    className="absolute right-1 top-1/2 -translate-y-1/2 h-6 w-6 p-0">
+                    <X className="h-3 w-3" />
+                  </Button>
+                )}
+              </div>
+
+              {searchResults.length > 0 && !selectedNode && (
+                <div className="border border-border rounded bg-card/30 max-h-60 overflow-auto">
+                  {searchResults.map((r) => (
+                    <button
+                      key={r.node_id}
+                      onClick={() => void predictFor(r)}
+                      className="w-full text-left px-3 py-1.5 border-b border-border/40 last:border-0 hover:bg-accent/40 text-xs flex items-center gap-2"
+                    >
+                      <span className="flex-1 truncate">{r.label || r.node_id}</span>
+                      {r.discipline && <Badge variant="outline" className="text-[9px] py-0 px-1 font-mono">{r.discipline}</Badge>}
+                      <span className="font-mono text-muted-foreground">PR {r.pagerank.toFixed(3)}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+
+              {selectedNode && (
+                <div className="p-2 rounded border border-primary/30 bg-primary/5 text-xs">
+                  <div className="text-muted-foreground text-[10px] uppercase tracking-wider">Source node</div>
+                  <div className="font-medium">{selectedNode.label || selectedNode.node_id}</div>
+                  <div className="flex gap-2 mt-1 text-[10px] text-muted-foreground">
+                    <span>PR {selectedNode.pagerank.toFixed(4)}</span>
+                    <span>degree {selectedNode.degree}</span>
+                    {selectedNode.community_id != null && <span>C{selectedNode.community_id}</span>}
+                  </div>
+                </div>
+              )}
+
+              {predicting && (
+                <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" /> Scoring candidates…
+                </div>
+              )}
+
+              {!predicting && selectedNode && predictions.length === 0 && (
+                <p className="text-xs text-muted-foreground">
+                  No candidate links — this node has no 2-hop neighbours that
+                  aren't already direct connections (or Adamic-Adar scored
+                  every candidate at 0).
+                </p>
+              )}
+
+              {predictions.length > 0 && (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="text-xs text-muted-foreground border-b border-border">
+                        <th className="text-left py-2 font-medium w-8">#</th>
+                        <th className="text-left py-2 font-medium">Candidate</th>
+                        <th className="text-left py-2 font-medium">Discipline</th>
+                        <th className="text-left py-2 font-medium">Community</th>
+                        <th className="text-right py-2 font-medium">Common neighbours</th>
+                        <th className="text-right py-2 font-medium">AA score</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {predictions.map((p, i) => (
+                        <tr key={p.node_id} className="border-b border-border/40 hover:bg-accent/30">
+                          <td className="py-1.5 text-xs text-muted-foreground font-mono">{i + 1}</td>
+                          <td className="py-1.5 text-xs truncate max-w-md">{p.label || p.node_id}</td>
+                          <td className="py-1.5">
+                            {p.discipline && <Badge variant="outline" className="text-[9px] py-0 px-1 font-mono">{p.discipline}</Badge>}
+                          </td>
+                          <td className="py-1.5">
+                            {p.community_id != null && <Badge variant="secondary" className="text-[9px] py-0 px-1 font-mono">C{p.community_id}</Badge>}
+                          </td>
+                          <td className="py-1.5 text-right text-xs font-mono">{p.common}</td>
+                          <td className="py-1.5 text-right text-xs font-mono text-primary">{p.score.toFixed(4)}</td>
                         </tr>
                       ))}
                     </tbody>

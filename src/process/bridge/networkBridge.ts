@@ -4,16 +4,11 @@ import { networkAnalysisService } from '../services/graph/NetworkAnalysisService
 
 /**
  * Theme 4 — network analysis IPC.
- *
- * Channels:
- *   network:refresh        → { id, node_count, edge_count, community_count, modularity, duration_ms }
- *   network:latest         → last successful run summary, or null
- *   network:top            ({ metric: 'pagerank'|'betweenness'|'degree'|'eigenvector', limit? }) → Metric[]
- *   network:communities    → community summaries
- *   network:node           (nodeId) → single metric row
  */
 export function registerNetworkBridge(): void {
-  ipcMain.handle('network:refresh', () => networkAnalysisService.refresh())
+  ipcMain.handle('network:refresh', (_evt, args?: { since?: number | null; until?: number | null }) => {
+    return networkAnalysisService.refresh(args ?? undefined)
+  })
 
   ipcMain.handle('network:latest', () => networkAnalysisService.latestRun())
 
@@ -27,6 +22,14 @@ export function registerNetworkBridge(): void {
   ipcMain.handle('network:communities', () => networkAnalysisService.communities())
 
   ipcMain.handle('network:node', (_evt, nodeId: string) => networkAnalysisService.forNode(nodeId))
+
+  ipcMain.handle('network:search', (_evt, args: { query: string; limit?: number }) => {
+    return networkAnalysisService.searchNodes(args.query, args.limit ?? 20)
+  })
+
+  ipcMain.handle('network:predict', (_evt, args: { node_id: string; limit?: number }) => {
+    return networkAnalysisService.predictLinks(args.node_id, args.limit ?? 20)
+  })
 
   log.info('network bridge registered')
 }

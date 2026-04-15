@@ -50,12 +50,23 @@ export interface NetworkMetric {
   computed_at: number
 }
 
+/** Optional time filter applied at graph-load time. Both bounds in ms-epoch. */
+export interface TimeWindow {
+  since?: number | null
+  until?: number | null
+}
+
 export class NetworkAnalysisService {
+  /** In-memory graph of the last refresh, reused by link prediction. */
+  private lastGraph: Graph | null = null
+  private lastWindow: TimeWindow | null = null
+
   /**
-   * Recompute all metrics from the current state of intel_links. Overwrites
-   * network_metrics in full. Returns a summary row from network_runs.
+   * Recompute all metrics from `intel_links`. If `window` is supplied, only
+   * links whose created_at falls within the range are considered — this lets
+   * the analyst see "the network as of" a given time.
    */
-  refresh(): NetworkRunResult {
+  refresh(window?: TimeWindow): NetworkRunResult {
     const db = getDatabase()
     const started = Date.now()
 
@@ -65,23 +76,9 @@ export class NetworkAnalysisService {
     const runId = Number(runIns.run(started).lastInsertRowid)
 
     try {
-      // Build graph: undirected for centrality + Louvain. Self-loops skipped.
-      const g = new Graph({ type: 'undirected', allowSelfLoops: false, multi: false })
+      const g = this.buildGraph(window)
 
-      const edgeRows = db.prepare(`
-        SELECT source_report_id, target_report_id, link_type, strength
-        FROM intel_links
-        WHERE source_report_id IS NOT NULL AND target_report_id IS NOT NULL
-          AND source_report_id <> target_report_id
-      `).all() as Array<{ source_report_id: string; target_report_id: string; link_type: string; strength: number | null }>
-
-      const endpointIds = new Set<string>()
-      for (const e of edgeRows) {
-        endpointIds.add(e.source_report_id)
-        endpointIds.add(e.target_report_id)
-      }
-
-      if (endpointIds.size === 0) {
+      if (g.order === 0) {
         db.prepare(
           'UPDATE network_runs SET finished_at=?, node_count=0, edge_count=0, community_count=0, duration_ms=? WHERE id=?'
         ).run(Date.now(), Date.now() - started, runId)
@@ -89,39 +86,6 @@ export class NetworkAnalysisService {
           id: runId, started_at: started, finished_at: Date.now(),
           node_count: 0, edge_count: 0, community_count: 0,
           modularity: null, duration_ms: Date.now() - started
-        }
-      }
-
-      const nodeMeta = resolveNodesById(db, Array.from(endpointIds))
-
-      // Add nodes
-      for (const id of endpointIds) {
-        const meta = nodeMeta.get(id)
-        g.addNode(id, {
-          label: (meta?.title as string) || id,
-          discipline: (meta?.discipline as string) || null,
-          nodeType: (meta?.type as string) || 'intel'
-        })
-      }
-
-      // Add edges (dedup since we forced undirected + multi=false).
-      // Weight = average strength across parallel link rows.
-      const edgeWeights = new Map<string, { sum: number; count: number }>()
-      for (const e of edgeRows) {
-        const [a, b] = e.source_report_id < e.target_report_id
-          ? [e.source_report_id, e.target_report_id]
-          : [e.target_report_id, e.source_report_id]
-        if (!g.hasNode(a) || !g.hasNode(b)) continue
-        const key = `${a}|${b}`
-        const w = e.strength ?? 0.5
-        const prev = edgeWeights.get(key)
-        if (prev) { prev.sum += w; prev.count += 1 }
-        else edgeWeights.set(key, { sum: w, count: 1 })
-      }
-      for (const [key, ws] of edgeWeights) {
-        const [a, b] = key.split('|')
-        if (!g.hasEdge(a, b)) {
-          g.addEdge(a, b, { weight: ws.sum / ws.count })
         }
       }
 
@@ -186,6 +150,11 @@ export class NetworkAnalysisService {
 
       log.info(`network: refresh complete — ${V} nodes, ${E} edges, ${communityCount} communities, Q=${modularity?.toFixed(3)}, ${finished - started}ms`)
 
+      // Retain the graph for link-prediction queries — no need to rebuild from
+      // scratch for each predictLinks call. Invalidated whenever refresh runs.
+      this.lastGraph = g
+      this.lastWindow = window ?? null
+
       return {
         id: runId, started_at: started, finished_at: finished,
         node_count: V, edge_count: E, community_count: communityCount,
@@ -198,6 +167,72 @@ export class NetworkAnalysisService {
       log.error(`network: refresh failed: ${message}`)
       throw err
     }
+  }
+
+  /**
+   * Load intel_links into a fresh graphology instance. Used by refresh()
+   * (before centrality) and by predictLinks() to recover the graph after
+   * a process restart wipes lastGraph.
+   */
+  private buildGraph(window?: TimeWindow): Graph {
+    const db = getDatabase()
+    const g = new Graph({ type: 'undirected', allowSelfLoops: false, multi: false })
+
+    // Time-window filter. `created_at` on intel_links is populated by the
+    // enricher; rows that predate that field (older migrations) fall through
+    // the WHERE and are included whenever no window is supplied.
+    const clauses: string[] = [
+      'source_report_id IS NOT NULL',
+      'target_report_id IS NOT NULL',
+      'source_report_id <> target_report_id'
+    ]
+    const params: unknown[] = []
+    if (window?.since != null) { clauses.push('created_at >= ?'); params.push(window.since) }
+    if (window?.until != null) { clauses.push('created_at <= ?'); params.push(window.until) }
+    const edgeRows = db.prepare(`
+      SELECT source_report_id, target_report_id, link_type, strength
+      FROM intel_links
+      WHERE ${clauses.join(' AND ')}
+    `).all(...params) as Array<{ source_report_id: string; target_report_id: string; link_type: string; strength: number | null }>
+
+    const endpointIds = new Set<string>()
+    for (const e of edgeRows) {
+      endpointIds.add(e.source_report_id)
+      endpointIds.add(e.target_report_id)
+    }
+    if (endpointIds.size === 0) return g
+
+    const nodeMeta = resolveNodesById(db, Array.from(endpointIds))
+    for (const id of endpointIds) {
+      const meta = nodeMeta.get(id)
+      g.addNode(id, {
+        label: (meta?.title as string) || id,
+        discipline: (meta?.discipline as string) || null,
+        nodeType: (meta?.type as string) || 'intel'
+      })
+    }
+
+    // Dedup parallel edges; weight = average strength.
+    const edgeWeights = new Map<string, { sum: number; count: number }>()
+    for (const e of edgeRows) {
+      const [a, b] = e.source_report_id < e.target_report_id
+        ? [e.source_report_id, e.target_report_id]
+        : [e.target_report_id, e.source_report_id]
+      if (!g.hasNode(a) || !g.hasNode(b)) continue
+      const key = `${a}|${b}`
+      const w = e.strength ?? 0.5
+      const prev = edgeWeights.get(key)
+      if (prev) { prev.sum += w; prev.count += 1 }
+      else edgeWeights.set(key, { sum: w, count: 1 })
+    }
+    for (const [key, ws] of edgeWeights) {
+      const [a, b] = key.split('|')
+      if (!g.hasEdge(a, b)) {
+        g.addEdge(a, b, { weight: ws.sum / ws.count })
+      }
+    }
+
+    return g
   }
 
   /** Top N nodes by a given metric. */
@@ -253,6 +288,104 @@ export class NetworkAnalysisService {
       FROM network_metrics WHERE node_id = ?
     `).get(nodeId) as NetworkMetric | undefined
     return row ?? null
+  }
+
+  /** Node search — simple label LIKE used by the link-prediction picker. */
+  searchNodes(query: string, limit = 20): NetworkMetric[] {
+    if (!query || query.trim().length < 2) return []
+    const db = getDatabase()
+    const q = `%${query.trim().toLowerCase()}%`
+    return db.prepare(`
+      SELECT node_id, node_type, label, discipline, degree, pagerank, betweenness, eigenvector, community_id, computed_at
+      FROM network_metrics
+      WHERE lower(label) LIKE ? OR lower(node_id) LIKE ?
+      ORDER BY pagerank DESC
+      LIMIT ?
+    `).all(q, q, limit) as NetworkMetric[]
+  }
+
+  /**
+   * Link prediction — Adamic-Adar. For every candidate node Y that is NOT
+   * currently connected to the source X, score
+   *
+   *     AA(X, Y) = Σ_{z ∈ N(X) ∩ N(Y)}  1 / log(|N(z)|)
+   *
+   * The intuition: common neighbours with low degree are stronger evidence
+   * of a hidden connection than common neighbours that are connected to
+   * everyone (a hub is a weak signal). Runs purely in-memory over
+   * `this.lastGraph` — must be called AFTER at least one refresh().
+   *
+   * Search space is bounded to 2-hop neighbours of X (any candidate Y at
+   * greater distance has zero common neighbours and contributes nothing).
+   */
+  predictLinks(nodeId: string, limit = 20): Array<{
+    node_id: string; label: string | null; score: number; common: number; community_id: number | null; discipline: string | null
+  }> {
+    // Rebuild the graph on demand if the process restarted since the last
+    // refresh. Cheap — ~1-2s for a 200K-edge graph; much faster than waiting
+    // through the 2-minute centrality recompute.
+    if (!this.lastGraph) {
+      this.lastGraph = this.buildGraph()
+    }
+    const g = this.lastGraph
+    if (!g.hasNode(nodeId)) {
+      throw new Error(`Node ${nodeId} is not in the current graph`)
+    }
+
+    // Neighbours of X as a Set for O(1) membership checks.
+    const neighX = new Set(g.neighbors(nodeId))
+
+    // Enumerate 2-hop neighbours as candidates.
+    const candidates = new Map<string, { common: string[] }>()
+    for (const z of neighX) {
+      for (const y of g.neighbors(z)) {
+        if (y === nodeId) continue
+        if (neighX.has(y)) continue // already directly connected
+        const entry = candidates.get(y)
+        if (entry) entry.common.push(z)
+        else candidates.set(y, { common: [z] })
+      }
+    }
+
+    const db = getDatabase()
+    const scored: Array<{ node_id: string; label: string | null; score: number; common: number; community_id: number | null; discipline: string | null }> = []
+    for (const [y, { common }] of candidates) {
+      let aa = 0
+      for (const z of common) {
+        const d = g.degree(z)
+        if (d > 1) aa += 1 / Math.log(d)
+      }
+      if (aa <= 0) continue
+      scored.push({ node_id: y, label: null, score: aa, common: common.length, community_id: null, discipline: null })
+    }
+    scored.sort((a, b) => b.score - a.score)
+    const topK = scored.slice(0, limit)
+
+    // Resolve labels / community / discipline from the cache — one query
+    // rather than per-row.
+    if (topK.length > 0) {
+      const placeholders = topK.map(() => '?').join(',')
+      const rows = db.prepare(`
+        SELECT node_id, label, community_id, discipline FROM network_metrics
+        WHERE node_id IN (${placeholders})
+      `).all(...topK.map((r) => r.node_id)) as Array<{ node_id: string; label: string | null; community_id: number | null; discipline: string | null }>
+      const byId = new Map(rows.map((r) => [r.node_id, r]))
+      for (const r of topK) {
+        const meta = byId.get(r.node_id)
+        if (meta) {
+          r.label = meta.label
+          r.community_id = meta.community_id
+          r.discipline = meta.discipline
+        }
+      }
+    }
+
+    return topK
+  }
+
+  /** Window of the last refresh, if any. */
+  lastWindowUsed(): TimeWindow | null {
+    return this.lastWindow
   }
 }
 
