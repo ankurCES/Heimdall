@@ -215,16 +215,30 @@ export function registerChatBridge(): void {
     const sessionMsgs = db.prepare(
       "SELECT content FROM chat_messages WHERE session_id = ? AND role = 'assistant' ORDER BY created_at"
     ).all(sessionId) as Array<{ content: string }>
+    // Full UUIDv4 pattern (8-4-4-4-12). The previous pattern only matched the
+    // first 16 chars of a UUID and produced truncated ids that did not match
+    // any row in intel_reports, so preliminary→intel links pointed at ghost
+    // ids and silently dropped in the graph.
+    const UUID_RE = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/g
     for (const msg of sessionMsgs) {
-      const uuidMatches = msg.content.match(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}/g) || []
+      const uuidMatches = msg.content.match(UUID_RE) || []
       sourceIds.push(...uuidMatches)
     }
+    // Dedupe + keep only ids that actually exist in intel_reports so the
+    // link target is a live node. Without this check, citations that refer
+    // to ids the assistant hallucinated would create dangling links.
+    const uniqueSourceIds = Array.from(new Set(sourceIds))
+    const verifiedSourceIds: string[] = uniqueSourceIds.length > 0
+      ? (db.prepare(
+          `SELECT id FROM intel_reports WHERE id IN (${uniqueSourceIds.map(() => '?').join(',')})`
+        ).all(...uniqueSourceIds) as Array<{ id: string }>).map((r) => r.id)
+      : []
 
     // Insert preliminary report
     db.prepare(`
       INSERT INTO preliminary_reports (id, session_id, chat_message_id, title, content, status, source_report_ids, created_at, updated_at)
       VALUES (?, ?, ?, ?, ?, 'preliminary', ?, ?, ?)
-    `).run(reportId, sessionId, messageId, extracted.title, content, JSON.stringify(sourceIds.slice(0, 50)), now, now)
+    `).run(reportId, sessionId, messageId, extracted.title, content, JSON.stringify(verifiedSourceIds.slice(0, 200)), now, now)
 
     // Insert recommended actions
     for (const action of extracted.actions) {
@@ -240,19 +254,25 @@ export function registerChatBridge(): void {
       )
     }
 
-    // Create links from preliminary report to source intel
-    for (const srcId of sourceIds.slice(0, 10)) {
-      db.prepare('INSERT OR IGNORE INTO intel_links (id, source_report_id, target_report_id, link_type, strength, reason, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)').run(
-        generateId(), reportId, srcId, 'preliminary_reference', 0.8, 'Source intel for preliminary report', now
-      )
-    }
+    // Create links from preliminary report to EVERY cited source intel.
+    // Previous code capped this at 10 — if the assistant cited 25 intel
+    // reports only the first 10 appeared in the relationship graph. Cap is
+    // now 200 (same as the source_report_ids store) so graph completeness
+    // matches what's listed in the report's citations.
+    const linkStmt = db.prepare('INSERT OR IGNORE INTO intel_links (id, source_report_id, target_report_id, link_type, strength, reason, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)')
+    const insertLinksTx = db.transaction((ids: string[]) => {
+      for (const srcId of ids) {
+        linkStmt.run(generateId(), reportId, srcId, 'preliminary_reference', 0.8, 'Source intel for preliminary report', now)
+      }
+    })
+    insertLinksTx(verifiedSourceIds.slice(0, 200))
 
     // Kuzu dual-write for preliminary report (fire-and-forget)
     if (kuzuService.isReady()) {
       (async () => {
         try {
           await kuzuService.upsertPreliminaryReport({ id: reportId, title: extracted.title, status: 'preliminary', created_at: now })
-          for (const srcId of sourceIds.slice(0, 10)) {
+          for (const srcId of verifiedSourceIds.slice(0, 200)) {
             await kuzuService.createLink(reportId, srcId, 'preliminary_reference', 0.8)
           }
         } catch {}

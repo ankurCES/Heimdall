@@ -294,6 +294,79 @@ const migrations: Migration[] = [
 
       log.info(`Migration 008: consolidated ${rowsMerged} duplicate HUMINT reports across ${consolidated} sessions`)
     }
+  },
+  {
+    version: '009',
+    name: 'backfill_preliminary_source_links',
+    up: (db) => {
+      // Earlier versions of chatBridge.ts used a truncated UUID regex
+      // (matched only the first 16 chars of a UUID) and capped source links
+      // at 10 per preliminary report. The net effect: preliminary_reports
+      // rows had `source_report_ids` JSON filled with garbage fragments, and
+      // the preliminary→intel edges in intel_links pointed at ids that do
+      // not exist in intel_reports.
+      //
+      // This migration re-scans the chat_messages that produced each
+      // preliminary report, extracts FULL UUIDs, verifies each against the
+      // live intel_reports set, and:
+      //   1. Rewrites preliminary_reports.source_report_ids with the
+      //      verified id list.
+      //   2. Inserts preliminary_reference intel_links for every verified
+      //      citation that is not already linked.
+      const FULL_UUID_RE = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/g
+
+      const prelims = db.prepare(
+        'SELECT id, session_id FROM preliminary_reports WHERE session_id IS NOT NULL AND session_id != \'\''
+      ).all() as Array<{ id: string; session_id: string }>
+
+      let rewrittenReports = 0
+      let linksAdded = 0
+
+      for (const prelim of prelims) {
+        // Pull all assistant messages for the session
+        const msgs = db.prepare(
+          "SELECT content FROM chat_messages WHERE session_id = ? AND role = 'assistant' ORDER BY created_at"
+        ).all(prelim.session_id) as Array<{ content: string }>
+
+        const candidates = new Set<string>()
+        for (const m of msgs) {
+          const matches = m.content.match(FULL_UUID_RE) || []
+          for (const uuid of matches) candidates.add(uuid)
+        }
+        if (candidates.size === 0) continue
+
+        // Verify each candidate exists in intel_reports
+        const ids = Array.from(candidates)
+        const verified = (db.prepare(
+          `SELECT id FROM intel_reports WHERE id IN (${ids.map(() => '?').join(',')})`
+        ).all(...ids) as Array<{ id: string }>).map((r) => r.id)
+        if (verified.length === 0) continue
+
+        // Overwrite the stored source_report_ids JSON with the verified set
+        db.prepare('UPDATE preliminary_reports SET source_report_ids = ?, updated_at = ? WHERE id = ?')
+          .run(JSON.stringify(verified.slice(0, 200)), timestamp(), prelim.id)
+        rewrittenReports++
+
+        // Insert preliminary_reference links that aren't already present
+        for (const srcId of verified.slice(0, 200)) {
+          const existing = db.prepare(
+            'SELECT 1 FROM intel_links WHERE source_report_id = ? AND target_report_id = ? AND link_type = ?'
+          ).get(prelim.id, srcId, 'preliminary_reference')
+          if (existing) continue
+          db.prepare(
+            "INSERT INTO intel_links (id, source_report_id, target_report_id, link_type, strength, reason, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)"
+          ).run(
+            `mig9_${prelim.id.slice(0, 8)}_${srcId.slice(0, 8)}_${linksAdded}`,
+            prelim.id, srcId, 'preliminary_reference', 0.8,
+            'Backfilled: source intel for preliminary report',
+            timestamp()
+          )
+          linksAdded++
+        }
+      }
+
+      log.info(`Migration 009: rewrote source_report_ids on ${rewrittenReports} preliminary reports, added ${linksAdded} preliminary→intel links`)
+    }
   }
 ]
 
