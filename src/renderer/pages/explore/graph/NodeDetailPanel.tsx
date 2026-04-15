@@ -127,7 +127,7 @@ export function NodeDetailPanel({ node, linkedItems, linkColors, onClose, onSele
     : node.discipline?.toUpperCase() || 'INTEL'
 
   return (
-    <div className="w-[380px] border-l border-border bg-card/80 backdrop-blur overflow-auto">
+    <div className="shrink-0 w-[400px] max-w-[92vw] h-full border-l border-border bg-card/95 backdrop-blur overflow-auto">
       <div className="sticky top-0 z-10 bg-card/95 backdrop-blur border-b border-border px-4 py-3 flex items-center gap-2">
         <Badge variant="outline" className={cn('text-[10px] font-mono', SEVERITY_STYLES[node.severity] || '')}>
           {(node.severity || '').toUpperCase()}

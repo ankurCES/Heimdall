@@ -334,7 +334,7 @@ export function RelationshipGraph() {
   }, [layoutMode, graphData.nodes])
 
   return (
-    <div className="flex h-full overflow-hidden">
+    <div className="flex h-full overflow-hidden relative">
       {/* Controls panel — non-scrolling header + scrollable body */}
       <div className="w-60 shrink-0 border-r border-border bg-card/50 flex flex-col overflow-hidden">
         {/* Sticky header: title + counts + layout toggle */}
@@ -566,15 +566,17 @@ export function RelationshipGraph() {
         )}
       </div>
 
-      {/* Detail panel */}
+      {/* Detail popup — floating overlay over the graph canvas, not an inline flex column */}
       {selectedNode && (
-        <NodeDetailPanel
-          node={selectedNode}
-          linkedItems={selectedNodeLinks}
-          linkColors={LINK_COLORS}
-          onClose={() => { setSelectedNode(null); setSelectedNodeLinks([]) }}
-          onSelectNode={(n) => handleNodeClick(n)}
-        />
+        <div className="absolute top-0 right-0 h-full z-[1000] shadow-2xl pointer-events-auto">
+          <NodeDetailPanel
+            node={selectedNode}
+            linkedItems={selectedNodeLinks}
+            linkColors={LINK_COLORS}
+            onClose={() => { setSelectedNode(null); setSelectedNodeLinks([]) }}
+            onSelectNode={(n) => handleNodeClick(n)}
+          />
+        </div>
       )}
     </div>
   )
