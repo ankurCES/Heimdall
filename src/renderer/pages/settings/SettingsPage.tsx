@@ -9,7 +9,8 @@ import {
   ShieldCheck,
   Brain,
   BookOpen,
-  Info
+  Info,
+  Lock
 } from 'lucide-react'
 import { cn } from '@renderer/lib/utils'
 import { ApiKeysTab } from './tabs/ApiKeysTab'
@@ -21,6 +22,7 @@ import { SafetyTab } from './tabs/SafetyTab'
 import { LlmTab } from './tabs/LlmTab'
 import { ObsidianTab } from './tabs/ObsidianTab'
 import { AboutTab } from './tabs/AboutTab'
+import { CompartmentsTab } from './tabs/CompartmentsTab'
 
 const tabs = [
   { id: 'sources', label: 'Sources', icon: Database, component: SourcesTab },
@@ -31,6 +33,7 @@ const tabs = [
   { id: 'obsidian', label: 'Obsidian', icon: BookOpen, component: ObsidianTab },
   { id: 'llm', label: 'LLM', icon: Brain, component: LlmTab },
   { id: 'safety', label: 'Safety', icon: ShieldCheck, component: SafetyTab },
+  { id: 'compartments', label: 'Compartments', icon: Lock, component: CompartmentsTab },
   { id: 'about', label: 'About', icon: Info, component: AboutTab }
 ]
 

@@ -991,6 +991,91 @@ const migrations: Migration[] = [
 
       log.info('Migration 017: ach_sessions / ach_hypotheses / ach_evidence / ach_scores created')
     }
+  },
+  {
+    version: '018',
+    name: 'compartments',
+    up: (db) => {
+      // Need-to-know compartments — Theme 10.2 + 10.5 of the agency roadmap.
+      //
+      // Classification levels (UNCLASSIFIED → TOP SECRET, migration 014)
+      // answer "how sensitive is this?". Compartments answer the orthogonal
+      // question "who needs to know about this category?".
+      //
+      // Real-world examples of compartments at agencies:
+      //   SI    — Special Intelligence (SIGINT)
+      //   TK    — Talent Keyhole (satellite imagery)
+      //   G     — Gamma (especially sensitive SIGINT)
+      //   HCS   — HUMINT Control System (clandestine sources)
+      //   ORCON — Originator Controlled
+      //   NOFORN — No Foreign Nationals
+      //
+      // Heimdall lets the analyst define their own compartments (since
+      // real codewords are themselves classified) and grant themselves
+      // tickets per-compartment.
+      //
+      // Visibility rule (enforced in renderer + bridges): an artifact
+      // tagged with compartments [A, B] is visible only to a user holding
+      // grants for ALL of A AND B (logical AND, "every compartment").
+      // An artifact with no compartments is universally visible (subject
+      // to classification gate).
+      //
+      // Each artifact stores its compartments as a JSON array of ticket
+      // IDs in a new `compartments` TEXT column. Migration is purely
+      // additive — every existing row defaults to '[]' (no compartment
+      // restrictions).
+
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS compartments (
+          id TEXT PRIMARY KEY,
+          ticket TEXT NOT NULL UNIQUE,
+          name TEXT NOT NULL,
+          description TEXT,
+          color TEXT,
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_compartments_ticket ON compartments(ticket);
+
+        CREATE TABLE IF NOT EXISTS compartment_grants (
+          id TEXT PRIMARY KEY,
+          compartment_id TEXT NOT NULL,
+          actor TEXT NOT NULL DEFAULT 'self',
+          granted_at INTEGER NOT NULL,
+          granted_by TEXT,
+          revoked_at INTEGER,
+          notes TEXT,
+          FOREIGN KEY (compartment_id) REFERENCES compartments(id) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS idx_compartment_grants_actor ON compartment_grants(actor, revoked_at);
+      `)
+
+      // Add `compartments TEXT` to every classified artifact table.
+      const tables = [
+        'intel_reports',
+        'preliminary_reports',
+        'humint_reports',
+        'recommended_actions',
+        'intel_gaps',
+        'chat_sessions',
+        'iw_events',
+        'ach_sessions',
+        'analytics_reports',
+        'analyst_council_runs',
+        'dpb_briefings'
+      ]
+      let added = 0
+      for (const tbl of tables) {
+        try {
+          db.exec(`ALTER TABLE ${tbl} ADD COLUMN compartments TEXT NOT NULL DEFAULT '[]'`)
+          added++
+        } catch {
+          // table doesn't exist (legacy install) or column already present — skip
+        }
+      }
+
+      log.info(`Migration 018: compartments + compartment_grants tables created; compartments column added to ${added} artifact tables`)
+    }
   }
 ]
 

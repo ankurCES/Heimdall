@@ -11,6 +11,16 @@ function isClassification(s: unknown): s is Classification {
   return typeof s === 'string' && (VALID_CLASSIFICATIONS as readonly string[]).includes(s)
 }
 
+function parseCompartments(raw: string | null | undefined): string[] {
+  if (!raw) return []
+  try {
+    const parsed = JSON.parse(raw)
+    return Array.isArray(parsed) ? parsed.map(String) : []
+  } catch {
+    return []
+  }
+}
+
 export function registerIntelBridge(): void {
   ipcMain.handle(IPC_CHANNELS.INTEL_GET_REPORTS, (_event, params) => {
     const db = getDatabase()
@@ -378,6 +388,7 @@ interface RawReport {
   credibility: number | null
   source_reliability: string | null
   classification: string | null
+  compartments: string | null
   reviewed: number
   created_at: number
   updated_at: number
@@ -403,6 +414,7 @@ function mapReport(row: RawReport): IntelReport {
     credibility: row.credibility,
     sourceReliability,
     classification: (isClassification(row.classification) ? row.classification : 'UNCLASSIFIED'),
+    compartments: parseCompartments(row.compartments),
     reviewed: row.reviewed === 1,
     createdAt: row.created_at,
     updatedAt: row.updated_at

@@ -15,6 +15,7 @@ import { formatRelativeTime } from '@renderer/lib/utils'
 import { cn } from '@renderer/lib/utils'
 import { StanagBadge } from '@renderer/components/StanagBadge'
 import { ClassificationBadge, isClassification, isCleared, type Classification } from '@renderer/components/ClassificationBanner'
+import { CompartmentBadge } from '@renderer/components/CompartmentBadge'
 import { ExportMenu } from '@renderer/components/ExportMenu'
 
 const SEVERITY_BADGE: Record<ThreatLevel, { variant: 'destructive' | 'warning' | 'default' | 'secondary' | 'outline'; label: string }> = {
@@ -202,6 +203,7 @@ export function FeedPage() {
                         <Badge variant={sevBadge.variant} className="text-[9px] py-0 px-1.5">{sevBadge.label}</Badge>
                         <Badge variant="outline" className="text-[9px] py-0 px-1.5 font-mono">{report.discipline}</Badge>
                         <ClassificationBadge level={report.classification} />
+                        <CompartmentBadge compartmentIds={report.compartments} />
                         <StanagBadge reliability={report.sourceReliability} credibility={report.credibility} />
                         <span className="text-[10px] text-muted-foreground">{report.sourceName}</span>
                         <span className="text-[10px] text-muted-foreground ml-auto">{formatRelativeTime(report.createdAt)}</span>
@@ -270,6 +272,8 @@ function ReportDetail({ report, onMarkReviewed }: { report: IntelReport; onMarkR
         <div className="flex items-center gap-2 mb-2 flex-wrap">
           <Badge variant={sevBadge.variant}>{sevBadge.label}</Badge>
           <Badge variant="outline" className="font-mono text-xs">{report.discipline.toUpperCase()}</Badge>
+          <ClassificationBadge level={report.classification} />
+          <CompartmentBadge compartmentIds={report.compartments} variant="verbose" />
           <StanagBadge reliability={report.sourceReliability} credibility={report.credibility} size="md" />
           {report.reviewed && <Badge variant="success">Reviewed</Badge>}
         </div>

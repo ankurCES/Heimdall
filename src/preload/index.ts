@@ -38,7 +38,11 @@ const testChannels = [
   'ach:hypotheses:add', 'ach:hypotheses:update', 'ach:hypotheses:delete',
   'ach:evidence:add', 'ach:evidence:update', 'ach:evidence:delete',
   'ach:scores:set', 'ach:scores:clear', 'ach:agent:generateHypotheses',
-  'export:write'
+  'export:write',
+  'compartments:list', 'compartments:list_with_grants', 'compartments:get',
+  'compartments:create', 'compartments:update', 'compartments:delete',
+  'compartments:grant', 'compartments:revoke', 'compartments:granted_ids',
+  'compartments:tag', 'compartments:get_for_artifact'
 ]
 const allowedChannels = [...Object.values(IPC_CHANNELS), ...testChannels]
 const chatEvents = ['chat:chunk', 'chat:done', 'chat:error']

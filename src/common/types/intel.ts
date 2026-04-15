@@ -40,6 +40,8 @@ export interface IntelReport {
   sourceReliability: 'A' | 'B' | 'C' | 'D' | 'E' | 'F' | null
   /** US/NATO classification level. Defaults to UNCLASSIFIED. */
   classification: 'UNCLASSIFIED' | 'CONFIDENTIAL' | 'SECRET' | 'TOP SECRET'
+  /** Need-to-know compartment IDs. Empty = no compartment restrictions. */
+  compartments: string[]
   reviewed: boolean
   createdAt: number
   updatedAt: number
