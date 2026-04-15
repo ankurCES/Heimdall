@@ -73,56 +73,72 @@ export class HumintService {
     const createdAt = existing?.created_at || now
     const isUpdate = !!existing
 
-    if (isUpdate) {
-      db.prepare(`
-        UPDATE humint_reports
-        SET analyst_notes = ?, findings = ?, confidence = ?,
-            source_report_ids = ?, tool_calls_used = ?, updated_at = ?
-        WHERE id = ?
-      `).run(analystNotes, findings, confidence, JSON.stringify(sourceIds), JSON.stringify(toolCalls), now, id)
-
-      // Clear outgoing links so we don't accumulate stale citations on each update
-      db.prepare(`DELETE FROM intel_links WHERE source_report_id = ? AND link_type IN ('humint_source','humint_preliminary','humint_cross_session')`).run(id)
-    } else {
-      db.prepare(`
-        INSERT INTO humint_reports (id, session_id, analyst_notes, findings, confidence, source_report_ids, tool_calls_used, status, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, 'draft', ?, ?)
-      `).run(id, sessionId, analystNotes, findings, confidence, JSON.stringify(sourceIds), JSON.stringify(toolCalls), createdAt, now)
-    }
-
-    // Create links from HUMINT to source intel
-    for (const srcId of sourceIds.slice(0, 15)) {
-      db.prepare('INSERT OR IGNORE INTO intel_links (id, source_report_id, target_report_id, link_type, strength, reason, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)').run(
-        generateId(), id, srcId, 'humint_source', 0.85, 'Source intel for HUMINT report', now
-      )
-    }
-
-    // Link to preliminary reports from the same session
+    // Pre-fetch data needed inside the transaction (queries that read tables
+    // we'll also write to inside the tx — better-sqlite3 transactions are
+    // synchronous so reads that depend on prior writes inside the tx are fine,
+    // but reads we do AFTER the tx body should be done up-front).
     const prelimReports = db.prepare(
       'SELECT id, title FROM preliminary_reports WHERE session_id = ?'
     ).all(sessionId) as Array<{ id: string; title: string }>
-    for (const prelim of prelimReports) {
-      db.prepare('INSERT OR IGNORE INTO intel_links (id, source_report_id, target_report_id, link_type, strength, reason, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)').run(
-        generateId(), id, prelim.id, 'humint_preliminary', 0.95, `HUMINT based on preliminary report: ${prelim.title.slice(0, 50)}`, now
-      )
-    }
 
-    // Cross-reference with HUMINT from other sessions — find shared entities/tags
     const otherHumints = db.prepare(
       'SELECT id, findings FROM humint_reports WHERE session_id != ? LIMIT 50'
     ).all(sessionId) as Array<{ id: string; findings: string }>
-    for (const other of otherHumints) {
-      // Check keyword overlap between findings
-      const myWords = new Set(findings.toLowerCase().match(/\b[a-z]{5,}\b/g) || [])
-      const otherWords = other.findings.toLowerCase().match(/\b[a-z]{5,}\b/g) || []
-      const overlap = otherWords.filter((w) => myWords.has(w)).length
-      if (overlap >= 5) {
-        db.prepare('INSERT OR IGNORE INTO intel_links (id, source_report_id, target_report_id, link_type, strength, reason, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)').run(
-          generateId(), id, other.id, 'humint_cross_session', Math.min(0.9, overlap * 0.1),
-          `Cross-session HUMINT connection (${overlap} shared keywords)`, now
+
+    const myWords = new Set(findings.toLowerCase().match(/\b[a-z]{5,}\b/g) || [])
+
+    // Atomic write — everything below either commits as a unit or rolls back.
+    // Without this transaction, a partial failure mid-loop would leave the
+    // humint_reports row inserted but with truncated link sets, breaking
+    // the graph and the upsert-by-session invariant.
+    const linkInsertStmt = db.prepare(
+      'INSERT OR IGNORE INTO intel_links (id, source_report_id, target_report_id, link_type, strength, reason, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)'
+    )
+
+    db.transaction(() => {
+      if (isUpdate) {
+        db.prepare(`
+          UPDATE humint_reports
+          SET analyst_notes = ?, findings = ?, confidence = ?,
+              source_report_ids = ?, tool_calls_used = ?, updated_at = ?
+          WHERE id = ?
+        `).run(analystNotes, findings, confidence, JSON.stringify(sourceIds), JSON.stringify(toolCalls), now, id)
+
+        // Clear outgoing links so we don't accumulate stale citations on each update
+        db.prepare(`DELETE FROM intel_links WHERE source_report_id = ? AND link_type IN ('humint_source','humint_preliminary','humint_cross_session')`).run(id)
+      } else {
+        db.prepare(`
+          INSERT INTO humint_reports (id, session_id, analyst_notes, findings, confidence, source_report_ids, tool_calls_used, status, created_at, updated_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, 'draft', ?, ?)
+        `).run(id, sessionId, analystNotes, findings, confidence, JSON.stringify(sourceIds), JSON.stringify(toolCalls), createdAt, now)
+      }
+
+      // Create links from HUMINT to source intel
+      for (const srcId of sourceIds.slice(0, 15)) {
+        linkInsertStmt.run(
+          generateId(), id, srcId, 'humint_source', 0.85, 'Source intel for HUMINT report', now
         )
       }
-    }
+
+      // Link to preliminary reports from the same session
+      for (const prelim of prelimReports) {
+        linkInsertStmt.run(
+          generateId(), id, prelim.id, 'humint_preliminary', 0.95, `HUMINT based on preliminary report: ${prelim.title.slice(0, 50)}`, now
+        )
+      }
+
+      // Cross-reference with HUMINT from other sessions — find shared keywords
+      for (const other of otherHumints) {
+        const otherWords = other.findings.toLowerCase().match(/\b[a-z]{5,}\b/g) || []
+        const overlap = otherWords.filter((w) => myWords.has(w)).length
+        if (overlap >= 5) {
+          linkInsertStmt.run(
+            generateId(), id, other.id, 'humint_cross_session', Math.min(0.9, overlap * 0.1),
+            `Cross-session HUMINT connection (${overlap} shared keywords)`, now
+          )
+        }
+      }
+    })()
 
     // Kuzu dual-write (fire-and-forget)
     if (kuzuService.isReady()) {

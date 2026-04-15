@@ -66,11 +66,18 @@ export function registerChatBridge(): void {
   }) => {
     const { messages, query, sessionId, connectionId, useAgentic = true, mode = 'direct' } = params
 
-    // Cache windows once for this request — avoid per-chunk lookup
+    // Cache windows once for this request — avoid per-chunk lookup. The
+    // isDestroyed() guard is required: the user can close a window mid-stream
+    // and webContents.send() throws if the window is gone, killing the
+    // current chat turn (and historically crashed the whole IPC handler).
     const windows = BrowserWindow.getAllWindows()
-    const emitChunk = (chunk: string) => {
-      for (const win of windows) win.webContents.send('chat:chunk', chunk)
+    const safeSend = (channel: string, payload: unknown) => {
+      for (const win of windows) {
+        if (win.isDestroyed()) continue
+        try { win.webContents.send(channel, payload) } catch {}
+      }
     }
+    const emitChunk = (chunk: string) => safeSend('chat:chunk', chunk)
 
     let fullResponse = ''
     try {
@@ -119,10 +126,10 @@ export function registerChatBridge(): void {
         fullResponse = await llmService.chat(fullMessages, connectionId, emitChunk, mode)
       }
 
-      for (const win of windows) win.webContents.send('chat:done', fullResponse)
+      safeSend('chat:done', fullResponse)
     } catch (err) {
       log.error('Chat error:', err)
-      for (const win of windows) win.webContents.send('chat:error', String(err))
+      safeSend('chat:error', String(err))
       throw err
     }
 

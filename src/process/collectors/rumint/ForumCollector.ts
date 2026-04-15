@@ -16,40 +16,49 @@ export class ForumCollector extends BaseCollector {
   private scorer = new VerificationScorer()
 
   async collect(): Promise<IntelReport[]> {
-    const reports: IntelReport[] = []
-
-    // Collect from configured RSS feeds
+    // Fetch all configured feeds in parallel — one slow feed used to block
+    // every subsequent one (sequential await), pushing the collector cycle
+    // past 60 s when any single feed timed out at 15 s. Promise.allSettled
+    // lets fast feeds complete in their own time and isolates failures.
     const feeds = this.getFeeds()
-    for (const feed of feeds) {
-      try {
-        const parsed = await parser.parseURL(feed.url)
-        for (const item of parsed.items.slice(0, 15)) {
-          if (!item.title) continue
+    if (feeds.length === 0) return []
 
-          const content = item.contentSnippet || item.content || item.title
-          const score = this.scorer.score({
-            sourceTier: feed.tier || 'unverified',
-            hasCorroboration: false,
-            specificity: this.assessSpecificity(content),
-            age: item.pubDate ? (Date.now() - new Date(item.pubDate).getTime()) / 3600000 : 24
-          })
+    const settled = await Promise.allSettled(
+      feeds.map((feed) => parser.parseURL(feed.url).then((parsed) => ({ feed, parsed })))
+    )
 
-          reports.push(
-            this.createReport({
-              title: `[RUMINT] ${feed.name}: ${item.title.slice(0, 80)}`,
-              content: `**Source**: ${feed.name}\n**Verification Score**: ${score}/100 (UNVERIFIED)\n**Published**: ${item.pubDate || 'Unknown'}\n\n${this.cleanContent(content)}\n\n---\n*This is unverified rumor intelligence. Corroboration required before action.*`,
-              severity: 'info',
-              sourceUrl: item.link,
-              sourceName: feed.name,
-              verificationScore: score
-            })
-          )
-        }
-
-        log.debug(`Forum: ${feed.name} — ${parsed.items.length} items`)
-      } catch (err) {
-        log.warn(`Forum feed failed: ${feed.name}: ${err}`)
+    const reports: IntelReport[] = []
+    for (const result of settled) {
+      if (result.status === 'rejected') {
+        const reason = result.reason as { message?: string }
+        log.warn(`Forum feed failed: ${reason?.message || result.reason}`)
+        continue
       }
+      const { feed, parsed } = result.value
+      for (const item of parsed.items.slice(0, 15)) {
+        if (!item.title) continue
+
+        const content = item.contentSnippet || item.content || item.title
+        const score = this.scorer.score({
+          sourceTier: feed.tier || 'unverified',
+          hasCorroboration: false,
+          specificity: this.assessSpecificity(content),
+          age: item.pubDate ? (Date.now() - new Date(item.pubDate).getTime()) / 3600000 : 24
+        })
+
+        reports.push(
+          this.createReport({
+            title: `[RUMINT] ${feed.name}: ${item.title.slice(0, 80)}`,
+            content: `**Source**: ${feed.name}\n**Verification Score**: ${score}/100 (UNVERIFIED)\n**Published**: ${item.pubDate || 'Unknown'}\n\n${this.cleanContent(content)}\n\n---\n*This is unverified rumor intelligence. Corroboration required before action.*`,
+            severity: 'info',
+            sourceUrl: item.link,
+            sourceName: feed.name,
+            verificationScore: score
+          })
+        )
+      }
+
+      log.debug(`Forum: ${feed.name} — ${parsed.items.length} items`)
     }
 
     return reports

@@ -68,9 +68,12 @@ async function initializeDeferred(): Promise<void> {
   // Start background enrichment orchestrator (Multica-style)
   enrichmentOrchestrator.start()
 
-  // Kuzu graph database — disabled by default to prevent native module crashes
-  // Enable via Settings when needed. SQLite graph fallback works for all queries.
-  const kuzuEnabled = false // TODO: make configurable via settings
+  // Kuzu graph database — opt-in via the `graphSync.enabled` setting (set by
+  // migration 003). Disabled by default because the native module has caused
+  // process crashes when accessed concurrently with collectors. The SQLite
+  // graph fallback handles every relationship query without it.
+  const kuzuEnabled = settingsService.get<string>('graphSync.enabled') === 'true'
+    && process.env.HEIMDALL_ENABLE_KUZU !== 'false'
   if (kuzuEnabled) {
     try {
       await kuzuService.initialize()
@@ -85,13 +88,15 @@ async function initializeDeferred(): Promise<void> {
       log.warn(`Kuzu initialization failed, using SQLite-only graph: ${err}`)
     }
   } else {
-    log.info('Kuzu graph DB disabled — using SQLite graph queries (stable)')
+    log.info('Kuzu graph DB disabled — using SQLite graph queries (stable). Set graphSync.enabled=true to opt in.')
   }
 
   // Start resource manager (memory cleanup, WAL checkpoint, cache pruning)
   resourceManager.start()
 
-  // Auto-pull Meshtastic data on startup if configured
+  // Auto-pull Meshtastic data on startup if configured. Outer catch logs at
+  // debug because a missing/malformed config is expected on first run; inner
+  // catch keeps the deferred pull from blowing up the main process.
   try {
     const meshConfig = settingsService.get<any>('meshtastic')
     if (meshConfig?.address) {
@@ -108,7 +113,9 @@ async function initializeDeferred(): Promise<void> {
         }
       }, 20000) // 20s delay — let UI render first
     }
-  } catch {}
+  } catch (err) {
+    log.debug(`Meshtastic config read failed at startup: ${err}`)
+  }
 
   log.info('Deferred initialization complete')
 }
@@ -185,28 +192,31 @@ if (!gotTheLock) {
     })
   })
 
-  app.on('window-all-closed', () => {
-    resourceManager.stop()
+  // Cleanup is idempotent — both events fire on different platforms and each
+  // shutdown method tolerates being called twice. Centralizing prevents
+  // drift between the two handlers and ensures a single audit point for
+  // adding new shutdown steps.
+  let cleanedUp = false
+  const cleanup = () => {
+    if (cleanedUp) return
+    cleanedUp = true
+    log.info('Heimdall shutting down — running cleanup')
+    try { resourceManager.stop() } catch (err) { log.debug(`resourceManager.stop: ${err}`) }
     kuzuService.close().catch(() => {})
-    enrichmentOrchestrator.stop()
-    intelPipeline.stop()
-    agentOrchestrator.stop()
-    collectorManager.shutdownAll()
-    cronService.stopAll()
-    closeDatabase()
+    try { enrichmentOrchestrator.stop() } catch (err) { log.debug(`enrichmentOrchestrator.stop: ${err}`) }
+    try { intelPipeline.stop() } catch (err) { log.debug(`intelPipeline.stop: ${err}`) }
+    try { agentOrchestrator.stop() } catch (err) { log.debug(`agentOrchestrator.stop: ${err}`) }
+    try { collectorManager.shutdownAll() } catch (err) { log.debug(`collectorManager.shutdownAll: ${err}`) }
+    try { cronService.stopAll() } catch (err) { log.debug(`cronService.stopAll: ${err}`) }
+    try { closeDatabase() } catch (err) { log.debug(`closeDatabase: ${err}`) }
+  }
+
+  app.on('window-all-closed', () => {
+    cleanup()
     if (process.platform !== 'darwin') {
       app.quit()
     }
   })
 
-  app.on('before-quit', () => {
-    resourceManager.stop()
-    kuzuService.close().catch(() => {})
-    enrichmentOrchestrator.stop()
-    intelPipeline.stop()
-    agentOrchestrator.stop()
-    collectorManager.shutdownAll()
-    cronService.stopAll()
-    closeDatabase()
-  })
+  app.on('before-quit', cleanup)
 }
