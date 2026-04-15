@@ -74,6 +74,10 @@ export function RelationshipGraph() {
   const [autoRefresh, setAutoRefresh] = useState<boolean>(() => {
     try { return localStorage.getItem(STORAGE_AUTOREFRESH) !== 'false' } catch { return true }
   })
+  // Bumped only when we WANT ForceGraph2D to fully reinitialize (layout mode
+  // change). NOT bumped on silent refreshes or membership changes, so pan/zoom
+  // and node positions are preserved.
+  const [layoutKey, setLayoutKey] = useState(0)
 
   const graphRef = useRef<any>(null)
   const refreshTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -107,7 +111,61 @@ export function RelationshipGraph() {
         limit: parseInt(nodeLimit)
       }) as { nodes: GraphNode[]; links: GraphLink[] }
 
-      setGraphData(result || { nodes: [], links: [] })
+      const fresh = result || { nodes: [], links: [] }
+
+      setGraphData((prev) => {
+        // First load — just take the fresh data.
+        if (prev.nodes.length === 0) return fresh
+
+        const prevById = new Map(prev.nodes.map((n) => [n.id, n]))
+        const freshIds = new Set(fresh.nodes.map((n) => n.id))
+
+        const added = fresh.nodes.filter((n) => !prevById.has(n.id))
+        const removed = prev.nodes.filter((n) => !freshIds.has(n.id))
+        const membershipChanged = added.length > 0 || removed.length > 0
+
+        // Cheap signal for link-set changes without sorting
+        const prevLinkKey = prev.links.length
+        const freshLinkKey = fresh.links.length
+        const linksChanged = prevLinkKey !== freshLinkKey
+
+        // Silent refresh + same nodes/links → mutate metadata in place and
+        // RETURN THE SAME REFERENCE. That prevents ForceGraph2D from seeing a
+        // new graphData prop and re-starting its simulation. The result: no
+        // camera reset, no node reshuffle, auto-refresh becomes invisible.
+        if (silent && !membershipChanged && !linksChanged) {
+          for (const n of fresh.nodes) {
+            const existing = prevById.get(n.id)
+            if (!existing) continue
+            // Refresh metadata without touching x/y/vx/vy/fx/fy
+            existing.title = n.title
+            existing.severity = n.severity
+            existing.verification = n.verification
+            existing.source = n.source
+            existing.createdAt = n.createdAt
+            existing.snippet = n.snippet
+          }
+          return prev
+        }
+
+        // Membership changed — preserve live positions for nodes that
+        // persisted, and let new nodes take their fresh initial positions.
+        const nextNodes: GraphNode[] = fresh.nodes.map((n) => {
+          const existing = prevById.get(n.id)
+          if (!existing) return n
+          // Mutate the EXISTING node object (preserving reference identity)
+          // with fresh metadata. d3-force tracks by reference so this means
+          // it sees "the same node, new metadata" — no layout disruption.
+          existing.title = n.title
+          existing.severity = n.severity
+          existing.verification = n.verification
+          existing.source = n.source
+          existing.createdAt = n.createdAt
+          existing.snippet = n.snippet
+          return existing
+        })
+        return { nodes: nextNodes, links: fresh.links }
+      })
     } catch (err) {
       console.error('Graph load failed:', err)
     } finally {
@@ -134,34 +192,57 @@ export function RelationshipGraph() {
     }
   }, [autoRefresh, loadGraph])
 
-  // Apply timeline / radial positions when layout mode changes or data loads
+  // When layout mode changes, apply pinned positions (or clear them) directly
+  // on the existing node objects and remount the ForceGraph via a key bump.
+  // Mutating in place lets d3 adopt the new layout without a data-ref change.
   useEffect(() => {
     if (graphData.nodes.length === 0) return
     if (layoutMode === 'force') {
-      // Release any pinned positions from previous modes
       for (const n of graphData.nodes) {
-        n.fx = null
-        n.fy = null
+        ;(n as any).fx = null
+        ;(n as any).fy = null
       }
-      return
+    } else {
+      const positions = layoutMode === 'timeline'
+        ? computeTimelineLayout(graphData.nodes as any)
+        : computeRadialLayout(graphData.nodes as any)
+      for (const n of graphData.nodes) {
+        const p = positions.get(n.id)
+        if (p) {
+          ;(n as any).fx = p.fx
+          ;(n as any).fy = p.fy
+          ;(n as any).x = p.x
+          ;(n as any).y = p.y
+        } else {
+          ;(n as any).fx = null
+          ;(n as any).fy = null
+        }
+      }
     }
+    // Bump the remount key so ForceGraph2D re-initializes with the pins
+    setLayoutKey((k) => k + 1)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [layoutMode])
+
+  // Also recompute pins when graphData reference actually changes (membership
+  // changed) — but DON'T bump the remount key. The simulation already sees the
+  // added nodes; we just need to pin them for non-force modes.
+  useEffect(() => {
+    if (layoutMode === 'force') return
+    if (graphData.nodes.length === 0) return
     const positions = layoutMode === 'timeline'
-      ? computeTimelineLayout(graphData.nodes)
-      : computeRadialLayout(graphData.nodes)
+      ? computeTimelineLayout(graphData.nodes as any)
+      : computeRadialLayout(graphData.nodes as any)
     for (const n of graphData.nodes) {
       const p = positions.get(n.id)
       if (p) {
-        n.fx = p.fx
-        n.fy = p.fy
-        n.x = p.x
-        n.y = p.y
+        ;(n as any).fx = p.fx
+        ;(n as any).fy = p.fy
       }
     }
-    // Nudge the simulation to respect new pins
-    if (graphRef.current?.d3ReheatSimulation) graphRef.current.d3ReheatSimulation()
-  }, [layoutMode, graphData])
+  }, [graphData, layoutMode])
 
-  // Configure d3 forces for force-directed mode — runs after each load
+  // Configure d3 forces for force-directed mode after remount
   useEffect(() => {
     if (layoutMode !== 'force' || !graphRef.current || graphData.nodes.length === 0) return
     const fg = graphRef.current
@@ -169,13 +250,10 @@ export function RelationshipGraph() {
       fg.d3Force('charge')?.strength(-180)
       fg.d3Force('link')?.distance((l: any) => 80 / Math.max(0.3, l.strength || 0.3))
       fg.d3Force('cluster', clusterForce(graphData.nodes as any, 'discipline', 0.08))
-      // d3-force collide — ensure no two nodes overlap
-      const d3 = (fg as any).d3Force ? null : null // placeholder, library provides d3 internally
-      fg.d3ReheatSimulation?.()
     } catch (err) {
       console.warn('d3Force configure failed:', err)
     }
-  }, [layoutMode, graphData])
+  }, [layoutMode, layoutKey])
 
   const handleNodeClick = (node: GraphNodeLite) => {
     const n = node as GraphNode
@@ -393,6 +471,7 @@ export function RelationshipGraph() {
         ) : graphData.nodes.length > 0 ? (
           <>
             <ForceGraph2D
+              key={layoutKey}
               ref={graphRef as any}
               graphData={graphData as any}
               nodeColor={(node: any) => DISCIPLINE_COLORS[node.discipline] || '#6b7280'}
