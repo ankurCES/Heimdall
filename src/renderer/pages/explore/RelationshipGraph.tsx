@@ -593,7 +593,16 @@ export function RelationshipGraph() {
             node={selectedNode}
             linkedItems={selectedNodeLinks}
             linkColors={LINK_COLORS}
-            onClose={() => { setSelectedNode(null); setSelectedNodeLinks([]) }}
+            onClose={() => {
+              setSelectedNode(null)
+              setSelectedNodeLinks([])
+              // Recenter the graph so the area that was hidden under the popup
+              // is visible again and the simulation settles back to its
+              // natural layout.
+              if (graphRef.current?.zoomToFit) {
+                graphRef.current.zoomToFit(400, 60)
+              }
+            }}
             onSelectNode={(n) => handleNodeClick(n)}
           />
         </div>

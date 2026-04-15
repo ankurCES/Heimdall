@@ -4,12 +4,120 @@ import { kuzuService } from '../services/graphdb/KuzuService'
 import { getDatabase } from '../services/database'
 import log from 'electron-log'
 
+type RawNode = Record<string, unknown>
+
+/**
+ * Resolve a set of node IDs across the four tables that can hold graph nodes
+ * (intel_reports, preliminary_reports, humint_reports, intel_gaps). A single
+ * node appears in the result exactly once — more specific types (HUMINT,
+ * preliminary, gap) override the generic intel_reports row that
+ * HumintService writes alongside.
+ *
+ * This replaces the prior behaviour that fetched only from intel_reports
+ * (missing preliminary / gap endpoints of HUMINT links) and that added
+ * top-N recent nodes regardless of deduplication (producing duplicate node
+ * ids which d3-force silently collapsed, leaving edges dangling).
+ */
+function resolveNodesById(db: ReturnType<typeof getDatabase>, ids: string[]): Map<string, RawNode> {
+  const result = new Map<string, RawNode>()
+  if (ids.length === 0) return result
+
+  const placeholders = ids.map(() => '?').join(',')
+
+  // intel_reports — generic base layer
+  try {
+    const rows = db.prepare(
+      `SELECT id, title, discipline, severity, source_name, verification_score, created_at, substr(content, 1, 200) AS snippet FROM intel_reports WHERE id IN (${placeholders})`
+    ).all(...ids) as Array<Record<string, unknown>>
+    for (const r of rows) {
+      result.set(r.id as string, {
+        id: r.id,
+        title: String(r.title || '').slice(0, 80),
+        discipline: r.discipline,
+        severity: r.severity,
+        source: r.source_name,
+        verification: r.verification_score,
+        createdAt: r.created_at,
+        snippet: r.snippet
+      })
+    }
+  } catch {}
+
+  // preliminary_reports — overrides intel_reports entry with preliminary type
+  try {
+    const rows = db.prepare(
+      `SELECT id, title, status, created_at, substr(content, 1, 200) AS snippet FROM preliminary_reports WHERE id IN (${placeholders})`
+    ).all(...ids) as Array<Record<string, unknown>>
+    for (const r of rows) {
+      result.set(r.id as string, {
+        id: r.id,
+        title: String(r.title || '').slice(0, 80),
+        discipline: 'preliminary',
+        severity: 'high',
+        source: 'Preliminary Report',
+        verification: 80,
+        type: 'preliminary',
+        createdAt: r.created_at,
+        snippet: r.snippet
+      })
+    }
+  } catch {}
+
+  // humint_reports — overrides intel_reports entry with humint type
+  try {
+    const rows = db.prepare(
+      `SELECT id, findings, confidence, created_at, session_id FROM humint_reports WHERE id IN (${placeholders})`
+    ).all(...ids) as Array<Record<string, unknown>>
+    for (const r of rows) {
+      const findings = String(r.findings || '')
+      result.set(r.id as string, {
+        id: r.id,
+        title: `HUMINT: ${findings.slice(0, 60)}`,
+        discipline: 'humint',
+        severity: 'high',
+        source: 'HUMINT Chat',
+        verification: 90,
+        type: 'humint',
+        createdAt: r.created_at,
+        snippet: findings.slice(0, 200),
+        confidence: r.confidence,
+        sessionId: r.session_id
+      })
+    }
+  } catch {}
+
+  // intel_gaps
+  try {
+    const rows = db.prepare(
+      `SELECT id, description, severity, created_at, preliminary_report_id FROM intel_gaps WHERE id IN (${placeholders})`
+    ).all(...ids) as Array<Record<string, unknown>>
+    for (const r of rows) {
+      const description = String(r.description || '')
+      result.set(r.id as string, {
+        id: r.id,
+        title: description.slice(0, 80),
+        discipline: 'gap',
+        severity: r.severity as string,
+        source: 'Information Gap',
+        verification: 0,
+        type: 'gap',
+        createdAt: r.created_at,
+        snippet: description,
+        preliminaryReportId: r.preliminary_report_id
+      })
+    }
+  } catch {}
+
+  return result
+}
+
 function getGraphFromSQLite(params?: {
   reportId?: string; discipline?: string; linkType?: string; limit?: number
 }): { nodes: Array<Record<string, unknown>>; links: Array<Record<string, unknown>> } {
   const db = getDatabase()
   const limit = params?.limit || 200
 
+  // 1) Fetch links matching filter
   let linkQuery = 'SELECT source_report_id, target_report_id, link_type, strength, reason FROM intel_links'
   const conditions: string[] = []
   const vals: unknown[] = []
@@ -19,10 +127,6 @@ function getGraphFromSQLite(params?: {
     vals.push(params.reportId, params.reportId)
   }
   if (params?.linkType && params.linkType !== 'all') {
-    // Treat 'humint' as an umbrella selector matching any of the three
-    // HUMINT-related link subtypes (source / preliminary / cross_session).
-    // The UI exposes a single "HUMINT Links" option while keeping the
-    // underlying colored subtypes rendered distinctly.
     if (params.linkType === 'humint') {
       conditions.push("link_type IN ('humint_source', 'humint_preliminary', 'humint_cross_session')")
     } else {
@@ -30,7 +134,6 @@ function getGraphFromSQLite(params?: {
       vals.push(params.linkType)
     }
   }
-
   if (conditions.length > 0) linkQuery += ` WHERE ${conditions.join(' AND ')}`
   linkQuery += ` ORDER BY strength DESC LIMIT ?`
   vals.push(limit)
@@ -39,98 +142,129 @@ function getGraphFromSQLite(params?: {
     source_report_id: string; target_report_id: string; link_type: string; strength: number; reason: string
   }>
 
-  const nodeIds = new Set<string>()
+  // 2) Resolve ALL endpoints across all 4 tables (deduplicated by id)
+  const endpointIds = new Set<string>()
   for (const link of links) {
-    nodeIds.add(link.source_report_id)
-    nodeIds.add(link.target_report_id)
+    endpointIds.add(link.source_report_id)
+    endpointIds.add(link.target_report_id)
   }
 
+  const nodesById = resolveNodesById(db, Array.from(endpointIds))
+
+  // 3) Optional discipline filter — shrinks the node set, which cascades to
+  //    links (drop any link whose endpoint was filtered out).
+  let finalLinks = links
   if (params?.discipline && params.discipline !== 'all') {
-    const filteredIds = nodeIds.size > 0
-      ? db.prepare(
-          `SELECT id FROM intel_reports WHERE id IN (${Array.from(nodeIds).map(() => '?').join(',')}) AND discipline = ?`
-        ).all(...Array.from(nodeIds), params.discipline) as Array<{ id: string }>
-      : []
-    const filteredSet = new Set(filteredIds.map((r) => r.id))
-    const filteredLinks = links.filter((l) => filteredSet.has(l.source_report_id) && filteredSet.has(l.target_report_id))
-
-    const nodes = filteredIds.length > 0
-      ? db.prepare(
-          `SELECT id, title, discipline, severity, source_name, verification_score, created_at, substr(content, 1, 200) AS snippet FROM intel_reports WHERE id IN (${filteredIds.map(() => '?').join(',')})`
-        ).all(...filteredIds.map((r) => r.id)) as Array<Record<string, unknown>>
-      : []
-
-    return {
-      nodes: nodes.map((n) => ({
-        id: n.id, title: (n.title as string).slice(0, 80), discipline: n.discipline,
-        severity: n.severity, source: n.source_name, verification: n.verification_score,
-        createdAt: n.created_at, snippet: n.snippet
-      })),
-      links: filteredLinks.map((l) => ({
-        source: l.source_report_id, target: l.target_report_id,
-        type: l.link_type, strength: l.strength, reason: l.reason
-      }))
+    const keep = new Set<string>()
+    for (const [id, n] of nodesById) {
+      if ((n as any).discipline === params.discipline) keep.add(id)
     }
+    for (const id of Array.from(nodesById.keys())) {
+      if (!keep.has(id)) nodesById.delete(id)
+    }
+    finalLinks = links.filter((l) => keep.has(l.source_report_id) && keep.has(l.target_report_id))
   }
 
-  const nodeQuery = nodeIds.size > 0
-    ? `SELECT id, title, discipline, severity, source_name, verification_score, created_at, substr(content, 1, 200) AS snippet FROM intel_reports WHERE id IN (${Array.from(nodeIds).map(() => '?').join(',')})`
-    : null
-  const nodes = nodeQuery ? db.prepare(nodeQuery).all(...Array.from(nodeIds)) as Array<Record<string, unknown>> : []
+  // 4) Also include recent unconnected HUMINT / preliminary / gap nodes so
+  //    the user can see products that haven't linked anything yet. Only when
+  //    filter allows (no discipline filter AND no specific linkType).
+  const showUnconnected = (!params?.discipline || params.discipline === 'all') &&
+                          (!params?.linkType || params.linkType === 'all')
 
-  // Add preliminary report nodes
-  const prelimReports = db.prepare('SELECT id, title, status, created_at, substr(content, 1, 200) AS snippet FROM preliminary_reports ORDER BY created_at DESC LIMIT 50').all() as Array<Record<string, unknown>>
-  const prelimNodes = prelimReports.map((p) => ({
-    id: p.id as string, title: `\u{1F4CB} ${(p.title as string).slice(0, 60)}`,
-    discipline: 'preliminary', severity: 'high', source: 'Preliminary Report',
-    verification: 80, type: 'preliminary',
-    createdAt: p.created_at, snippet: p.snippet
-  }))
+  const gapSyntheticLinks: Array<{
+    source: string; target: string; type: string; strength: number; reason: string
+  }> = []
 
-  // Add HUMINT nodes
-  const humintReports = db.prepare('SELECT id, findings, confidence, created_at, session_id FROM humint_reports ORDER BY created_at DESC LIMIT 30').all() as Array<Record<string, unknown>>
-  const humintNodes = humintReports.map((h) => ({
-    id: h.id as string, title: `\u{1F530} HUMINT: ${(h.findings as string).slice(0, 60)}`,
-    discipline: 'humint', severity: 'high', source: 'HUMINT Chat',
-    verification: 90, type: 'humint',
-    createdAt: h.created_at, snippet: (h.findings as string).slice(0, 200),
-    confidence: h.confidence, sessionId: h.session_id
-  }))
+  if (showUnconnected) {
+    // Recent preliminary reports not already in the set
+    try {
+      const rows = db.prepare(
+        'SELECT id, title, status, created_at, substr(content, 1, 200) AS snippet FROM preliminary_reports ORDER BY created_at DESC LIMIT 50'
+      ).all() as Array<Record<string, unknown>>
+      for (const r of rows) {
+        const id = r.id as string
+        if (nodesById.has(id)) continue
+        nodesById.set(id, {
+          id, title: String(r.title || '').slice(0, 80),
+          discipline: 'preliminary', severity: 'high', source: 'Preliminary Report',
+          verification: 80, type: 'preliminary',
+          createdAt: r.created_at, snippet: r.snippet
+        })
+      }
+    } catch {}
 
-  // Add gap nodes
-  const gaps = db.prepare("SELECT id, description, severity, created_at, preliminary_report_id FROM intel_gaps WHERE status = 'open' LIMIT 30").all() as Array<Record<string, unknown>>
-  const gapNodes = gaps.map((g) => ({
-    id: g.id as string, title: `\u{26A0}\u{FE0F} ${(g.description as string).slice(0, 60)}`,
-    discipline: 'gap', severity: g.severity as string, source: 'Information Gap',
-    verification: 0, type: 'gap',
-    createdAt: g.created_at, snippet: g.description
-  }))
+    // Recent HUMINT reports not already in the set
+    try {
+      const rows = db.prepare(
+        'SELECT id, findings, confidence, created_at, session_id FROM humint_reports ORDER BY created_at DESC LIMIT 30'
+      ).all() as Array<Record<string, unknown>>
+      for (const r of rows) {
+        const id = r.id as string
+        if (nodesById.has(id)) continue
+        const findings = String(r.findings || '')
+        nodesById.set(id, {
+          id, title: `HUMINT: ${findings.slice(0, 60)}`,
+          discipline: 'humint', severity: 'high', source: 'HUMINT Chat',
+          verification: 90, type: 'humint',
+          createdAt: r.created_at, snippet: findings.slice(0, 200),
+          confidence: r.confidence, sessionId: r.session_id
+        })
+      }
+    } catch {}
 
-  // Gap links — use the preliminary_report_id already in each gap row (no extra query needed)
-  const gapLinks = gaps
-    .filter((g) => g.preliminary_report_id)
-    .map((g) => ({
-      source: g.preliminary_report_id as string, target: g.id as string,
-      type: 'gap_identified', strength: 0.7, reason: 'Information gap identified in report'
-    }))
+    // Recent open gaps — add node + synthesize a gap→preliminary link so the
+    // relationship is visible even though it is not materialized in intel_links.
+    try {
+      const rows = db.prepare(
+        "SELECT id, description, severity, created_at, preliminary_report_id FROM intel_gaps WHERE status = 'open' ORDER BY created_at DESC LIMIT 30"
+      ).all() as Array<Record<string, unknown>>
+      for (const r of rows) {
+        const id = r.id as string
+        const description = String(r.description || '')
+        if (!nodesById.has(id)) {
+          nodesById.set(id, {
+            id, title: description.slice(0, 80),
+            discipline: 'gap', severity: r.severity as string, source: 'Information Gap',
+            verification: 0, type: 'gap',
+            createdAt: r.created_at, snippet: description,
+            preliminaryReportId: r.preliminary_report_id
+          })
+        }
+        // Synthesize the preliminary→gap edge (not stored in intel_links)
+        if (r.preliminary_report_id && nodesById.has(r.preliminary_report_id as string)) {
+          gapSyntheticLinks.push({
+            source: r.preliminary_report_id as string,
+            target: id,
+            type: 'gap_identified',
+            strength: 0.7,
+            reason: 'Information gap identified in report'
+          })
+        } else if (r.preliminary_report_id) {
+          // Need to also fetch the target preliminary node so the edge renders
+          const prelim = resolveNodesById(db, [r.preliminary_report_id as string])
+          for (const [pid, pnode] of prelim) {
+            if (!nodesById.has(pid)) nodesById.set(pid, pnode)
+          }
+          gapSyntheticLinks.push({
+            source: r.preliminary_report_id as string,
+            target: id,
+            type: 'gap_identified',
+            strength: 0.7,
+            reason: 'Information gap identified in report'
+          })
+        }
+      }
+    } catch {}
+  }
 
   return {
-    nodes: [
-      ...nodes.map((n) => ({
-        id: n.id, title: (n.title as string).slice(0, 80), discipline: n.discipline,
-        severity: n.severity, source: n.source_name, verification: n.verification_score,
-        createdAt: n.created_at, snippet: n.snippet
-      })),
-      ...prelimNodes,
-      ...humintNodes,
-      ...gapNodes
-    ],
+    nodes: Array.from(nodesById.values()),
     links: [
-      ...links.map((l) => ({
+      ...finalLinks.map((l) => ({
         source: l.source_report_id, target: l.target_report_id,
         type: l.link_type, strength: l.strength, reason: l.reason
       })),
-      ...gapLinks
+      ...gapSyntheticLinks
     ]
   }
 }
