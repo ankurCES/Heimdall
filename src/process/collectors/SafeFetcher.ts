@@ -14,6 +14,8 @@ export interface FetchOptions {
 export class SafeFetcher {
   private rateLimiter: RateLimiter
   private robotsChecker: RobotsChecker
+  private airGapMode = false
+  private airGapAllowlist: Set<string> = new Set()
 
   constructor(requestsPerMinute: number = 30, respectRobots: boolean = true) {
     this.rateLimiter = new RateLimiter(requestsPerMinute)
@@ -29,9 +31,41 @@ export class SafeFetcher {
     this.robotsChecker.setEnabled(enabled)
   }
 
+  /**
+   * Air-gap mode (Theme 10.6). When enabled every outbound fetch is
+   * refused unless the hostname matches the allowlist (exact or
+   * DNS-suffix match). The failure is auditable and the collector
+   * bubbles it up as any other fetch error.
+   */
+  setAirGap(enabled: boolean, allowlist: string[] = []): void {
+    this.airGapMode = enabled
+    this.airGapAllowlist = new Set(
+      allowlist.map((s) => s.trim().toLowerCase()).filter(Boolean)
+    )
+    log.info(`SafeFetcher: air-gap ${enabled ? `ENABLED (allowlist=${Array.from(this.airGapAllowlist).join(',') || '<empty>'})` : 'disabled'}`)
+  }
+
+  isAirGapped(): boolean { return this.airGapMode }
+
+  private airGapAllows(hostname: string): boolean {
+    if (!this.airGapMode) return true
+    const h = hostname.toLowerCase()
+    for (const allowed of this.airGapAllowlist) {
+      if (h === allowed || h.endsWith(`.${allowed}`)) return true
+    }
+    return false
+  }
+
   async fetch(url: string, options: FetchOptions = {}): Promise<Response> {
     const { headers = {}, timeout = 30000, maxRetries = 3 } = options
     const domain = new URL(url).hostname
+
+    // Air-gap gate. Hard block BEFORE robots / rate limit / retry — nothing
+    // leaves the host unless explicitly allowlisted.
+    if (!this.airGapAllows(domain)) {
+      auditService.log('fetch.airgap_blocked', { url, domain })
+      throw new Error(`Blocked by air-gap mode: ${url}`)
+    }
 
     // Check robots.txt
     const allowed = await this.robotsChecker.isAllowed(url)

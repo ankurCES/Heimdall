@@ -73,6 +73,7 @@ async function initializeDeferred(): Promise<void> {
   if (safety) {
     safeFetcher.setRate(safety.rateLimitPerDomain || 30)
     safeFetcher.setRobotsEnabled(safety.respectRobotsTxt ?? true)
+    safeFetcher.setAirGap(safety.airGapMode ?? false, safety.airGapAllowlist ?? [])
   }
 
   // Seed default sources on first run

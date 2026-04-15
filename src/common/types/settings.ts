@@ -33,7 +33,11 @@ export const SafetyConfigSchema = z.object({
   rateLimitPerDomain: z.number().int().min(1).default(30),
   respectRobotsTxt: z.boolean().default(true),
   proxyUrl: z.string().default(''),
-  retentionDays: z.number().int().min(1).default(90)
+  retentionDays: z.number().int().min(1).default(90),
+  // Theme 10.6 — air-gap mode. When true, SafeFetcher rejects any outbound
+  // fetch whose hostname isn't in airGapAllowlist (exact or DNS suffix match).
+  airGapMode: z.boolean().default(false),
+  airGapAllowlist: z.array(z.string()).default([])
 })
 
 export const LlmConnectionSchema = z.object({

@@ -54,7 +54,9 @@ const testChannels = [
   'cybint:tactics', 'cybint:techniques', 'cybint:tag_techniques',
   'cybint:top_techniques', 'cybint:reports_for_technique',
   'cybint:sync_kev', 'cybint:kev_count', 'cybint:kev_in_corpus',
-  'cybint:latest_run'
+  'cybint:latest_run',
+  'safety:airgap_status', 'safety:apply_airgap',
+  'safety:panic_wipe_targets', 'safety:panic_wipe'
 ]
 const allowedChannels = [...Object.values(IPC_CHANNELS), ...testChannels]
 const chatEvents = ['chat:chunk', 'chat:done', 'chat:error']

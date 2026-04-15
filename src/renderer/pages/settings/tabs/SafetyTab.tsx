@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { ShieldCheck, Check, Lock } from 'lucide-react'
+import { ShieldCheck, Check, Lock, PlugZap, Flame, AlertTriangle, Loader2 } from 'lucide-react'
 import { Button } from '@renderer/components/ui/button'
 import { Input } from '@renderer/components/ui/input'
 import { Label } from '@renderer/components/ui/label'
@@ -13,6 +13,8 @@ import { CLASSIFICATION_LEVELS, type Classification, isClassification } from '@r
 const DEFAULT_SAFETY: SafetyConfig = {
   rateLimitPerDomain: 30,
   respectRobotsTxt: true,
+  airGapMode: false,
+  airGapAllowlist: [],
   proxyUrl: '',
   retentionDays: 90
 }
@@ -137,6 +139,8 @@ export function SafetyTab() {
 
       <ClearanceCard />
       <EncryptionCard />
+      <AirGapCard />
+      <PanicWipeCard />
     </div>
   )
 }
@@ -374,6 +378,194 @@ function EncryptionCard() {
           <p><strong>Scope:</strong> encrypts every byte of <code className="font-mono">heimdall.db</code> and its WAL/SHM companions. Vector index, Obsidian vault cache, and settings DB are <em>not</em> covered by this batch.</p>
           <p><strong>Recovery:</strong> none. Lose the passphrase → lose the data. Store it in a password manager or secure paper backup.</p>
         </div>
+      </CardContent>
+    </Card>
+  )
+}
+
+/**
+ * Air-gap mode — Theme 10.6. When enabled, SafeFetcher refuses any
+ * outbound fetch whose hostname isn't on the allowlist (exact or DNS
+ * suffix match). Intended for SCIF / classified deployments.
+ */
+function AirGapCard() {
+  const { value: saved, save } = useSetting<SafetyConfig>('safety', DEFAULT_SAFETY)
+  const [enabled, setEnabled] = useState(false)
+  const [allowlist, setAllowlist] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [savedAt, setSavedAt] = useState(0)
+
+  useEffect(() => {
+    if (saved) {
+      setEnabled(saved.airGapMode ?? false)
+      setAllowlist((saved.airGapAllowlist ?? []).join('\n'))
+    }
+  }, [saved])
+
+  const handleSave = async () => {
+    setSaving(true)
+    try {
+      const list = allowlist.split(/[\s,]+/).map((s) => s.trim()).filter(Boolean)
+      await save({ ...saved, airGapMode: enabled, airGapAllowlist: list } as SafetyConfig)
+      await window.heimdall.invoke('safety:apply_airgap', { enabled, allowlist: list })
+      setSavedAt(Date.now())
+      setTimeout(() => setSavedAt(0), 2500)
+    } finally { setSaving(false) }
+  }
+
+  return (
+    <Card>
+      <CardHeader>
+        <div className="flex items-center gap-2">
+          <PlugZap className="h-5 w-5 text-muted-foreground" />
+          <CardTitle className="text-base">Air-gap mode</CardTitle>
+        </div>
+        <CardDescription>
+          When enabled, every outbound HTTP fetch from any collector or
+          service is refused unless the hostname matches the allowlist
+          (exact or DNS-suffix match). Intended for SCIF-style deployments —
+          doesn't touch inbound traffic.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        <div className="flex items-center justify-between">
+          <Label>Enable air-gap mode</Label>
+          <Switch checked={enabled} onCheckedChange={setEnabled} />
+        </div>
+        <div>
+          <Label>Allowlist (one host per line, or space/comma separated)</Label>
+          <textarea
+            className="w-full mt-1 rounded border border-border bg-background p-2 text-sm font-mono min-h-[96px]"
+            placeholder="internal.heimdall.local&#10;cve.mitre.org"
+            value={allowlist}
+            onChange={(e) => setAllowlist(e.target.value)}
+          />
+          <p className="text-[10px] text-muted-foreground mt-1">
+            <code className="font-mono">example.com</code> matches{' '}
+            <code className="font-mono">example.com</code> and{' '}
+            <code className="font-mono">*.example.com</code>. Leave empty for
+            a hard cut-off (nothing at all leaves the host).
+          </p>
+        </div>
+        <Button onClick={handleSave} disabled={saving}>
+          {savedAt ? <><Check className="h-4 w-4 mr-2" />Applied</> : 'Save & apply'}
+        </Button>
+      </CardContent>
+    </Card>
+  )
+}
+
+/**
+ * Panic-wipe — Theme 10.7. Irreversibly destroys the local working set.
+ * Renderer enforces a double confirmation (type the exact token, then
+ * type DESTROY in a second field) before sending IPC. The service itself
+ * also requires the token — defence in depth.
+ */
+function PanicWipeCard() {
+  const TOKEN = 'WIPE-HEIMDALL'
+  const [open, setOpen] = useState(false)
+  const [targets, setTargets] = useState<string[]>([])
+  const [token, setToken] = useState('')
+  const [confirm, setConfirm] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [result, setResult] = useState<{ removed_paths: string[]; failed_paths: Array<{ path: string; error: string }>; total_bytes_removed: number } | null>(null)
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (open) {
+      void window.heimdall.invoke('safety:panic_wipe_targets').then((t) => setTargets(t as string[]))
+    }
+  }, [open])
+
+  const wipe = async () => {
+    setError(null)
+    if (token !== TOKEN || confirm !== 'DESTROY') {
+      setError('Exact token required and the second field must read "DESTROY".')
+      return
+    }
+    setBusy(true)
+    try {
+      const r = await window.heimdall.invoke('safety:panic_wipe', { confirmation: token })
+      setResult(r as { removed_paths: string[]; failed_paths: Array<{ path: string; error: string }>; total_bytes_removed: number })
+    } catch (err) {
+      setError(String(err).replace(/^Error:\s*/, ''))
+    } finally { setBusy(false) }
+  }
+
+  return (
+    <Card>
+      <CardHeader>
+        <div className="flex items-center gap-2">
+          <Flame className="h-5 w-5 text-red-400" />
+          <CardTitle className="text-base">Panic-wipe</CardTitle>
+        </div>
+        <CardDescription>
+          Irreversibly destroys the local database, migration backups,
+          vector index, encryption marker, and browser caches. The process
+          exits after the wipe — there is no recovery path.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        {!open ? (
+          <Button variant="destructive" onClick={() => { setOpen(true); setResult(null); setError(null); setToken(''); setConfirm('') }}>
+            <Flame className="h-4 w-4 mr-2" />Start panic-wipe
+          </Button>
+        ) : result ? (
+          <div className="p-3 rounded border border-emerald-500/30 bg-emerald-500/10 text-xs space-y-2">
+            <div className="flex items-center gap-2 font-semibold text-emerald-300">
+              <Check className="h-3.5 w-3.5" />Wipe complete
+            </div>
+            <div>Removed {result.removed_paths.length} path{result.removed_paths.length === 1 ? '' : 's'} ({(result.total_bytes_removed / 1024 / 1024).toFixed(1)} MB).</div>
+            {result.failed_paths.length > 0 && (
+              <div className="text-red-300">
+                {result.failed_paths.length} failure{result.failed_paths.length === 1 ? '' : 's'}:
+                <ul className="list-disc list-inside mt-1">
+                  {result.failed_paths.map((f) => (
+                    <li key={f.path} className="font-mono text-[10px]">{f.path}: {f.error}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+            <div className="italic text-muted-foreground">The app will quit in a few seconds.</div>
+          </div>
+        ) : (
+          <div className="p-3 rounded border border-red-500/30 bg-red-500/5 space-y-3">
+            <div className="flex items-start gap-2 text-xs text-red-200">
+              <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5" />
+              <div>
+                <p className="font-semibold">This operation is irreversible.</p>
+                <p className="mt-1">
+                  {targets.length} file/directory path{targets.length === 1 ? '' : 's'} will be destroyed.
+                </p>
+              </div>
+            </div>
+            <details className="text-[10px] text-muted-foreground">
+              <summary className="cursor-pointer">What will be wiped ({targets.length} paths)</summary>
+              <ul className="mt-1 font-mono text-[10px] max-h-32 overflow-auto pl-2">
+                {targets.map((p) => <li key={p}>{p}</li>)}
+              </ul>
+            </details>
+            <div>
+              <Label>Type exactly <code className="font-mono text-[10px]">{TOKEN}</code></Label>
+              <Input value={token} onChange={(e) => setToken(e.target.value)} className="font-mono" />
+            </div>
+            <div>
+              <Label>Then type <code className="font-mono text-[10px]">DESTROY</code></Label>
+              <Input value={confirm} onChange={(e) => setConfirm(e.target.value)} className="font-mono" />
+            </div>
+            {error && <p className="text-xs text-red-300">{error}</p>}
+            <div className="flex gap-2">
+              <Button variant="ghost" size="sm" onClick={() => setOpen(false)}>Cancel</Button>
+              <Button
+                variant="destructive" size="sm" onClick={wipe}
+                disabled={busy || token !== TOKEN || confirm !== 'DESTROY'}
+              >
+                {busy ? <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" /> : <Flame className="h-3.5 w-3.5 mr-1.5" />}
+                I understand — wipe everything
+              </Button>
+            </div>
+          </div>
+        )}
       </CardContent>
     </Card>
   )
