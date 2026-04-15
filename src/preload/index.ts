@@ -46,7 +46,9 @@ const testChannels = [
   'encryption:status', 'encryption:unlock', 'encryption:enable',
   'encryption:change', 'encryption:finish_boot',
   'network:refresh', 'network:latest', 'network:top',
-  'network:communities', 'network:node', 'network:search', 'network:predict'
+  'network:communities', 'network:node', 'network:search', 'network:predict',
+  'entity:resolve', 'entity:latest', 'entity:top', 'entity:types',
+  'entity:aliases', 'entity:reports'
 ]
 const allowedChannels = [...Object.values(IPC_CHANNELS), ...testChannels]
 const chatEvents = ['chat:chunk', 'chat:done', 'chat:error']

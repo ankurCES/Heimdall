@@ -1125,6 +1125,70 @@ const migrations: Migration[] = [
 
       log.info('Migration 019: network_metrics + network_runs tables created')
     }
+  },
+  {
+    version: '020',
+    name: 'entity_resolution',
+    up: (db) => {
+      // Cross-domain entity resolution — Theme 4.6 of the agency roadmap.
+      //
+      // intel_entities holds raw extracted (type, value) pairs per report.
+      // Many of those are aliases of the same real-world identity —
+      // "Vladimir Putin", "V. Putin", "Putin, V." — that analytic queries
+      // need to collapse. This migration adds:
+      //
+      //   - canonical_entities: one row per resolved identity, carrying the
+      //     canonical (type, value) plus aggregate mention counts.
+      //   - canonical_id column on intel_entities: pointer to the resolved
+      //     identity. NULL until the resolver runs.
+      //   - entity_resolution_runs: audit trail of resolver invocations
+      //     (parameters, cluster count, duration, errors).
+      //
+      // The resolver writes canonical_id in bulk at the end of a run;
+      // callers should treat NULL canonical_id as "unresolved — use raw
+      // entity_value for display".
+
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS canonical_entities (
+          id TEXT PRIMARY KEY,
+          entity_type TEXT NOT NULL,
+          canonical_value TEXT NOT NULL,
+          normalized_value TEXT NOT NULL,
+          alias_count INTEGER NOT NULL DEFAULT 1,
+          mention_count INTEGER NOT NULL DEFAULT 0,
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_canonical_type ON canonical_entities(entity_type);
+        CREATE INDEX IF NOT EXISTS idx_canonical_mentions ON canonical_entities(mention_count DESC);
+        CREATE INDEX IF NOT EXISTS idx_canonical_normalized ON canonical_entities(normalized_value);
+        CREATE UNIQUE INDEX IF NOT EXISTS uq_canonical_type_norm ON canonical_entities(entity_type, normalized_value);
+
+        CREATE TABLE IF NOT EXISTS entity_resolution_runs (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          started_at INTEGER NOT NULL,
+          finished_at INTEGER,
+          raw_count INTEGER,
+          cluster_count INTEGER,
+          similarity_threshold REAL,
+          duration_ms INTEGER,
+          error TEXT
+        );
+      `)
+
+      // canonical_id points each raw entity at its resolved cluster head.
+      // NULL until the resolver has run.
+      try {
+        db.exec(`ALTER TABLE intel_entities ADD COLUMN canonical_id TEXT`)
+      } catch {
+        // column already present — idempotent no-op
+      }
+      try {
+        db.exec(`CREATE INDEX IF NOT EXISTS idx_entities_canonical ON intel_entities(canonical_id)`)
+      } catch { /* noop */ }
+
+      log.info('Migration 020: canonical_entities + entity_resolution_runs tables + canonical_id column on intel_entities')
+    }
   }
 ]
 
