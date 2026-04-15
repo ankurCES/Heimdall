@@ -33,7 +33,11 @@ const testChannels = [
   'iw:events:list', 'iw:events:get', 'iw:events:create', 'iw:events:update', 'iw:events:delete',
   'iw:indicators:add', 'iw:indicators:update', 'iw:indicators:delete', 'iw:indicators:history',
   'iw:evaluate:indicator', 'iw:evaluate:event', 'iw:evaluate:all',
-  'dpb:generate', 'dpb:latest', 'dpb:list', 'dpb:get'
+  'dpb:generate', 'dpb:latest', 'dpb:list', 'dpb:get',
+  'ach:sessions:list', 'ach:sessions:get', 'ach:sessions:create', 'ach:sessions:update', 'ach:sessions:delete',
+  'ach:hypotheses:add', 'ach:hypotheses:update', 'ach:hypotheses:delete',
+  'ach:evidence:add', 'ach:evidence:update', 'ach:evidence:delete',
+  'ach:scores:set', 'ach:scores:clear', 'ach:agent:generateHypotheses'
 ]
 const allowedChannels = [...Object.values(IPC_CHANNELS), ...testChannels]
 const chatEvents = ['chat:chunk', 'chat:done', 'chat:error']

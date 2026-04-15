@@ -14,6 +14,7 @@ import { registerWatchBridge } from './watchBridge'
 import { registerMarketsBridge } from './marketsBridge'
 import { registerAnalyticsBridge } from './analyticsBridge'
 import { registerIwBridge } from './iwBridge'
+import { registerAchBridge } from './achBridge'
 import log from 'electron-log'
 
 export function registerAllBridges(): void {
@@ -33,5 +34,6 @@ export function registerAllBridges(): void {
   registerMarketsBridge()
   registerAnalyticsBridge()
   registerIwBridge()
+  registerAchBridge()
   log.info('All IPC bridges registered')
 }

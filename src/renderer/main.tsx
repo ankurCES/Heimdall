@@ -20,6 +20,7 @@ import { EnrichedPage } from './pages/enriched/EnrichedPage'
 import { WatchPage } from './pages/watch/WatchPage'
 import { MarketsPage } from './pages/markets/MarketsPage'
 import { IwPage } from './pages/iw/IwPage'
+import { AchPage } from './pages/ach/AchPage'
 import { Toaster } from 'sonner'
 import { NotificationListener } from './components/NotificationListener'
 import './styles/globals.css'
@@ -53,6 +54,7 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
           <Route path="/enriched" element={<EnrichedPage />} />
           <Route path="/watch" element={<WatchPage />} />
           <Route path="/iw" element={<IwPage />} />
+          <Route path="/ach" element={<AchPage />} />
           <Route path="/sync" element={<SyncPage />} />
           <Route path="/tokens" element={<TokensPage />} />
           <Route path="/audit" element={<AuditPage />} />

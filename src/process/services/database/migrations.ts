@@ -898,6 +898,99 @@ const migrations: Migration[] = [
 
       log.info('Migration 016: iw_events / iw_indicators / iw_evaluations + dpb_briefings tables created')
     }
+  },
+  {
+    version: '017',
+    name: 'ach_workbench',
+    up: (db) => {
+      // Analysis of Competing Hypotheses (ACH) — Themes 2.1, 2.2, 2.3, 2.4, 2.6
+      // of the agency roadmap.
+      //
+      // Heuer's gold-standard methodology for analytic rigor:
+      //   1. Define 3–5 mutually-exclusive hypotheses
+      //   2. List every relevant piece of evidence
+      //   3. Score each piece against each hypothesis:
+      //        CC = strongly consistent (++) , C = consistent (+),
+      //        N  = not applicable / neutral, I = inconsistent (-),
+      //        II = strongly inconsistent (--)
+      //   4. Pick the hypothesis with the LEAST disconfirming evidence
+      //      (NOT the most confirming) — the "Heuer principle"
+      //   5. Identify "diagnostic" evidence — evidence that would
+      //      distinguish between hypotheses if found
+      //
+      // The three tables model: a session (the analyst's question), the
+      // competing hypotheses, and the evidence cards. Scores are stored in
+      // a separate join table (ach_scores) so we can change either side
+      // without rewriting full rows.
+      //
+      // Every artifact carries classification + chain audit on create/
+      // delete/score-change. Sessions are linked to chat sessions when the
+      // analyst seeds them from a chat conversation.
+
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS ach_sessions (
+          id TEXT PRIMARY KEY,
+          title TEXT NOT NULL,
+          question TEXT,
+          chat_session_id TEXT,
+          preliminary_report_id TEXT,
+          classification TEXT NOT NULL DEFAULT 'UNCLASSIFIED',
+          status TEXT NOT NULL DEFAULT 'open',
+          conclusion TEXT,
+          conclusion_hypothesis_id TEXT,
+          conclusion_confidence TEXT,
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_ach_sessions_chat ON ach_sessions(chat_session_id);
+        CREATE INDEX IF NOT EXISTS idx_ach_sessions_status ON ach_sessions(status);
+        CREATE INDEX IF NOT EXISTS idx_ach_sessions_updated ON ach_sessions(updated_at DESC);
+
+        CREATE TABLE IF NOT EXISTS ach_hypotheses (
+          id TEXT PRIMARY KEY,
+          session_id TEXT NOT NULL,
+          ordinal INTEGER NOT NULL,
+          label TEXT NOT NULL,
+          description TEXT,
+          source TEXT NOT NULL DEFAULT 'analyst',
+          created_at INTEGER NOT NULL,
+          FOREIGN KEY (session_id) REFERENCES ach_sessions(id) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS idx_ach_hypotheses_session ON ach_hypotheses(session_id, ordinal);
+
+        CREATE TABLE IF NOT EXISTS ach_evidence (
+          id TEXT PRIMARY KEY,
+          session_id TEXT NOT NULL,
+          ordinal INTEGER NOT NULL,
+          claim TEXT NOT NULL,
+          source_intel_id TEXT,
+          source_humint_id TEXT,
+          source_label TEXT,
+          weight REAL NOT NULL DEFAULT 1.0,
+          credibility INTEGER,
+          notes TEXT,
+          created_at INTEGER NOT NULL,
+          FOREIGN KEY (session_id) REFERENCES ach_sessions(id) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS idx_ach_evidence_session ON ach_evidence(session_id, ordinal);
+
+        CREATE TABLE IF NOT EXISTS ach_scores (
+          session_id TEXT NOT NULL,
+          hypothesis_id TEXT NOT NULL,
+          evidence_id TEXT NOT NULL,
+          score TEXT NOT NULL,
+          rationale TEXT,
+          updated_at INTEGER NOT NULL,
+          PRIMARY KEY (hypothesis_id, evidence_id),
+          FOREIGN KEY (session_id) REFERENCES ach_sessions(id) ON DELETE CASCADE,
+          FOREIGN KEY (hypothesis_id) REFERENCES ach_hypotheses(id) ON DELETE CASCADE,
+          FOREIGN KEY (evidence_id) REFERENCES ach_evidence(id) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS idx_ach_scores_session ON ach_scores(session_id);
+      `)
+
+      log.info('Migration 017: ach_sessions / ach_hypotheses / ach_evidence / ach_scores created')
+    }
   }
 ]
 
