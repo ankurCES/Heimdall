@@ -85,7 +85,11 @@ class ToolRegistryImpl {
         return true
       })
       return {
-        output: filtered.map((r) => `[${r.severity.toUpperCase()}] ${r.title}\nDiscipline: ${r.discipline} | Source: ${r.sourceName}\n${r.content.slice(0, 300)}`).join('\n---\n'),
+        // Trailing [id:<uuid>] marker per result lets the LLM cite reports by id
+        // when summarizing ("…per report a1b2c3d4-…") and also lands in
+        // tool_call_logs.result for later source-id extraction when saving a
+        // preliminary report.
+        output: filtered.map((r) => `[${r.severity.toUpperCase()}] ${r.title}\nDiscipline: ${r.discipline} | Source: ${r.sourceName}\n${r.content.slice(0, 300)}\n[id:${r.id}]`).join('\n---\n'),
         data: filtered
       }
     })
@@ -102,7 +106,9 @@ class ToolRegistryImpl {
     }, async (params) => {
       const results = await vectorDbService.search(params.query as string, (params.limit as number) || 8)
       return {
-        output: results.map((r) => `[${r.severity}] ${r.title} (score: ${r.score.toFixed(2)})\n${r.snippet}`).join('\n---\n'),
+        // Each result carries [id:<uuid>] so the LLM can cite by id and
+        // handleSavePreliminaryReport can harvest IDs from tool_call_logs.
+        output: results.map((r) => `[${r.severity}] ${r.title} (score: ${r.score.toFixed(2)})\n${r.snippet}\n[id:${r.id}]`).join('\n---\n'),
         data: results
       }
     })
@@ -119,10 +125,10 @@ class ToolRegistryImpl {
     }, async (params) => {
       const db = getDatabase()
       const results = db.prepare(
-        'SELECT r.title, r.discipline, r.severity, r.source_name, substr(r.content, 1, 300) as snippet FROM intel_reports r JOIN intel_entities e ON r.id = e.report_id WHERE e.entity_type = ? AND e.entity_value = ? LIMIT 10'
+        'SELECT r.id, r.title, r.discipline, r.severity, r.source_name, substr(r.content, 1, 300) as snippet FROM intel_reports r JOIN intel_entities e ON r.id = e.report_id WHERE e.entity_type = ? AND e.entity_value = ? LIMIT 10'
       ).all(params.entity_type, params.entity_value) as Array<Record<string, unknown>>
       return {
-        output: results.map((r) => `[${r.severity}] ${r.title}\n${r.discipline} | ${r.source_name}\n${r.snippet}`).join('\n---\n') || 'No matching reports found.',
+        output: results.map((r) => `[${r.severity}] ${r.title}\n${r.discipline} | ${r.source_name}\n${r.snippet}\n[id:${r.id}]`).join('\n---\n') || 'No matching reports found.',
         data: results
       }
     })

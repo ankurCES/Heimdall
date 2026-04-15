@@ -323,16 +323,33 @@ const migrations: Migration[] = [
       let linksAdded = 0
 
       for (const prelim of prelims) {
-        // Pull all assistant messages for the session
+        const candidates = new Set<string>()
+
+        // Pull all assistant messages for the session — the old regex ran
+        // against these already, but missed full UUIDs; new regex fixes that.
         const msgs = db.prepare(
           "SELECT content FROM chat_messages WHERE session_id = ? AND role = 'assistant' ORDER BY created_at"
         ).all(prelim.session_id) as Array<{ content: string }>
-
-        const candidates = new Set<string>()
         for (const m of msgs) {
           const matches = m.content.match(FULL_UUID_RE) || []
           for (const uuid of matches) candidates.add(uuid)
         }
+
+        // Also scan tool_call_logs — the agent's search tool results now
+        // include [id:<uuid>] markers, but even older rows occasionally
+        // contain stringified JSON with full UUIDs. This is a lossy signal
+        // for sessions predating the tool-output fix, but it catches any
+        // report ids that happened to appear in tool result text.
+        try {
+          const logs = db.prepare(
+            "SELECT result FROM tool_call_logs WHERE session_id = ? AND tool_name IN ('vector_search', 'intel_search', 'entity_lookup', 'graph_query') AND result IS NOT NULL"
+          ).all(prelim.session_id) as Array<{ result: string }>
+          for (const l of logs) {
+            const matches = (l.result || '').match(FULL_UUID_RE) || []
+            for (const uuid of matches) candidates.add(uuid)
+          }
+        } catch {}
+
         if (candidates.size === 0) continue
 
         // Verify each candidate exists in intel_reports
@@ -366,6 +383,93 @@ const migrations: Migration[] = [
       }
 
       log.info(`Migration 009: rewrote source_report_ids on ${rewrittenReports} preliminary reports, added ${linksAdded} preliminary→intel links`)
+    }
+  },
+  {
+    version: '010',
+    name: 'backfill_preliminary_source_links_from_tool_logs',
+    up: (db) => {
+      // Migration 009 scanned only chat_messages for UUIDs, but the LLM
+      // typically cites intel by name, not by id, so its responses rarely
+      // contain full UUIDs. The authoritative source of which intel was
+      // surfaced to the LLM is tool_call_logs — vector_search / intel_search
+      // / entity_lookup results list the reports that matched the query.
+      //
+      // This migration re-does the backfill using tool_call_logs as the
+      // primary signal, with assistant messages as a fallback.
+      const FULL_UUID_RE = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/g
+
+      const prelims = db.prepare(
+        'SELECT id, session_id FROM preliminary_reports WHERE session_id IS NOT NULL AND session_id != \'\''
+      ).all() as Array<{ id: string; session_id: string }>
+
+      let rewrittenReports = 0
+      let linksAdded = 0
+
+      for (const prelim of prelims) {
+        const candidates = new Set<string>()
+
+        // Primary: tool_call_logs for the session
+        try {
+          const logs = db.prepare(
+            "SELECT result FROM tool_call_logs WHERE session_id = ? AND tool_name IN ('vector_search', 'intel_search', 'entity_lookup', 'graph_query') AND result IS NOT NULL"
+          ).all(prelim.session_id) as Array<{ result: string }>
+          for (const l of logs) {
+            const matches = (l.result || '').match(FULL_UUID_RE) || []
+            for (const uuid of matches) candidates.add(uuid)
+          }
+        } catch {}
+
+        // Secondary: assistant messages
+        const msgs = db.prepare(
+          "SELECT content FROM chat_messages WHERE session_id = ? AND role = 'assistant' ORDER BY created_at"
+        ).all(prelim.session_id) as Array<{ content: string }>
+        for (const m of msgs) {
+          const matches = m.content.match(FULL_UUID_RE) || []
+          for (const uuid of matches) candidates.add(uuid)
+        }
+
+        if (candidates.size === 0) continue
+
+        // Verify against intel_reports
+        const ids = Array.from(candidates)
+        const verified = (db.prepare(
+          `SELECT id FROM intel_reports WHERE id IN (${ids.map(() => '?').join(',')})`
+        ).all(...ids) as Array<{ id: string }>).map((r) => r.id)
+        if (verified.length === 0) continue
+
+        // Merge with any ids already in preliminary_reports.source_report_ids
+        // so we don't accidentally shrink the list for any report that was
+        // already correctly populated.
+        let existing: string[] = []
+        try {
+          const row = db.prepare('SELECT source_report_ids FROM preliminary_reports WHERE id = ?').get(prelim.id) as { source_report_ids: string | null } | undefined
+          if (row?.source_report_ids) existing = JSON.parse(row.source_report_ids)
+        } catch {}
+        const merged = Array.from(new Set([...existing, ...verified])).slice(0, 200)
+
+        db.prepare('UPDATE preliminary_reports SET source_report_ids = ?, updated_at = ? WHERE id = ?')
+          .run(JSON.stringify(merged), timestamp(), prelim.id)
+        rewrittenReports++
+
+        for (const srcId of merged) {
+          const existingLink = db.prepare(
+            'SELECT 1 FROM intel_links WHERE source_report_id = ? AND target_report_id = ? AND link_type = ?'
+          ).get(prelim.id, srcId, 'preliminary_reference')
+          if (existingLink) continue
+          db.prepare(
+            'INSERT INTO intel_links (id, source_report_id, target_report_id, link_type, strength, reason, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)'
+          ).run(
+            `mig10_${prelim.id.slice(0, 8)}_${srcId.slice(0, 8)}_${linksAdded}`,
+            prelim.id, srcId, 'preliminary_reference', 0.8,
+            'Backfilled: source intel for preliminary report (via tool_call_logs)',
+            timestamp()
+          )
+          linksAdded++
+        }
+      }
+
+      log.info(`Migration 010: rewrote source_report_ids on ${rewrittenReports} preliminary reports (tool_logs scan), added ${linksAdded} preliminary→intel links`)
     }
   }
 ]

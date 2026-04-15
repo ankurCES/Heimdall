@@ -165,17 +165,18 @@ function getGraphFromSQLite(params?: {
     finalLinks = links.filter((l) => keep.has(l.source_report_id) && keep.has(l.target_report_id))
   }
 
-  // 4) Also include recent unconnected HUMINT / preliminary / gap nodes so
-  //    the user can see products that haven't linked anything yet. Only when
-  //    filter allows (no discipline filter AND no specific linkType).
-  const showUnconnected = (!params?.discipline || params.discipline === 'all') &&
-                          (!params?.linkType || params.linkType === 'all')
+  // 4) Also include recent HUMINT / preliminary / gap nodes + their gap
+  //    links. These are "analyst products" — they must stay visible
+  //    regardless of the link-type filter so the user always sees what they
+  //    have produced. The discipline filter still applies (a cybint-only
+  //    view won't pull in humint products unless humint links cybint intel).
+  const showProducts = !params?.discipline || params.discipline === 'all'
 
   const gapSyntheticLinks: Array<{
     source: string; target: string; type: string; strength: number; reason: string
   }> = []
 
-  if (showUnconnected) {
+  if (showProducts) {
     // Recent preliminary reports not already in the set
     try {
       const rows = db.prepare(
@@ -212,8 +213,55 @@ function getGraphFromSQLite(params?: {
       }
     } catch {}
 
-    // Recent open gaps — add node + synthesize a gap→preliminary link so the
-    // relationship is visible even though it is not materialized in intel_links.
+    // Recent pending actions from recommended_actions table. Each action is a
+    // child of its parent preliminary_report. Same model as gaps.
+    const includeActionLinks = !params?.linkType || params.linkType === 'all' || params.linkType === 'action_identified'
+    try {
+      const rows = db.prepare(
+        "SELECT id, action, priority, preliminary_report_id, created_at FROM recommended_actions WHERE status = 'pending' ORDER BY created_at DESC LIMIT 50"
+      ).all() as Array<Record<string, unknown>>
+      for (const r of rows) {
+        const id = r.id as string
+        const action = String(r.action || '')
+        if (!nodesById.has(id)) {
+          nodesById.set(id, {
+            id,
+            title: action.slice(0, 80),
+            discipline: 'action',
+            severity: r.priority === 'critical' ? 'critical' : r.priority === 'high' ? 'high' : 'medium',
+            source: 'Recommended Action',
+            verification: 0,
+            type: 'action',
+            createdAt: r.created_at,
+            snippet: action,
+            priority: r.priority,
+            preliminaryReportId: r.preliminary_report_id
+          })
+        }
+        if (includeActionLinks && r.preliminary_report_id) {
+          if (!nodesById.has(r.preliminary_report_id as string)) {
+            const prelim = resolveNodesById(db, [r.preliminary_report_id as string])
+            for (const [pid, pnode] of prelim) {
+              if (!nodesById.has(pid)) nodesById.set(pid, pnode)
+            }
+          }
+          if (nodesById.has(r.preliminary_report_id as string)) {
+            gapSyntheticLinks.push({
+              source: r.preliminary_report_id as string,
+              target: id,
+              type: 'action_identified',
+              strength: 0.6,
+              reason: 'Recommended action from report'
+            })
+          }
+        }
+      }
+    } catch {}
+
+    // Recent open gaps — add node + (conditionally) synthesize gap→preliminary
+    // link. The link is only emitted when the current linkType filter would
+    // accept a 'gap_identified' edge.
+    const includeGapLinks = !params?.linkType || params.linkType === 'all' || params.linkType === 'gap_identified'
     try {
       const rows = db.prepare(
         "SELECT id, description, severity, created_at, preliminary_report_id FROM intel_gaps WHERE status = 'open' ORDER BY created_at DESC LIMIT 30"
@@ -231,27 +279,23 @@ function getGraphFromSQLite(params?: {
           })
         }
         // Synthesize the preliminary→gap edge (not stored in intel_links)
-        if (r.preliminary_report_id && nodesById.has(r.preliminary_report_id as string)) {
-          gapSyntheticLinks.push({
-            source: r.preliminary_report_id as string,
-            target: id,
-            type: 'gap_identified',
-            strength: 0.7,
-            reason: 'Information gap identified in report'
-          })
-        } else if (r.preliminary_report_id) {
-          // Need to also fetch the target preliminary node so the edge renders
-          const prelim = resolveNodesById(db, [r.preliminary_report_id as string])
-          for (const [pid, pnode] of prelim) {
-            if (!nodesById.has(pid)) nodesById.set(pid, pnode)
+        if (includeGapLinks && r.preliminary_report_id) {
+          // Ensure the preliminary parent is in the node set so the edge renders
+          if (!nodesById.has(r.preliminary_report_id as string)) {
+            const prelim = resolveNodesById(db, [r.preliminary_report_id as string])
+            for (const [pid, pnode] of prelim) {
+              if (!nodesById.has(pid)) nodesById.set(pid, pnode)
+            }
           }
-          gapSyntheticLinks.push({
-            source: r.preliminary_report_id as string,
-            target: id,
-            type: 'gap_identified',
-            strength: 0.7,
-            reason: 'Information gap identified in report'
-          })
+          if (nodesById.has(r.preliminary_report_id as string)) {
+            gapSyntheticLinks.push({
+              source: r.preliminary_report_id as string,
+              target: id,
+              type: 'gap_identified',
+              strength: 0.7,
+              reason: 'Information gap identified in report'
+            })
+          }
         }
       }
     } catch {}

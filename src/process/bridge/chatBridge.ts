@@ -212,17 +212,30 @@ export function registerChatBridge(): void {
     }
 
     // Also check session chat messages for referenced UUIDs
-    const sessionMsgs = db.prepare(
-      "SELECT content FROM chat_messages WHERE session_id = ? AND role = 'assistant' ORDER BY created_at"
-    ).all(sessionId) as Array<{ content: string }>
     // Full UUIDv4 pattern (8-4-4-4-12). The previous pattern only matched the
     // first 16 chars of a UUID and produced truncated ids that did not match
     // any row in intel_reports, so preliminary→intel links pointed at ghost
     // ids and silently dropped in the graph.
     const UUID_RE = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/g
+
+    // Scan assistant messages for cited report ids.
+    const sessionMsgs = db.prepare(
+      "SELECT content FROM chat_messages WHERE session_id = ? AND role = 'assistant' ORDER BY created_at"
+    ).all(sessionId) as Array<{ content: string }>
     for (const msg of sessionMsgs) {
       const uuidMatches = msg.content.match(UUID_RE) || []
       sourceIds.push(...uuidMatches)
+    }
+
+    // ALSO scan tool_call_logs — vector_search / intel_search / entity_lookup
+    // now emit trailing [id:<uuid>] markers for each returned report. The LLM
+    // text alone often omits explicit ids, so this is the primary signal.
+    const toolLogs = db.prepare(
+      "SELECT result FROM tool_call_logs WHERE session_id = ? AND tool_name IN ('vector_search', 'intel_search', 'entity_lookup', 'graph_query') AND result IS NOT NULL"
+    ).all(sessionId) as Array<{ result: string }>
+    for (const log of toolLogs) {
+      const ids = (log.result || '').match(UUID_RE) || []
+      sourceIds.push(...ids)
     }
     // Dedupe + keep only ids that actually exist in intel_reports so the
     // link target is a live node. Without this check, citations that refer

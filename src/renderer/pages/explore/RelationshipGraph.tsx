@@ -29,19 +29,20 @@ const DISCIPLINE_COLORS: Record<string, string> = {
   osint: '#3b82f6', cybint: '#ef4444', finint: '#10b981', socmint: '#8b5cf6',
   geoint: '#f59e0b', sigint: '#06b6d4', rumint: '#f97316', ci: '#ec4899',
   agency: '#6366f1', imint: '#14b8a6',
-  preliminary: '#a78bfa', gap: '#fb923c', humint: '#fbbf24'
+  preliminary: '#a78bfa', gap: '#fb923c', humint: '#fbbf24', action: '#22d3ee'
 }
 
 const SEVERITY_SIZE: Record<string, number> = {
   critical: 10, high: 8, medium: 7, low: 6, info: 5
 }
 
-// Icons drawn inside each node. Preliminary / HUMINT / Gap have explicit
-// types; regular intel falls back to its discipline emoji.
+// Icons drawn inside each node. Preliminary / HUMINT / Gap / Action have
+// explicit types; regular intel falls back to its discipline emoji.
 const TYPE_ICONS: Record<string, string> = {
   preliminary: '📋',
   humint: '🔰',
-  gap: '⚠️'
+  gap: '⚠️',
+  action: '📌'
 }
 const DISCIPLINE_ICONS: Record<string, string> = {
   osint: '🌐',
@@ -67,6 +68,7 @@ const LINK_COLORS: Record<string, string> = {
   temporal: '#6b7280',
   preliminary_reference: '#a78bfa',
   gap_identified: '#fb923c',
+  action_identified: '#22d3ee',
   humint_source: '#fbbf24',
   humint_preliminary: '#f59e0b',
   humint_cross_session: '#eab308'
@@ -77,6 +79,7 @@ const LINK_LABELS: Record<string, string> = {
   temporal: 'Temporal',
   preliminary_reference: 'Preliminary Ref',
   gap_identified: 'Info Gap',
+  action_identified: 'Action Item',
   humint_source: 'HUMINT Source',
   humint_preliminary: 'HUMINT Prelim',
   humint_cross_session: 'HUMINT Cross-Session'
