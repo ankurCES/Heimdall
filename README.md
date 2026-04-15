@@ -9,7 +9,7 @@
   <a href="https://github.com/ankurCES/Heimdall/releases"><img src="https://img.shields.io/github/v/release/ankurCES/Heimdall?style=flat-square" alt="Release" /></a>
   <a href="https://github.com/ankurCES/Heimdall/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue?style=flat-square" alt="License" /></a>
   <img src="https://img.shields.io/badge/platform-macOS%20|%20Windows%20|%20Linux-lightgrey?style=flat-square" alt="Platform" />
-  <img src="https://img.shields.io/badge/collectors-42%2B-green?style=flat-square" alt="Collectors" />
+  <img src="https://img.shields.io/badge/collectors-50%2B-green?style=flat-square" alt="Collectors" />
 </p>
 
 ---
@@ -22,26 +22,49 @@ Built with Electron + React + TypeScript. Runs entirely on your machine — no c
 
 ## Screenshots
 
-> The app includes 16 pages: Dashboard, Intel Feed, Browse Intel, Sources, Alerts, Threat Map, Meshtastic, Obsidian Vault, Chat, Explore (Charts + Graph), Enriched Data, Watch Terms, Sync Center, Token Usage, Audit Log, and Settings.
+> The app includes 17 pages organized into 5 sidebar groups: **Overview** (Dashboard, Intel Feed, Map, Markets), **Intelligence** (Browse Intel, Enriched Data, Watch Terms, Explore), **Sources & Sync** (Sources, Sync Center, Obsidian Vault), **AI & Comms** (Chat, Alerts, Meshtastic), **System** (Token Usage, Audit Log, Settings).
 
 ---
 
 ## Features
 
-### Intelligence Collection (42+ Sources)
+### Intelligence Collection (50+ Sources)
 
 | Discipline | Sources | Examples |
 |-----------|---------|----------|
-| **OSINT** | 12 | RSS feeds (BBC, NYT, Al Jazeera), GDELT, GNews, Factbook, Public Records, arXiv, Polymarket predictions |
-| **CYBINT** | 7 | NVD CVEs, abuse.ch (URLhaus, Feodo Tracker), SANS ISC, Ransomware.live, C2IntelFeeds, Internet outage detection (IODA) |
-| **FININT** | 3 | SEC EDGAR filings, OFAC sanctions, Yahoo Finance commodities (14 futures) |
-| **SOCMINT** | 3 | Reddit (public JSON), Telegram channels, Twitter/X |
+| **OSINT** | 13 | RSS feeds (BBC, NYT, Al Jazeera), GDELT, GNews, Factbook, Public Records, arXiv, Polymarket predictions |
+| **CYBINT** | 8 | NVD CVEs, abuse.ch (URLhaus, Feodo Tracker), SANS ISC, Ransomware.live, C2IntelFeeds, Internet outage detection (IODA) |
+| **FININT** | 6 | SEC EDGAR filings, OFAC sanctions, Yahoo Finance commodities (14 futures), MFAPI Indian mutual funds, Alpaca US stocks, Alpaca crypto |
+| **SOCMINT** | 4 | Reddit (public JSON), Telegram channels (Bot API + public scraper), Twitter/X |
 | **GEOINT** | 8 | USGS earthquakes, NOAA weather, NASA FIRMS wildfires, NASA EONET, GDACS disaster alerts, Safecast radiation, Open-Meteo climate anomalies, Sentinel satellite |
 | **SIGINT** | 8 | ADS-B aircraft (adsb.lol), ISS tracking, AIS maritime vessels, Meshtastic LoRa mesh, FCC licenses, FAA airport delays, maritime chokepoints |
 | **RUMINT** | 3 | Forum monitoring, Reddit unverified tips, leak/whistleblower feeds |
 | **CI** | 2 | HaveIBeenPwned breaches, breach news feeds |
 | **Agency** | 5 | Interpol, FBI Most Wanted, Europol, UN Security Council, government travel advisories (UK FCDO + AU DFAT) |
 | **IMINT** | 2 | Traffic cameras (DOT feeds), public webcams with LLM vision analysis |
+| **Custom** | ∞ | User-addable: Generic JSON API (JSONPath + field map), Telegram channel scraper, GitHub repo monitor (releases/security/commits/files), RSS/Atom feeds |
+
+### Custom Intel Channels (User-Addable)
+
+Add your own intelligence sources via UI without touching code:
+
+- **Generic JSON API** — any REST API with JSONPath selector and field mapping. API keys live in Settings (`settings:apikeys.X` references)
+- **Telegram channels** — public preview scraper, no Bot API needed
+- **GitHub repos** — monitor releases, security advisories, commits, issues, or specific JSON files
+- **RSS/Atom feeds** — any feed URL via UI
+- **Source Preset Gallery** — 30+ curated one-click sources: Bellingcat Telegram, OSINT Defender, CISA advisories, MITRE ATT&CK, Sigma rules, Krebs on Security, Talos, Mandiant, MFAPI funds, Alpaca markets, etc.
+- **Live "Test Source"** before saving — preview sample reports
+
+### Markets Dashboard
+
+Dedicated trader-style dashboard surfacing all financial intel:
+
+- **KPI strip**: VIX, USD Index, Gold, WTI Crude, Top Mover, Sanctions count
+- **Sector heatmap**: 14 commodities color-coded by % change (red→green divergent)
+- **Multi-asset price chart**: Toggle commodities/stocks/crypto/funds, normalized vs raw, ranges 24h / 7d / 30d / 90d / 1y / 5y
+- **Geopolitical context panels**: Recent SEC filings, OFAC+UN sanctions, Polymarket geopolitical contracts
+- **Detail drawer**: Click any commodity → 30-day chart + significant moves table + related intel
+- **5-Year historical backfill**: One-click button pulls ~50K daily bars from Yahoo Finance, Alpaca, MFAPI
 
 ### AI-Powered Chat
 
@@ -53,6 +76,19 @@ Built with Electron + React + TypeScript. Runs entirely on your machine — no c
 - **Preliminary reports**: Auto-extract recommended actions and information gaps
 - **Collapsible thinking blocks**: See the AI's planning, research, and analysis steps
 
+### Operations Center Dashboard
+
+SOC-style overview with 4 zones, auto-refreshing every 30s:
+
+- **6 KPI cards**: Total reports, Critical (24h), 7-day trend, Knowledge graph size, Active sources, Tag count
+- **Stacked hourly activity chart**: 24-hour timeline by severity
+- **Discipline distribution**: Doughnut chart across 10 disciplines
+- **Geo heatmap**: Mini Leaflet map with severity-colored circles for last-24h critical/high events
+- **Top entities**: Threat actors, malware, countries, CVEs by mention count (7d)
+- **Top sources**: 24h volume with horizontal bar fill colored by discipline
+- **Top market movers**: Sorted by |% change| with arrow indicators
+- **Critical activity timeline**: 12 most recent high+critical events
+
 ### Geospatial Threat Map
 
 - **Leaflet** dark-themed map with 2000+ geo-tagged intel markers
@@ -60,6 +96,15 @@ Built with Electron + React + TypeScript. Runs entirely on your machine — no c
 - **ADS-B & ISS trajectory paths**: Smooth great-circle interpolated dotted lines with distinct colors per aircraft/satellite
 - **Meshtastic mesh nodes**: Real-time node positions with battery/SNR telemetry
 - **Layer toggles**: Enable/disable any discipline or trajectory paths
+
+### Sidebar & Navigation
+
+- **Grouped categories**: 5 logical groups (Overview, Intelligence, Sources & Sync, AI & Comms, System)
+- **Collapsible mini mode**: Toggle to 56px icon-only sidebar with hover tooltips
+- **Per-group collapse**: Each group has a chevron to fold its items
+- **State persistence**: Sidebar collapse state and per-group fold state saved to localStorage
+- **Mobile drawer**: Sidebar slides in from a hamburger button on screens < 768px
+- **Heimdall logo** + "Always vigilant" tagline at top
 
 ### Enrichment Pipeline
 
