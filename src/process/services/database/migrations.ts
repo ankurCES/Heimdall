@@ -1189,6 +1189,58 @@ const migrations: Migration[] = [
 
       log.info('Migration 020: canonical_entities + entity_resolution_runs tables + canonical_id column on intel_entities')
     }
+  },
+  {
+    version: '021',
+    name: 'deception_scoring',
+    up: (db) => {
+      // Counter-intelligence scoring — Theme 6.1 + 6.3 of the agency roadmap.
+      //
+      // Per-report linguistic deception score + flag breakdown. Scores run
+      // from 0 (no flags) to 100 (heavy multiple-flag signal). Individual
+      // heuristic flags are stored as a JSON array so the UI can show the
+      // exact reasons.
+      //
+      // `source_bias_flags` holds the known-state-aligned source list with
+      // per-source bias direction (pro-kremlin / pro-beijing / pro-tehran /
+      // pro-pyongyang / pro-hamas / etc). Population is seeded in code on
+      // first use rather than hardcoded here, so deployers can extend it
+      // without a new migration.
+
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS deception_scores (
+          report_id TEXT PRIMARY KEY,
+          overall_score REAL NOT NULL DEFAULT 0,
+          flags TEXT NOT NULL DEFAULT '[]',
+          word_count INTEGER NOT NULL DEFAULT 0,
+          computed_at INTEGER NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_deception_score ON deception_scores(overall_score DESC);
+
+        CREATE TABLE IF NOT EXISTS source_bias_flags (
+          id TEXT PRIMARY KEY,
+          match_type TEXT NOT NULL,
+          match_value TEXT NOT NULL,
+          bias_direction TEXT NOT NULL,
+          note TEXT,
+          created_at INTEGER NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_sbias_match ON source_bias_flags(match_type, match_value);
+
+        CREATE TABLE IF NOT EXISTS counterintel_runs (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          started_at INTEGER NOT NULL,
+          finished_at INTEGER,
+          reports_scored INTEGER,
+          avg_score REAL,
+          high_flag_count INTEGER,
+          duration_ms INTEGER,
+          error TEXT
+        );
+      `)
+
+      log.info('Migration 021: deception_scores + source_bias_flags + counterintel_runs tables created')
+    }
   }
 ]
 

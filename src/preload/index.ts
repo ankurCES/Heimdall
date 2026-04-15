@@ -48,7 +48,9 @@ const testChannels = [
   'network:refresh', 'network:latest', 'network:top',
   'network:communities', 'network:node', 'network:search', 'network:predict',
   'entity:resolve', 'entity:latest', 'entity:top', 'entity:types',
-  'entity:aliases', 'entity:reports'
+  'entity:aliases', 'entity:reports',
+  'ci:analyze', 'ci:latest', 'ci:top', 'ci:for_report',
+  'ci:state_media', 'ci:bias_list'
 ]
 const allowedChannels = [...Object.values(IPC_CHANNELS), ...testChannels]
 const chatEvents = ['chat:chunk', 'chat:done', 'chat:error']
