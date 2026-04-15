@@ -42,7 +42,9 @@ const testChannels = [
   'compartments:list', 'compartments:list_with_grants', 'compartments:get',
   'compartments:create', 'compartments:update', 'compartments:delete',
   'compartments:grant', 'compartments:revoke', 'compartments:granted_ids',
-  'compartments:tag', 'compartments:get_for_artifact'
+  'compartments:tag', 'compartments:get_for_artifact',
+  'encryption:status', 'encryption:unlock', 'encryption:enable',
+  'encryption:change', 'encryption:finish_boot'
 ]
 const allowedChannels = [...Object.values(IPC_CHANNELS), ...testChannels]
 const chatEvents = ['chat:chunk', 'chat:done', 'chat:error']

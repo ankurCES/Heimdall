@@ -136,6 +136,7 @@ export function SafetyTab() {
       </Button>
 
       <ClearanceCard />
+      <EncryptionCard />
     </div>
   )
 }
@@ -215,6 +216,163 @@ function ClearanceCard() {
             <li><span className="font-mono">TOP SECRET</span> — could cause exceptionally grave damage</li>
           </ul>
           <p className="mt-3 italic">Every classification change is recorded in the tamper-evident audit chain (Audit Log → Tamper-Evident Chain).</p>
+        </div>
+      </CardContent>
+    </Card>
+  )
+}
+
+/**
+ * At-rest encryption (SQLCipher, Theme 10.3). One-click enable; subsequent
+ * launches prompt for passphrase before any DB access. Passphrase is never
+ * stored — SQLCipher derives the key at unlock time via PBKDF2-HMAC-SHA512
+ * (256 000 iterations, 16-byte salt in the DB header).
+ */
+function EncryptionCard() {
+  const [status, setStatus] = useState<{ enabled: boolean; enabled_at: number | null; db_path: string } | null>(null)
+  const [busy, setBusy] = useState(false)
+  const [enableOpen, setEnableOpen] = useState(false)
+  const [changeOpen, setChangeOpen] = useState(false)
+  const [pp1, setPp1] = useState('')
+  const [pp2, setPp2] = useState('')
+  const [oldPp, setOldPp] = useState('')
+  const [error, setError] = useState<string | null>(null)
+  const [notice, setNotice] = useState<string | null>(null)
+
+  useEffect(() => { void refresh() }, [])
+
+  async function refresh() {
+    try {
+      const s = await window.heimdall.invoke('encryption:status') as { enabled: boolean; enabled_at: number | null; db_path: string }
+      setStatus(s)
+    } catch { /* noop */ }
+  }
+
+  const submitEnable = async () => {
+    setError(null)
+    if (pp1.length < 8) return setError('Passphrase must be at least 8 characters.')
+    if (pp1 !== pp2) return setError('Passphrases do not match.')
+    setBusy(true)
+    try {
+      await window.heimdall.invoke('encryption:enable', pp1)
+      setNotice('Encryption enabled. On next launch you will be prompted for this passphrase before the database unlocks.')
+      setEnableOpen(false); setPp1(''); setPp2('')
+      await refresh()
+    } catch (err) {
+      setError(String(err).replace(/^Error:\s*/, ''))
+    } finally { setBusy(false) }
+  }
+
+  const submitChange = async () => {
+    setError(null)
+    if (pp1.length < 8) return setError('New passphrase must be at least 8 characters.')
+    if (pp1 !== pp2) return setError('New passphrases do not match.')
+    setBusy(true)
+    try {
+      await window.heimdall.invoke('encryption:change', { old: oldPp, next: pp1 })
+      setNotice('Passphrase changed. Remember the new passphrase — there is no recovery path.')
+      setChangeOpen(false); setOldPp(''); setPp1(''); setPp2('')
+      await refresh()
+    } catch (err) {
+      setError(String(err).replace(/^Error:\s*/, ''))
+    } finally { setBusy(false) }
+  }
+
+  return (
+    <Card>
+      <CardHeader>
+        <div className="flex items-center gap-2">
+          <Lock className="h-5 w-5 text-muted-foreground" />
+          <CardTitle className="text-base">At-rest Encryption (SQLCipher)</CardTitle>
+        </div>
+        <CardDescription>
+          Encrypt the local SQLite database with a passphrase. On subsequent
+          launches Heimdall stays locked until you type it in. Passphrase is
+          never stored anywhere — lose it and the data is unrecoverable.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        <div className="flex items-center gap-3 p-3 rounded border border-border bg-card/30">
+          <div className={`h-2 w-2 rounded-full ${status?.enabled ? 'bg-emerald-500' : 'bg-muted-foreground'}`} />
+          <div className="flex-1">
+            <div className="text-sm font-medium">
+              {status == null ? 'Loading…' : status.enabled ? 'Encryption enabled' : 'Encryption disabled'}
+            </div>
+            <div className="text-[10px] font-mono text-muted-foreground break-all">{status?.db_path}</div>
+          </div>
+          {status && !status.enabled && (
+            <Button size="sm" onClick={() => { setEnableOpen(true); setError(null); setNotice(null) }}>
+              <Lock className="h-3.5 w-3.5 mr-1.5" />Enable
+            </Button>
+          )}
+          {status && status.enabled && (
+            <Button size="sm" variant="outline" onClick={() => { setChangeOpen(true); setError(null); setNotice(null) }}>
+              Change passphrase
+            </Button>
+          )}
+        </div>
+
+        {notice && (
+          <div className="text-xs p-2 rounded bg-emerald-500/10 border border-emerald-500/30 text-emerald-300">
+            {notice}
+          </div>
+        )}
+
+        {enableOpen && (
+          <div className="p-3 rounded border border-amber-500/40 bg-amber-500/5 space-y-3">
+            <p className="text-xs text-amber-200">
+              ⚠ Encryption is a one-way action in this release. A plaintext backup of
+              your current database will be preserved next to it (look for
+              <code className="mx-1 font-mono">heimdall.db.backup-&lt;timestamp&gt;</code>)
+              so you can roll back manually if something goes wrong. The migration
+              may take a few seconds on larger databases.
+            </p>
+            <div>
+              <Label>New passphrase (min 8 chars)</Label>
+              <Input type="password" value={pp1} onChange={(e) => setPp1(e.target.value)} />
+            </div>
+            <div>
+              <Label>Confirm passphrase</Label>
+              <Input type="password" value={pp2} onChange={(e) => setPp2(e.target.value)} />
+            </div>
+            {error && <p className="text-xs text-red-300">{error}</p>}
+            <div className="flex gap-2 justify-end">
+              <Button size="sm" variant="ghost" onClick={() => { setEnableOpen(false); setError(null) }}>Cancel</Button>
+              <Button size="sm" onClick={submitEnable} disabled={busy || !pp1 || !pp2}>
+                {busy ? 'Encrypting…' : 'Enable encryption'}
+              </Button>
+            </div>
+          </div>
+        )}
+
+        {changeOpen && (
+          <div className="p-3 rounded border border-border bg-card/30 space-y-3">
+            <div>
+              <Label>Current passphrase</Label>
+              <Input type="password" value={oldPp} onChange={(e) => setOldPp(e.target.value)} />
+            </div>
+            <div>
+              <Label>New passphrase (min 8 chars)</Label>
+              <Input type="password" value={pp1} onChange={(e) => setPp1(e.target.value)} />
+            </div>
+            <div>
+              <Label>Confirm new passphrase</Label>
+              <Input type="password" value={pp2} onChange={(e) => setPp2(e.target.value)} />
+            </div>
+            {error && <p className="text-xs text-red-300">{error}</p>}
+            <div className="flex gap-2 justify-end">
+              <Button size="sm" variant="ghost" onClick={() => { setChangeOpen(false); setError(null) }}>Cancel</Button>
+              <Button size="sm" onClick={submitChange} disabled={busy || !oldPp || !pp1 || !pp2}>
+                {busy ? 'Rekeying…' : 'Change passphrase'}
+              </Button>
+            </div>
+          </div>
+        )}
+
+        <div className="text-[10px] text-muted-foreground pt-2 border-t border-border space-y-1">
+          <p><strong>Algorithm:</strong> SQLCipher 4.x default — AES-256-CBC + HMAC-SHA512 per page, PBKDF2-HMAC-SHA512 KDF with 256 000 iterations and a 16-byte random salt stored in the DB header.</p>
+          <p><strong>Scope:</strong> encrypts every byte of <code className="font-mono">heimdall.db</code> and its WAL/SHM companions. Vector index, Obsidian vault cache, and settings DB are <em>not</em> covered by this batch.</p>
+          <p><strong>Recovery:</strong> none. Lose the passphrase → lose the data. Store it in a password manager or secure paper backup.</p>
         </div>
       </CardContent>
     </Card>

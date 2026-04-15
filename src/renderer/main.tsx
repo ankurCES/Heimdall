@@ -23,6 +23,7 @@ import { IwPage } from './pages/iw/IwPage'
 import { AchPage } from './pages/ach/AchPage'
 import { Toaster } from 'sonner'
 import { NotificationListener } from './components/NotificationListener'
+import { UnlockGate } from './components/UnlockGate'
 import './styles/globals.css'
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
@@ -37,6 +38,7 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
           style: { background: 'hsl(222 47% 8%)', border: '1px solid hsl(217 33% 17%)', color: 'hsl(210 40% 93%)' }
         }}
       />
+      <UnlockGate>
       <NotificationListener />
       <Routes>
         <Route element={<Layout />}>
@@ -61,6 +63,7 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
           <Route path="/settings" element={<SettingsPage />} />
         </Route>
       </Routes>
+      </UnlockGate>
     </HashRouter>
   </React.StrictMode>
 )

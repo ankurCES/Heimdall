@@ -2,8 +2,10 @@ import { app, BrowserWindow, shell } from 'electron'
 import { join } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import log from 'electron-log'
-import { initDatabase, closeDatabase } from './services/database'
+import { initDatabase, closeDatabase, isDatabaseReady } from './services/database'
 import { registerAllBridges } from './bridge'
+import { registerEncryptionBridge } from './bridge/encryptionBridge'
+import { encryptionService } from './services/security/EncryptionService'
 import { registerAllCollectors } from './collectors/registry'
 import { collectorManager } from './collectors/CollectorManager'
 import { safeFetcher } from './collectors/SafeFetcher'
@@ -34,10 +36,33 @@ let mainWindow: BrowserWindow | null = null
 async function initializeEssentials(): Promise<void> {
   log.info('Heimdall starting — Phase 1: Essentials')
 
+  // Encryption gate: if the user has enabled at-rest encryption, the DB stays
+  // locked until the renderer hands us a passphrase via encryption:unlock.
+  // In that mode we register only the encryption bridge; the rest wait until
+  // unlock completes (see initializeAfterUnlock below).
+  if (encryptionService.isEnabled()) {
+    log.info('Encryption is enabled — deferring DB init until unlock')
+    registerEncryptionBridge()
+    return
+  }
+
   initDatabase()
+  registerEncryptionBridge()
   registerAllBridges()
 
   log.info('Essentials initialized')
+}
+
+async function initializeAfterUnlock(): Promise<void> {
+  log.info('Heimdall — finishing boot after unlock')
+  // DB was opened by encryptionService.unlock() during the unlock call.
+  if (!isDatabaseReady()) {
+    log.error('initializeAfterUnlock called with no live DB — aborting')
+    return
+  }
+  registerAllBridges()
+  await initializeDeferred()
+  log.info('Post-unlock boot complete')
 }
 
 async function initializeDeferred(): Promise<void> {
@@ -165,7 +190,17 @@ if (!gotTheLock) {
 
     await initializeEssentials()
     createWindow()
-    await initializeDeferred()
+
+    if (isDatabaseReady()) {
+      // Unencrypted boot — run deferred init immediately.
+      await initializeDeferred()
+    } else {
+      // Encrypted boot — wait for the renderer to call encryption:unlock.
+      // `heimdall-unlocked` is emitted by encryptionBridge on finish_boot.
+      app.once('heimdall-unlocked', () => {
+        initializeAfterUnlock().catch((err) => log.error(`post-unlock init failed: ${err}`))
+      })
+    }
 
     app.on('activate', () => {
       if (BrowserWindow.getAllWindows().length === 0) {
