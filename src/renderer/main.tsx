@@ -21,6 +21,7 @@ import { WatchPage } from './pages/watch/WatchPage'
 import { MarketsPage } from './pages/markets/MarketsPage'
 import { IwPage } from './pages/iw/IwPage'
 import { AchPage } from './pages/ach/AchPage'
+import { NetworkPage } from './pages/network/NetworkPage'
 import { Toaster } from 'sonner'
 import { NotificationListener } from './components/NotificationListener'
 import { UnlockGate } from './components/UnlockGate'
@@ -57,6 +58,7 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
           <Route path="/watch" element={<WatchPage />} />
           <Route path="/iw" element={<IwPage />} />
           <Route path="/ach" element={<AchPage />} />
+          <Route path="/network" element={<NetworkPage />} />
           <Route path="/sync" element={<SyncPage />} />
           <Route path="/tokens" element={<TokensPage />} />
           <Route path="/audit" element={<AuditPage />} />

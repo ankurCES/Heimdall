@@ -1076,6 +1076,55 @@ const migrations: Migration[] = [
 
       log.info(`Migration 018: compartments + compartment_grants tables created; compartments column added to ${added} artifact tables`)
     }
+  },
+  {
+    version: '019',
+    name: 'network_metrics',
+    up: (db) => {
+      // Cached centrality + community assignments — Theme 4.1 + 4.2 of the
+      // agency roadmap. Computing PageRank / betweenness / Louvain on every
+      // request would be wasteful; we cache the most recent run per node
+      // and expose a "refresh" action in the UI.
+      //
+      // node_id refers to any artifact in the relationship graph — an
+      // intel_report, preliminary_report, humint_report, or intel_gap.
+      // node_type disambiguates across those tables. The `computed_at`
+      // column is replicated per row so a partial refresh is still
+      // straightforward to reason about.
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS network_metrics (
+          node_id TEXT NOT NULL,
+          node_type TEXT NOT NULL,
+          degree REAL NOT NULL DEFAULT 0,
+          pagerank REAL NOT NULL DEFAULT 0,
+          betweenness REAL NOT NULL DEFAULT 0,
+          eigenvector REAL NOT NULL DEFAULT 0,
+          community_id INTEGER,
+          label TEXT,
+          discipline TEXT,
+          computed_at INTEGER NOT NULL,
+          PRIMARY KEY (node_id, node_type)
+        );
+        CREATE INDEX IF NOT EXISTS idx_network_metrics_pagerank ON network_metrics(pagerank DESC);
+        CREATE INDEX IF NOT EXISTS idx_network_metrics_betweenness ON network_metrics(betweenness DESC);
+        CREATE INDEX IF NOT EXISTS idx_network_metrics_degree ON network_metrics(degree DESC);
+        CREATE INDEX IF NOT EXISTS idx_network_metrics_community ON network_metrics(community_id);
+
+        CREATE TABLE IF NOT EXISTS network_runs (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          started_at INTEGER NOT NULL,
+          finished_at INTEGER,
+          node_count INTEGER,
+          edge_count INTEGER,
+          community_count INTEGER,
+          modularity REAL,
+          duration_ms INTEGER,
+          error TEXT
+        );
+      `)
+
+      log.info('Migration 019: network_metrics + network_runs tables created')
+    }
   }
 ]
 
