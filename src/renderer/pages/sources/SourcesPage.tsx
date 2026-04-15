@@ -13,6 +13,8 @@ import { DISCIPLINE_LABELS, type Discipline, type Source } from '@common/types/i
 import { formatRelativeTime } from '@renderer/lib/utils'
 import { ipc } from '@renderer/lib/ipc'
 import { cn } from '@renderer/lib/utils'
+import { Select, SelectContent, SelectItem, SelectTrigger } from '@renderer/components/ui/select'
+import { RELIABILITY_LABELS, RELIABILITY_DESCRIPTIONS, type AdmiraltyReliability } from '@renderer/components/StanagBadge'
 
 const DISCIPLINE_COLORS: Record<string, string> = {
   osint: 'bg-blue-500', cybint: 'bg-red-500', finint: 'bg-emerald-500', socmint: 'bg-violet-500',
@@ -215,6 +217,7 @@ export function SourcesPage() {
                       <div className="flex items-center gap-2">
                         <span className="text-sm font-medium">{source.name}</span>
                         <Badge variant="outline" className="text-[9px] py-0 px-1 font-mono">{source.type}</Badge>
+                        <ReliabilityPicker source={source} onChange={() => fetchSources()} />
                       </div>
                       <div className="flex items-center gap-3 mt-0.5 text-[10px] text-muted-foreground">
                         {source.schedule && (
@@ -275,5 +278,50 @@ export function SourcesPage() {
         </Card>
       ))}
     </div>
+  )
+}
+
+const RELIABILITY_PILL_COLORS: Record<AdmiraltyReliability, string> = {
+  A: 'border-emerald-500/40 bg-emerald-500/15 text-emerald-300',
+  B: 'border-green-500/40 bg-green-500/15 text-green-300',
+  C: 'border-yellow-500/40 bg-yellow-500/15 text-yellow-300',
+  D: 'border-orange-500/40 bg-orange-500/15 text-orange-300',
+  E: 'border-red-500/40 bg-red-500/15 text-red-300',
+  F: 'border-slate-500/40 bg-slate-500/15 text-slate-300'
+}
+
+/**
+ * Compact A–F reliability picker shown inline next to each source name.
+ * Lets analysts override the migration's seeded defaults; persists via
+ * `sources:update` IPC.
+ */
+function ReliabilityPicker({ source, onChange }: { source: Source; onChange: () => void }) {
+  const value = source.admiralty_reliability || 'F'
+  const handle = async (v: string) => {
+    const r = v === '_' ? null : (v as AdmiraltyReliability)
+    await ipc.sources.update(source.id, { admiralty_reliability: r })
+    onChange()
+  }
+  const tooltip = `STANAG 2511 source reliability:\n${value} = ${RELIABILITY_LABELS[value as AdmiraltyReliability]}\n  ${RELIABILITY_DESCRIPTIONS[value as AdmiraltyReliability]}\nClick to change.`
+  return (
+    <Select value={value} onValueChange={handle}>
+      <SelectTrigger
+        className={cn('h-5 w-9 px-1.5 py-0 text-[10px] font-mono font-bold border [&>svg]:hidden cursor-pointer', RELIABILITY_PILL_COLORS[value as AdmiraltyReliability])}
+        title={tooltip}
+      >
+        {value}
+      </SelectTrigger>
+      <SelectContent>
+        {(['A', 'B', 'C', 'D', 'E', 'F'] as AdmiraltyReliability[]).map((r) => (
+          <SelectItem key={r} value={r}>
+            <span className="font-mono font-bold mr-2">{r}</span>
+            <span className="text-xs">{RELIABILITY_LABELS[r]}</span>
+          </SelectItem>
+        ))}
+        <SelectItem value="_">
+          <span className="text-xs italic text-muted-foreground">Clear rating</span>
+        </SelectItem>
+      </SelectContent>
+    </Select>
   )
 }

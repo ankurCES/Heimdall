@@ -13,6 +13,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { DISCIPLINE_LABELS, type Discipline, type ThreatLevel, type IntelReport } from '@common/types/intel'
 import { formatRelativeTime } from '@renderer/lib/utils'
 import { cn } from '@renderer/lib/utils'
+import { StanagBadge } from '@renderer/components/StanagBadge'
 
 const SEVERITY_BADGE: Record<ThreatLevel, { variant: 'destructive' | 'warning' | 'default' | 'secondary' | 'outline'; label: string }> = {
   critical: { variant: 'destructive', label: 'CRITICAL' },
@@ -198,6 +199,7 @@ export function FeedPage() {
                       <div className="flex items-center gap-2 mt-1">
                         <Badge variant={sevBadge.variant} className="text-[9px] py-0 px-1.5">{sevBadge.label}</Badge>
                         <Badge variant="outline" className="text-[9px] py-0 px-1.5 font-mono">{report.discipline}</Badge>
+                        <StanagBadge reliability={report.sourceReliability} credibility={report.credibility} />
                         <span className="text-[10px] text-muted-foreground">{report.sourceName}</span>
                         <span className="text-[10px] text-muted-foreground ml-auto">{formatRelativeTime(report.createdAt)}</span>
                       </div>
@@ -262,9 +264,10 @@ function ReportDetail({ report, onMarkReviewed }: { report: IntelReport; onMarkR
     <div className="p-4 space-y-4">
       {/* Header */}
       <div>
-        <div className="flex items-center gap-2 mb-2">
+        <div className="flex items-center gap-2 mb-2 flex-wrap">
           <Badge variant={sevBadge.variant}>{sevBadge.label}</Badge>
           <Badge variant="outline" className="font-mono text-xs">{report.discipline.toUpperCase()}</Badge>
+          <StanagBadge reliability={report.sourceReliability} credibility={report.credibility} size="md" />
           {report.reviewed && <Badge variant="success">Reviewed</Badge>}
         </div>
         <h2 className="text-lg font-semibold leading-tight">{report.title}</h2>
@@ -276,6 +279,10 @@ function ReportDetail({ report, onMarkReviewed }: { report: IntelReport; onMarkR
           <div className="flex justify-between">
             <span className="text-muted-foreground">Source</span>
             <span>{report.sourceName}</span>
+          </div>
+          <div className="flex justify-between">
+            <span className="text-muted-foreground">STANAG 2511</span>
+            <span className="font-mono">{report.sourceReliability || 'F'}{report.credibility || 6} ({((['', 'Confirmed', 'Probably true', 'Possibly true', 'Doubtfully true', 'Improbable', 'Cannot judge'][report.credibility || 6]) || 'Cannot judge')})</span>
           </div>
           <div className="flex justify-between">
             <span className="text-muted-foreground">Verification</span>

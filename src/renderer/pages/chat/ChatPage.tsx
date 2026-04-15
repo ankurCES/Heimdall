@@ -11,6 +11,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Switch } from '@renderer/components/ui/switch'
 import { Label } from '@renderer/components/ui/label'
 import { MarkdownRenderer } from '@renderer/components/MarkdownRenderer'
+import { IcdProbabilityHints } from '@renderer/components/IcdProbabilityHints'
 import { ThinkingBlocks } from '@renderer/components/ThinkingBlock'
 import { TagEntityPicker } from '@renderer/components/TagEntityPicker'
 import { cn } from '@renderer/lib/utils'
@@ -416,6 +417,11 @@ export function ChatPage() {
                 ) : (<>
                   <div className="px-4 py-3">
                     <ThinkingBlocks content={msg.content} isStreaming={false} />
+                    {/* ICD 203 lint — surfaces ambiguous probability words
+                        (likely / could / possibly) with the canonical
+                        estimative-probability alternatives. Renders nothing
+                        if the message is clean. */}
+                    <IcdProbabilityHints content={msg.content} />
                   </div>
                   {msg.content.length > 200 && (
                     <div className="border-t border-border/50 px-4 py-2 flex items-center justify-between">

@@ -538,6 +538,141 @@ const migrations: Migration[] = [
       const r2 = db.prepare("DROP TABLE IF EXISTS graph_sync_log").run()
       log.info(`Migration 012: removed ${r1.changes} kuzu settings rows; dropped graph_sync_log table (${r2.changes} effect)`)
     }
+  },
+  {
+    version: '013',
+    name: 'admiralty_source_rating_and_credibility',
+    up: (db) => {
+      // NATO STANAG 2511 / Admiralty Code two-axis intelligence rating.
+      //
+      //   Source reliability (A–F):
+      //     A = Completely reliable    (sole authority, history of total reliability)
+      //     B = Usually reliable       (history of mostly correct information)
+      //     C = Fairly reliable        (some past success, occasional doubt)
+      //     D = Not usually reliable   (mostly invalid in the past)
+      //     E = Unreliable             (lack of authenticity / proven invalid)
+      //     F = Reliability unknown    (cannot be judged)
+      //
+      //   Information credibility (1–6):
+      //     1 = Confirmed by other independent sources
+      //     2 = Probably true (logical, consistent with other intel)
+      //     3 = Possibly true (reasonably logical, agrees with some intel)
+      //     4 = Doubtfully true (not logical but possible, no other evidence)
+      //     5 = Improbable (illogical, contradicted by other intel)
+      //     6 = Truth cannot be judged
+      //
+      // Reports carry a combined rating like "B2" (usually-reliable source,
+      // probably-true information). The flat 0–100 verification_score remains
+      // for backward compat but is no longer the primary trust signal.
+
+      // Backwards-compat: ALTER TABLE only adds nullable columns; no data loss.
+      try { db.exec(`ALTER TABLE sources ADD COLUMN admiralty_reliability TEXT`) } catch {}
+      try { db.exec(`ALTER TABLE sources ADD COLUMN admiralty_reliability_set_at INTEGER`) } catch {}
+      try { db.exec(`ALTER TABLE intel_reports ADD COLUMN credibility INTEGER`) } catch {}
+      try { db.exec(`ALTER TABLE intel_reports ADD COLUMN credibility_computed_at INTEGER`) } catch {}
+
+      // Backfill source reliability from known defaults — start with the
+      // most common 50+ seeded sources. Anything else stays NULL (= F,
+      // analyst must judge). This list was distilled from the seeded
+      // collectors by category — government / wire-service primaries are
+      // B, well-known OSINT analysts are C, anonymous tip feeds are E,
+      // F is the explicit "unknown" sentinel.
+      const RELIABILITY_DEFAULTS: Array<[string, string]> = [
+        // A — Completely reliable: official primary records
+        ['SEC EDGAR', 'A'],
+        ['UN Security Council Sanctions', 'A'],
+        ['OFAC Sanctions', 'A'],
+        ['NVD CVE', 'A'],
+        ['CISA Cybersecurity Advisories', 'A'],
+        ['CISA ICS Advisories', 'A'],
+        ['Federal Register', 'A'],
+        ['USGS Earthquake', 'A'],
+        ['NOAA Weather', 'A'],
+        ['NASA FIRMS', 'A'],
+        ['NASA EONET', 'A'],
+        ['GDACS', 'A'],
+        ['Interpol', 'A'],
+        ['FBI', 'A'],
+        ['Europol', 'A'],
+        ['UK FCDO', 'A'],
+        ['AU DFAT', 'A'],
+        // B — Usually reliable: mainstream wire services + reputable specialists
+        ['Reuters', 'B'],
+        ['BBC', 'B'],
+        ['Al Jazeera', 'B'],
+        ['NYT', 'B'],
+        ['GDELT', 'B'],
+        ['Krebs on Security', 'B'],
+        ['Mandiant Threat Intelligence', 'B'],
+        ['Cisco Talos Intelligence', 'B'],
+        ['Google Project Zero', 'B'],
+        ['MITRE ATT&CK', 'B'],
+        ['Sigma Detection Rules', 'B'],
+        ['YARA Rules', 'B'],
+        ['UK NCSC Threat Reports', 'B'],
+        ['US-CERT', 'B'],
+        ['IODA Internet Outage', 'B'],
+        ['ADS-B', 'B'],
+        ['ISS Tracker', 'B'],
+        ['AIS Maritime', 'B'],
+        ['Yahoo Finance Commodities', 'B'],
+        ['Alpaca', 'B'],
+        ['MFAPI', 'B'],
+        // C — Fairly reliable: enthusiast / community OSINT
+        ['Bellingcat', 'C'],
+        ['OSINT Defender', 'C'],
+        ['Threat-Intel', 'C'],
+        ['Open-Source Threat Intel Feeds', 'C'],
+        ['Public Intelligence Feeds', 'C'],
+        ['BleepingComputer', 'C'],
+        ['Dark Reading', 'C'],
+        ['The Hacker News', 'C'],
+        ['Polymarket', 'C'],
+        // D — Not usually reliable: state-media / known propaganda channels
+        // (mark conservatively — analyst must override per-claim)
+        // E — Unreliable: explicit rumor mills, anonymous tip feeds
+        ['RUMINT', 'E'],
+        ['Reddit r/conspiracy', 'E'],
+        ['Reddit r/RBI', 'E'],
+        // Reddit news-aggregation subs — fairly reliable for what they're aggregating
+        ['Reddit r/worldnews', 'C'],
+        ['Reddit r/geopolitics', 'C'],
+        ['Reddit r/Intelligence', 'C'],
+        ['Reddit r/OSINT', 'C']
+      ]
+      const now = timestamp()
+      const upd = db.prepare(
+        `UPDATE sources SET admiralty_reliability = ?, admiralty_reliability_set_at = ? WHERE admiralty_reliability IS NULL AND name LIKE ?`
+      )
+      let rated = 0
+      for (const [pattern, rating] of RELIABILITY_DEFAULTS) {
+        const r = upd.run(rating, now, `%${pattern}%`)
+        rated += r.changes
+      }
+
+      // Backfill credibility on intel_reports from existing verification_score
+      // as a starting point (analyst can refine via Feed UI). The mapping is
+      // deliberately conservative — old scores were noisy, so most reports
+      // start at "3 = possibly true" or worse.
+      //
+      //   verification >= 90  →  2  (probably true)
+      //   verification >= 70  →  3  (possibly true)
+      //   verification >= 50  →  4  (doubtfully true)
+      //   verification < 50   →  5  (improbable)
+      const credResult = db.prepare(`
+        UPDATE intel_reports
+        SET credibility = CASE
+          WHEN verification_score >= 90 THEN 2
+          WHEN verification_score >= 70 THEN 3
+          WHEN verification_score >= 50 THEN 4
+          ELSE 5
+        END,
+        credibility_computed_at = ?
+        WHERE credibility IS NULL
+      `).run(now)
+
+      log.info(`Migration 013: rated ${rated} sources; backfilled credibility on ${credResult.changes} reports`)
+    }
   }
 ]
 

@@ -32,6 +32,12 @@ export interface IntelReport {
   latitude: number | null
   longitude: number | null
   verificationScore: number
+  /** NATO STANAG 2511 information credibility rating: 1=confirmed, 2=probably true,
+   *  3=possibly true, 4=doubtfully true, 5=improbable, 6=truth cannot be judged.
+   *  Null = not yet rated; UI treats as 6 (unknown). */
+  credibility: number | null
+  /** STANAG 2511 source reliability A–F, joined from the source row. */
+  sourceReliability: 'A' | 'B' | 'C' | 'D' | 'E' | 'F' | null
   reviewed: boolean
   createdAt: number
   updatedAt: number
@@ -45,6 +51,10 @@ export interface Source {
   config: Record<string, unknown>
   schedule: string | null
   enabled: boolean
+  /** NATO STANAG 2511 source reliability: A=completely reliable,
+   *  B=usually reliable, C=fairly reliable, D=not usually reliable,
+   *  E=unreliable, F=reliability unknown. Null = not yet rated. */
+  admiralty_reliability: 'A' | 'B' | 'C' | 'D' | 'E' | 'F' | null
   lastCollectedAt: number | null
   lastError: string | null
   errorCount: number

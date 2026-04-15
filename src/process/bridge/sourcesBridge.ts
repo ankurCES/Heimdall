@@ -44,6 +44,15 @@ export function registerSourcesBridge(): void {
     if (data.config !== undefined) { fields.push('config = ?'); values.push(JSON.stringify(data.config)) }
     if (data.schedule !== undefined) { fields.push('schedule = ?'); values.push(data.schedule) }
     if (data.enabled !== undefined) { fields.push('enabled = ?'); values.push(data.enabled ? 1 : 0) }
+    if (data.admiralty_reliability !== undefined) {
+      // STANAG 2511 reliability A–F (or null to clear)
+      const valid = ['A', 'B', 'C', 'D', 'E', 'F'] as const
+      const v = data.admiralty_reliability
+      if (v === null || (typeof v === 'string' && (valid as readonly string[]).includes(v))) {
+        fields.push('admiralty_reliability = ?'); values.push(v)
+        fields.push('admiralty_reliability_set_at = ?'); values.push(now)
+      }
+    }
 
     fields.push('updated_at = ?')
     values.push(now)
@@ -143,6 +152,7 @@ function mapSource(row: Record<string, unknown>): Source {
     config: JSON.parse((row.config as string) || '{}'),
     schedule: row.schedule as string | null,
     enabled: (row.enabled as number) === 1,
+    admiralty_reliability: (row.admiralty_reliability as Source['admiralty_reliability']) || null,
     lastCollectedAt: row.last_collected_at as number | null,
     lastError: row.last_error as string | null,
     errorCount: row.error_count as number,

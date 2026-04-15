@@ -39,7 +39,10 @@ export function registerIntelBridge(): void {
       values.push(sourceId)
     }
 
-    const join = needsJoin ? 'LEFT JOIN sources s ON r.source_id = s.id' : ''
+    // Always JOIN sources so STANAG source-reliability rating is available
+    // on every returned report. The previous gating on `needsJoin` only
+    // joined when filtering by source_type.
+    const join = 'LEFT JOIN sources s ON r.source_id = s.id'
     const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : ''
 
     const total = (
@@ -48,7 +51,7 @@ export function registerIntelBridge(): void {
 
     const reports = db
       .prepare(
-        `SELECT r.* FROM intel_reports r ${join} ${where} ORDER BY r.created_at DESC LIMIT ? OFFSET ?`
+        `SELECT r.*, s.admiralty_reliability AS source_reliability FROM intel_reports r ${join} ${where} ORDER BY r.created_at DESC LIMIT ? OFFSET ?`
       )
       .all(...values, limit, offset)
 
@@ -71,7 +74,9 @@ export function registerIntelBridge(): void {
 
   ipcMain.handle(IPC_CHANNELS.INTEL_GET_REPORT, (_event, params: { id: string }) => {
     const db = getDatabase()
-    const row = db.prepare('SELECT * FROM intel_reports WHERE id = ?').get(params.id)
+    const row = db.prepare(
+      'SELECT r.*, s.admiralty_reliability AS source_reliability FROM intel_reports r LEFT JOIN sources s ON r.source_id = s.id WHERE r.id = ?'
+    ).get(params.id)
     return row ? mapReport(row as RawReport) : null
   })
 
@@ -121,7 +126,7 @@ export function registerIntelBridge(): void {
 
     const recentCritical = db
       .prepare(
-        "SELECT * FROM intel_reports WHERE severity IN ('critical','high') ORDER BY created_at DESC LIMIT 10"
+        "SELECT r.*, s.admiralty_reliability AS source_reliability FROM intel_reports r LEFT JOIN sources s ON r.source_id = s.id WHERE r.severity IN ('critical','high') ORDER BY r.created_at DESC LIMIT 10"
       )
       .all()
 
@@ -337,12 +342,16 @@ interface RawReport {
   latitude: number | null
   longitude: number | null
   verification_score: number
+  credibility: number | null
+  source_reliability: string | null
   reviewed: number
   created_at: number
   updated_at: number
 }
 
 function mapReport(row: RawReport): IntelReport {
+  const r = row.source_reliability
+  const sourceReliability = (r === 'A' || r === 'B' || r === 'C' || r === 'D' || r === 'E' || r === 'F') ? r : null
   return {
     id: row.id,
     discipline: row.discipline as IntelReport['discipline'],
@@ -357,6 +366,8 @@ function mapReport(row: RawReport): IntelReport {
     latitude: row.latitude,
     longitude: row.longitude,
     verificationScore: row.verification_score,
+    credibility: row.credibility,
+    sourceReliability,
     reviewed: row.reviewed === 1,
     createdAt: row.created_at,
     updatedAt: row.updated_at
