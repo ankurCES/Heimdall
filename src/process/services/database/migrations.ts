@@ -53,6 +53,29 @@ const migrations: Migration[] = [
         'INSERT OR IGNORE INTO settings (key, value, updated_at) VALUES (?, ?, ?)'
       ).run('graphSync.enabled', 'true', now)
     }
+  },
+  {
+    version: '004',
+    name: 'market_quotes_table',
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS market_quotes (
+          id TEXT PRIMARY KEY,
+          ticker TEXT NOT NULL,
+          name TEXT NOT NULL,
+          category TEXT NOT NULL,
+          price REAL NOT NULL,
+          change_pct REAL NOT NULL,
+          change_abs REAL,
+          prev_close REAL,
+          currency TEXT,
+          recorded_at INTEGER NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_market_quotes_ticker ON market_quotes(ticker, recorded_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_market_quotes_recorded ON market_quotes(recorded_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_market_quotes_category ON market_quotes(category);
+      `)
+    }
   }
 ]
 

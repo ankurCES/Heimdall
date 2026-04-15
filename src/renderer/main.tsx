@@ -18,6 +18,7 @@ import { BrowsePage } from './pages/browse/BrowsePage'
 import { SyncPage } from './pages/sync/SyncPage'
 import { EnrichedPage } from './pages/enriched/EnrichedPage'
 import { WatchPage } from './pages/watch/WatchPage'
+import { MarketsPage } from './pages/markets/MarketsPage'
 import { Toaster } from 'sonner'
 import { NotificationListener } from './components/NotificationListener'
 import './styles/globals.css'
@@ -43,6 +44,7 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
           <Route path="/sources" element={<SourcesPage />} />
           <Route path="/alerts" element={<AlertsPage />} />
           <Route path="/map" element={<MapPage />} />
+          <Route path="/markets" element={<MarketsPage />} />
           <Route path="/meshtastic" element={<MeshtasticPage />} />
           <Route path="/vault" element={<VaultPage />} />
           <Route path="/chat" element={<ChatPage />} />

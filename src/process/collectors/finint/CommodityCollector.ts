@@ -65,6 +65,33 @@ export class CommodityCollector extends BaseCollector {
       // Group by category for summary reports
       const byCategory = new Map<string, Array<{ name: string; price: number; change: number; pct: number }>>()
 
+      // Dual-write to market_quotes table for time-series charts
+      try {
+        const { getDatabase } = require('../../services/database')
+        const { generateId } = require('@common/utils/id')
+        const db = getDatabase()
+        const stmt = db.prepare(
+          'INSERT INTO market_quotes (id, ticker, name, category, price, change_pct, change_abs, prev_close, currency, recorded_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+        )
+        const now = Date.now()
+        const tx = db.transaction(() => {
+          for (const quote of quotes) {
+            const commodity = COMMODITIES.find((c) => c.symbol === quote.symbol)
+            if (!commodity || quote.regularMarketPrice == null) continue
+            stmt.run(
+              generateId(), commodity.symbol, commodity.name, commodity.category,
+              quote.regularMarketPrice, quote.regularMarketChangePercent || 0,
+              quote.regularMarketChange || 0, quote.regularMarketPreviousClose || 0,
+              quote.currency || 'USD', now
+            )
+          }
+        })
+        tx()
+        log.debug(`market_quotes: inserted ${quotes.length} quotes`)
+      } catch (err) {
+        log.debug(`market_quotes write failed: ${err}`)
+      }
+
       for (const quote of quotes) {
         const commodity = COMMODITIES.find((c) => c.symbol === quote.symbol)
         if (!commodity) continue

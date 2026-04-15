@@ -21,7 +21,9 @@ const testChannels = [
   'sync:getJobs', 'sync:runJob', 'sync:runAll', 'sync:isRunning',
   'watch:getTerms', 'watch:addTerm', 'watch:toggleTerm', 'watch:removeTerm', 'watch:scan',
   'intel:getTrajectories', 'intel:getSourceTypes',
-  'sources:test', 'sources:listPresets'
+  'sources:test', 'sources:listPresets',
+  'markets:getLatestQuotes', 'markets:getHistory', 'markets:getKpis',
+  'markets:getMarketIntel', 'markets:getCommodityDetail'
 ]
 const allowedChannels = [...Object.values(IPC_CHANNELS), ...testChannels]
 const chatEvents = ['chat:chunk', 'chat:done', 'chat:error']

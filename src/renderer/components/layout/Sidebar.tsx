@@ -16,7 +16,8 @@ import {
   Layers,
   RefreshCw,
   Sparkles,
-  Eye
+  Eye,
+  TrendingUp
 } from 'lucide-react'
 import { cn } from '@renderer/lib/utils'
 
@@ -27,6 +28,7 @@ const navItems = [
   { to: '/sources', icon: Database, label: 'Sources' },
   { to: '/alerts', icon: Bell, label: 'Alerts' },
   { to: '/map', icon: Map, label: 'Map' },
+  { to: '/markets', icon: TrendingUp, label: 'Markets' },
   { to: '/meshtastic', icon: Radio, label: 'Meshtastic' },
   { to: '/vault', icon: BookOpen, label: 'Obsidian Vault' },
   { to: '/chat', icon: MessageSquare, label: 'Chat' },
