@@ -10,8 +10,13 @@ import {
 } from 'lucide-react'
 import { Card, CardContent } from '@renderer/components/ui/card'
 import { Badge } from '@renderer/components/ui/badge'
+import { Button } from '@renderer/components/ui/button'
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@renderer/components/ui/dialog'
 import { DISCIPLINE_LABELS } from '@common/types/intel'
 import { formatRelativeTime, cn } from '@renderer/lib/utils'
+import { ClassificationBadge } from '@renderer/components/ClassificationBanner'
+import { MarkdownRenderer } from '@renderer/components/MarkdownRenderer'
+import { FileText as FileIcon, Loader2 } from 'lucide-react'
 import {
   Chart as ChartJS,
   CategoryScale, LinearScale, BarElement, PointElement, LineElement,
@@ -108,6 +113,7 @@ export function DashboardPage() {
           </p>
         </div>
         <div className="flex items-center gap-2">
+          <DpbButton />
           <Badge variant="outline" className="gap-1 text-xs">
             <Activity className="h-3 w-3" />
             {enabledCount}/{sources.length} sources
@@ -399,4 +405,80 @@ function KpiCard({ icon, label, value, sublabel, color }: {
 
 function SkeletonBox() {
   return <div className="w-full h-full bg-muted/30 rounded animate-pulse" />
+}
+
+/**
+ * Daily President's Brief — generates a structured snapshot of the
+ * operational picture (top intel + I&W status + HUMINT + open gaps +
+ * pending actions + trend deltas) and renders it in a modal.
+ */
+function DpbButton() {
+  const [open, setOpen] = useState(false)
+  const [generating, setGenerating] = useState(false)
+  const [brief, setBrief] = useState<{ id: string; classification: string; body_md: string } | null>(null)
+  const [periodHours, setPeriodHours] = useState(24)
+
+  const generate = async () => {
+    setGenerating(true)
+    setBrief(null)
+    try {
+      const result = await window.heimdall.invoke('dpb:generate', { periodHours }) as { id: string; classification: string; body_md: string }
+      setBrief(result)
+    } finally {
+      setGenerating(false)
+    }
+  }
+
+  // Open + auto-generate
+  const openModal = () => {
+    setOpen(true)
+    void generate()
+  }
+
+  return (
+    <>
+      <Button size="sm" variant="outline" onClick={openModal} className="gap-1.5">
+        <FileIcon className="h-3.5 w-3.5" />
+        Daily Brief
+      </Button>
+
+      <Dialog open={open} onOpenChange={(v) => { setOpen(v); if (!v) setBrief(null) }}>
+        <DialogContent className="max-w-3xl max-h-[90vh] overflow-hidden flex flex-col">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 flex-wrap">
+              <FileIcon className="h-4 w-4" />
+              Daily Intelligence Brief
+              {brief && <ClassificationBadge level={brief.classification as 'UNCLASSIFIED' | 'CONFIDENTIAL' | 'SECRET' | 'TOP SECRET'} />}
+              <select
+                className="ml-auto text-xs bg-card border border-border rounded px-2 py-1"
+                value={periodHours}
+                onChange={(e) => setPeriodHours(parseInt(e.target.value, 10))}
+              >
+                <option value={6}>Last 6h</option>
+                <option value={24}>Last 24h</option>
+                <option value={72}>Last 3 days</option>
+                <option value={168}>Last 7 days</option>
+              </select>
+              <Button size="sm" variant="ghost" onClick={generate} disabled={generating}>
+                {generating ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : 'Refresh'}
+              </Button>
+            </DialogTitle>
+          </DialogHeader>
+          <div className="flex-1 overflow-auto pr-2 pb-2">
+            {generating && !brief && (
+              <div className="flex items-center justify-center py-12 text-muted-foreground">
+                <Loader2 className="h-6 w-6 animate-spin mr-2" />
+                Assembling brief…
+              </div>
+            )}
+            {brief && (
+              <div className="prose prose-sm prose-invert max-w-none">
+                <MarkdownRenderer content={brief.body_md} />
+              </div>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
+    </>
+  )
 }

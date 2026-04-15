@@ -3,7 +3,7 @@ import { useState, useEffect } from 'react'
 import {
   LayoutDashboard, FileText, Database, Bell, Map, MessageSquare,
   Settings, Activity, BookOpen, Coins, BarChart3, Radio,
-  Layers, RefreshCw, Sparkles, Eye, TrendingUp,
+  Layers, RefreshCw, Sparkles, Eye, AlertOctagon, TrendingUp,
   ChevronLeft, ChevronRight, ChevronDown
 } from 'lucide-react'
 import { cn } from '@renderer/lib/utils'
@@ -37,6 +37,7 @@ const NAV_GROUPS: NavGroup[] = [
       { to: '/browse', icon: Layers, label: 'Browse Intel' },
       { to: '/enriched', icon: Sparkles, label: 'Enriched Data' },
       { to: '/watch', icon: Eye, label: 'Watch Terms' },
+      { to: '/iw', icon: AlertOctagon, label: 'I&W' },
       { to: '/explore', icon: BarChart3, label: 'Explore' }
     ]
   },

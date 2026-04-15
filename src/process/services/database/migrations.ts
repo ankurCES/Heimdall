@@ -807,6 +807,97 @@ const migrations: Migration[] = [
 
       log.info('Migration 015: analyst_council_runs + analyst_council_outputs tables created')
     }
+  },
+  {
+    version: '016',
+    name: 'iw_workbench_and_dpb',
+    up: (db) => {
+      // Indicators & Warnings (I&W) — Themes 5.1, 5.2 of the agency roadmap.
+      //
+      // An "event" is a high-impact scenario the analyst is watching for
+      // ("conflict in Taiwan Strait", "ransomware spillover into utilities").
+      // Each event has a set of indicators — observable preconditions the
+      // analyst can measure. Each indicator has a query (currently
+      // intel_count over keywords/discipline/severity) and Red/Amber/Green
+      // thresholds. The dashboard surfaces R/A/G state per indicator and
+      // an aggregate state per event.
+      //
+      // iw_evaluations is the time-series history — each evaluation appends
+      // a row so the analyst can see how the indicator has trended over
+      // days/weeks (Theme 5.3 anomaly detection will consume this later).
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS iw_events (
+          id TEXT PRIMARY KEY,
+          name TEXT NOT NULL,
+          description TEXT,
+          scenario_class TEXT,
+          classification TEXT NOT NULL DEFAULT 'UNCLASSIFIED',
+          status TEXT NOT NULL DEFAULT 'active',
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_iw_events_status ON iw_events(status);
+
+        CREATE TABLE IF NOT EXISTS iw_indicators (
+          id TEXT PRIMARY KEY,
+          event_id TEXT NOT NULL,
+          name TEXT NOT NULL,
+          description TEXT,
+          query_type TEXT NOT NULL,
+          query_params TEXT NOT NULL,
+          red_threshold REAL,
+          amber_threshold REAL,
+          weight REAL NOT NULL DEFAULT 1.0,
+          current_value REAL,
+          current_level TEXT,
+          last_evaluated_at INTEGER,
+          status TEXT NOT NULL DEFAULT 'active',
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL,
+          FOREIGN KEY (event_id) REFERENCES iw_events(id) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS idx_iw_indicators_event ON iw_indicators(event_id);
+        CREATE INDEX IF NOT EXISTS idx_iw_indicators_status ON iw_indicators(status);
+
+        CREATE TABLE IF NOT EXISTS iw_evaluations (
+          id TEXT PRIMARY KEY,
+          indicator_id TEXT NOT NULL,
+          value REAL NOT NULL,
+          level TEXT NOT NULL,
+          source_count INTEGER,
+          evaluated_at INTEGER NOT NULL,
+          FOREIGN KEY (indicator_id) REFERENCES iw_indicators(id) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS idx_iw_evaluations_indicator ON iw_evaluations(indicator_id, evaluated_at DESC);
+      `)
+
+      // Daily President's Brief (Theme 9.1) — assembled snapshots of the
+      // operational picture. Each brief carries its classification and an
+      // optional template_name for agencies with house formats. The
+      // body_md is the rendered briefing markdown; structured data is in
+      // body_json so the renderer / exporter can re-render in PDF / DOCX
+      // / NATO INTREP later (Theme 9.4).
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS dpb_briefings (
+          id TEXT PRIMARY KEY,
+          generated_at INTEGER NOT NULL,
+          classification TEXT NOT NULL DEFAULT 'UNCLASSIFIED',
+          template_name TEXT,
+          period_hours INTEGER NOT NULL DEFAULT 24,
+          body_md TEXT NOT NULL,
+          body_json TEXT,
+          intel_count INTEGER,
+          critical_count INTEGER,
+          humint_count INTEGER,
+          iw_red_count INTEGER,
+          iw_amber_count INTEGER,
+          created_at INTEGER NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_dpb_generated ON dpb_briefings(generated_at DESC);
+      `)
+
+      log.info('Migration 016: iw_events / iw_indicators / iw_evaluations + dpb_briefings tables created')
+    }
   }
 ]
 

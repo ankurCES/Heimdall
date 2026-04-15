@@ -29,7 +29,11 @@ const testChannels = [
   'analytics:deleteReport', 'analytics:duplicateReport', 'analytics:queryWidget',
   'intel:setClassification',
   'audit:chain:list', 'audit:chain:verify',
-  'council:run', 'council:get', 'council:list'
+  'council:run', 'council:get', 'council:list',
+  'iw:events:list', 'iw:events:get', 'iw:events:create', 'iw:events:update', 'iw:events:delete',
+  'iw:indicators:add', 'iw:indicators:update', 'iw:indicators:delete', 'iw:indicators:history',
+  'iw:evaluate:indicator', 'iw:evaluate:event', 'iw:evaluate:all',
+  'dpb:generate', 'dpb:latest', 'dpb:list', 'dpb:get'
 ]
 const allowedChannels = [...Object.values(IPC_CHANNELS), ...testChannels]
 const chatEvents = ['chat:chunk', 'chat:done', 'chat:error']
