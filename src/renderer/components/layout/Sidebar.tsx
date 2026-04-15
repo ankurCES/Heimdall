@@ -177,7 +177,7 @@ export function Sidebar() {
       {/* Footer */}
       <div className={cn('border-t border-border py-2', collapsed ? 'px-1 text-center' : 'px-4')}>
         <p className="text-[10px] text-muted-foreground/70">
-          {collapsed ? 'v0.1' : 'v0.1.0 · Public Safety Monitor'}
+          {collapsed ? 'v0.2' : 'v0.2.0 · Public Safety Monitor'}
         </p>
       </div>
     </aside>

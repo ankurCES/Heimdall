@@ -19,7 +19,7 @@ export function AboutTab() {
         <h1 className="text-3xl font-bold tracking-tight mb-1">Heimdall</h1>
         <p className="text-lg text-muted-foreground italic mb-3">Always vigilant</p>
         <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-primary/10 border border-primary/20">
-          <span className="text-xs font-mono text-primary">v0.1.0</span>
+          <span className="text-xs font-mono text-primary">v0.2.0</span>
         </div>
       </div>
 
