@@ -48,14 +48,15 @@ function getGraphFromSQLite(params?: {
 
     const nodes = filteredIds.length > 0
       ? db.prepare(
-          `SELECT id, title, discipline, severity, source_name, verification_score FROM intel_reports WHERE id IN (${filteredIds.map(() => '?').join(',')})`
+          `SELECT id, title, discipline, severity, source_name, verification_score, created_at, substr(content, 1, 200) AS snippet FROM intel_reports WHERE id IN (${filteredIds.map(() => '?').join(',')})`
         ).all(...filteredIds.map((r) => r.id)) as Array<Record<string, unknown>>
       : []
 
     return {
       nodes: nodes.map((n) => ({
-        id: n.id, title: (n.title as string).slice(0, 50), discipline: n.discipline,
-        severity: n.severity, source: n.source_name, verification: n.verification_score
+        id: n.id, title: (n.title as string).slice(0, 80), discipline: n.discipline,
+        severity: n.severity, source: n.source_name, verification: n.verification_score,
+        createdAt: n.created_at, snippet: n.snippet
       })),
       links: filteredLinks.map((l) => ({
         source: l.source_report_id, target: l.target_report_id,
@@ -65,48 +66,52 @@ function getGraphFromSQLite(params?: {
   }
 
   const nodeQuery = nodeIds.size > 0
-    ? `SELECT id, title, discipline, severity, source_name, verification_score FROM intel_reports WHERE id IN (${Array.from(nodeIds).map(() => '?').join(',')})`
+    ? `SELECT id, title, discipline, severity, source_name, verification_score, created_at, substr(content, 1, 200) AS snippet FROM intel_reports WHERE id IN (${Array.from(nodeIds).map(() => '?').join(',')})`
     : null
   const nodes = nodeQuery ? db.prepare(nodeQuery).all(...Array.from(nodeIds)) as Array<Record<string, unknown>> : []
 
   // Add preliminary report nodes
-  const prelimReports = db.prepare('SELECT id, title, status FROM preliminary_reports ORDER BY created_at DESC LIMIT 50').all() as Array<Record<string, unknown>>
+  const prelimReports = db.prepare('SELECT id, title, status, created_at, substr(content, 1, 200) AS snippet FROM preliminary_reports ORDER BY created_at DESC LIMIT 50').all() as Array<Record<string, unknown>>
   const prelimNodes = prelimReports.map((p) => ({
-    id: p.id as string, title: `\u{1F4CB} ${(p.title as string).slice(0, 40)}`,
+    id: p.id as string, title: `\u{1F4CB} ${(p.title as string).slice(0, 60)}`,
     discipline: 'preliminary', severity: 'high', source: 'Preliminary Report',
-    verification: 80, type: 'preliminary'
+    verification: 80, type: 'preliminary',
+    createdAt: p.created_at, snippet: p.snippet
   }))
 
   // Add HUMINT nodes
-  const humintReports = db.prepare('SELECT id, findings, confidence FROM humint_reports ORDER BY created_at DESC LIMIT 30').all() as Array<Record<string, unknown>>
+  const humintReports = db.prepare('SELECT id, findings, confidence, created_at, session_id FROM humint_reports ORDER BY created_at DESC LIMIT 30').all() as Array<Record<string, unknown>>
   const humintNodes = humintReports.map((h) => ({
-    id: h.id as string, title: `\u{1F530} HUMINT: ${(h.findings as string).slice(0, 35)}`,
-    discipline: 'humint', severity: 'high', source: 'HUMINT',
-    verification: 90, type: 'humint'
+    id: h.id as string, title: `\u{1F530} HUMINT: ${(h.findings as string).slice(0, 60)}`,
+    discipline: 'humint', severity: 'high', source: 'HUMINT Chat',
+    verification: 90, type: 'humint',
+    createdAt: h.created_at, snippet: (h.findings as string).slice(0, 200),
+    confidence: h.confidence, sessionId: h.session_id
   }))
 
   // Add gap nodes
-  const gaps = db.prepare("SELECT id, description, severity FROM intel_gaps WHERE status = 'open' LIMIT 30").all() as Array<Record<string, unknown>>
+  const gaps = db.prepare("SELECT id, description, severity, created_at, preliminary_report_id FROM intel_gaps WHERE status = 'open' LIMIT 30").all() as Array<Record<string, unknown>>
   const gapNodes = gaps.map((g) => ({
-    id: g.id as string, title: `\u{26A0}\u{FE0F} ${(g.description as string).slice(0, 40)}`,
+    id: g.id as string, title: `\u{26A0}\u{FE0F} ${(g.description as string).slice(0, 60)}`,
     discipline: 'gap', severity: g.severity as string, source: 'Information Gap',
-    verification: 0, type: 'gap'
+    verification: 0, type: 'gap',
+    createdAt: g.created_at, snippet: g.description
   }))
 
-  // Gap links
-  const gapLinks = gaps.map((g) => {
-    const prelim = db.prepare('SELECT preliminary_report_id FROM intel_gaps WHERE id = ?').get(g.id) as { preliminary_report_id: string }
-    return {
-      source: prelim.preliminary_report_id, target: g.id as string,
+  // Gap links — use the preliminary_report_id already in each gap row (no extra query needed)
+  const gapLinks = gaps
+    .filter((g) => g.preliminary_report_id)
+    .map((g) => ({
+      source: g.preliminary_report_id as string, target: g.id as string,
       type: 'gap_identified', strength: 0.7, reason: 'Information gap identified in report'
-    }
-  })
+    }))
 
   return {
     nodes: [
       ...nodes.map((n) => ({
-        id: n.id, title: (n.title as string).slice(0, 50), discipline: n.discipline,
-        severity: n.severity, source: n.source_name, verification: n.verification_score
+        id: n.id, title: (n.title as string).slice(0, 80), discipline: n.discipline,
+        severity: n.severity, source: n.source_name, verification: n.verification_score,
+        createdAt: n.created_at, snippet: n.snippet
       })),
       ...prelimNodes,
       ...humintNodes,

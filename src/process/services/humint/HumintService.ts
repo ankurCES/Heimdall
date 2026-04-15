@@ -65,13 +65,30 @@ export class HumintService {
     const firstUserMsg = messages.find((m) => m.role === 'user')?.content || 'HUMINT Report'
     const title = `HUMINT: ${firstUserMsg.slice(0, 80)}`
 
-    const id = generateId()
+    // UPSERT semantics — one HUMINT per chat session. If a report already exists
+    // for this sessionId, reuse its id and update in place. This keeps the graph
+    // node identity stable across repeated "Record HUMINT" clicks.
+    const existing = db.prepare('SELECT id, created_at FROM humint_reports WHERE session_id = ?').get(sessionId) as { id: string; created_at: number } | undefined
+    const id = existing?.id || generateId()
+    const createdAt = existing?.created_at || now
+    const isUpdate = !!existing
 
-    // Insert HUMINT report
-    db.prepare(`
-      INSERT INTO humint_reports (id, session_id, analyst_notes, findings, confidence, source_report_ids, tool_calls_used, status, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, 'draft', ?, ?)
-    `).run(id, sessionId, analystNotes, findings, confidence, JSON.stringify(sourceIds), JSON.stringify(toolCalls), now, now)
+    if (isUpdate) {
+      db.prepare(`
+        UPDATE humint_reports
+        SET analyst_notes = ?, findings = ?, confidence = ?,
+            source_report_ids = ?, tool_calls_used = ?, updated_at = ?
+        WHERE id = ?
+      `).run(analystNotes, findings, confidence, JSON.stringify(sourceIds), JSON.stringify(toolCalls), now, id)
+
+      // Clear outgoing links so we don't accumulate stale citations on each update
+      db.prepare(`DELETE FROM intel_links WHERE source_report_id = ? AND link_type IN ('humint_source','humint_preliminary','humint_cross_session')`).run(id)
+    } else {
+      db.prepare(`
+        INSERT INTO humint_reports (id, session_id, analyst_notes, findings, confidence, source_report_ids, tool_calls_used, status, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, 'draft', ?, ?)
+      `).run(id, sessionId, analystNotes, findings, confidence, JSON.stringify(sourceIds), JSON.stringify(toolCalls), createdAt, now)
+    }
 
     // Create links from HUMINT to source intel
     for (const srcId of sourceIds.slice(0, 15)) {
@@ -122,20 +139,30 @@ export class HumintService {
       })()
     }
 
-    // Tag the HUMINT report
+    // Refresh tags — drop confidence / tool-specific tags before re-inserting so
+    // repeated updates don't accumulate stale tool:X tags from past invocations
+    if (isUpdate) {
+      db.prepare(`DELETE FROM intel_tags WHERE report_id = ? AND (tag = 'humint' OR tag LIKE 'confidence:%' OR tag LIKE 'tool:%')`).run(id)
+    }
     for (const tag of ['humint', `confidence:${confidence}`, ...toolCalls.map((t) => `tool:${t}`)]) {
       db.prepare('INSERT OR IGNORE INTO intel_tags (report_id, tag, confidence, source, created_at) VALUES (?, ?, ?, ?, ?)').run(
         id, tag, 1.0, 'humint', now
       )
     }
 
-    // Also create as intel_report for graph integration + enrichment pipeline
+    // Also upsert as intel_report for graph integration + enrichment pipeline
     const { createHash } = require('crypto')
     const hash = createHash('sha256').update(title + findings.slice(0, 500)).digest('hex')
     const reportContent = `## Analyst Notes\n\n${analystNotes.slice(0, 2000)}\n\n## Findings\n\n${findings.slice(0, 3000)}`
-    db.prepare(
-      'INSERT OR IGNORE INTO intel_reports (id, discipline, title, content, severity, source_id, source_name, content_hash, verification_score, reviewed, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
-    ).run(id, 'osint', title, reportContent, 'high', 'humint', 'HUMINT (Human Intelligence)', hash, 90, 1, now, now)
+    if (isUpdate) {
+      db.prepare(
+        'UPDATE intel_reports SET title = ?, content = ?, content_hash = ?, updated_at = ? WHERE id = ?'
+      ).run(title, reportContent, hash, now, id)
+    } else {
+      db.prepare(
+        'INSERT OR IGNORE INTO intel_reports (id, discipline, title, content, severity, source_id, source_name, content_hash, verification_score, reviewed, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+      ).run(id, 'osint', title, reportContent, 'high', 'humint', 'HUMINT (Human Intelligence)', hash, 90, 1, createdAt, now)
+    }
 
     // Trigger enrichment (entities, auto-tags, corroboration, links)
     try {
@@ -149,12 +176,12 @@ export class HumintService {
       })
     } catch {}
 
-    log.info(`HUMINT report created: ${title} (${sourceIds.length} sources, ${toolCalls.length} tools)`)
+    log.info(`HUMINT report ${isUpdate ? 'updated' : 'created'}: ${title} (${sourceIds.length} sources, ${toolCalls.length} tools)`)
 
     return {
       id, sessionId, analystNotes, findings, confidence,
       sourceReportIds: sourceIds, toolCallsUsed: toolCalls,
-      status: 'draft', createdAt: now, updatedAt: now
+      status: 'draft', createdAt, updatedAt: now
     }
   }
 

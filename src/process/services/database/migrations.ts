@@ -191,6 +191,109 @@ const migrations: Migration[] = [
       }
       log.info(`Migration 007: analytics_reports table created, seeded ${seeded} preset(s)`)
     }
+  },
+  {
+    version: '008',
+    name: 'consolidate_humint_per_session',
+    up: (db) => {
+      // Enforce the invariant that each chat session has at most one HUMINT
+      // report. Before this migration, repeated "Record HUMINT" clicks on the
+      // same session created duplicate humint_reports + intel_reports rows with
+      // duplicate graph edges. Consolidate those duplicates into the oldest
+      // (canonical) row per session so graph nodes stay stable.
+      const dupGroups = db.prepare(`
+        SELECT session_id, COUNT(*) AS c
+        FROM humint_reports
+        WHERE session_id IS NOT NULL AND session_id != ''
+        GROUP BY session_id
+        HAVING c > 1
+      `).all() as Array<{ session_id: string; c: number }>
+
+      let consolidated = 0
+      let rowsMerged = 0
+
+      for (const group of dupGroups) {
+        const rows = db.prepare(
+          'SELECT id, analyst_notes, findings, source_report_ids, tool_calls_used, created_at, updated_at FROM humint_reports WHERE session_id = ? ORDER BY created_at ASC'
+        ).all(group.session_id) as Array<{
+          id: string; analyst_notes: string; findings: string;
+          source_report_ids: string | null; tool_calls_used: string | null;
+          created_at: number; updated_at: number
+        }>
+
+        if (rows.length < 2) continue
+        const canonical = rows[0]
+        const duplicates = rows.slice(1)
+
+        // Merge source_report_ids + tool_calls_used from all rows (deduped)
+        const mergedSourceIds = new Set<string>()
+        const mergedTools = new Set<string>()
+        for (const r of rows) {
+          try {
+            for (const s of JSON.parse(r.source_report_ids || '[]')) mergedSourceIds.add(s)
+            for (const t of JSON.parse(r.tool_calls_used || '[]')) mergedTools.add(t)
+          } catch {}
+        }
+
+        // Use the latest analyst_notes + findings (most recent row) as canonical content
+        const latest = rows[rows.length - 1]
+        const latestUpdatedAt = Math.max(...rows.map((r) => r.updated_at || r.created_at))
+
+        db.prepare(`
+          UPDATE humint_reports
+          SET analyst_notes = ?, findings = ?,
+              source_report_ids = ?, tool_calls_used = ?, updated_at = ?
+          WHERE id = ?
+        `).run(
+          latest.analyst_notes,
+          latest.findings,
+          JSON.stringify(Array.from(mergedSourceIds)),
+          JSON.stringify(Array.from(mergedTools)),
+          latestUpdatedAt,
+          canonical.id
+        )
+
+        // Redirect intel_links from each duplicate → canonical
+        for (const dup of duplicates) {
+          // Links where the duplicate is the source → re-point to canonical
+          db.prepare(
+            'UPDATE OR IGNORE intel_links SET source_report_id = ? WHERE source_report_id = ?'
+          ).run(canonical.id, dup.id)
+          // Links where the duplicate is the target → re-point to canonical
+          db.prepare(
+            'UPDATE OR IGNORE intel_links SET target_report_id = ? WHERE target_report_id = ?'
+          ).run(canonical.id, dup.id)
+          // Clean up any that became self-links after re-point
+          db.prepare(
+            'DELETE FROM intel_links WHERE source_report_id = target_report_id'
+          ).run()
+          // Clean up any residual rows that violated UPDATE OR IGNORE's uniqueness
+          db.prepare('DELETE FROM intel_links WHERE source_report_id = ? OR target_report_id = ?').run(dup.id, dup.id)
+
+          // Move tags from duplicate → canonical (INSERT OR IGNORE dedupes)
+          db.prepare(
+            'UPDATE OR IGNORE intel_tags SET report_id = ? WHERE report_id = ?'
+          ).run(canonical.id, dup.id)
+          db.prepare('DELETE FROM intel_tags WHERE report_id = ?').run(dup.id)
+
+          // Move entities from duplicate → canonical
+          db.prepare(
+            'UPDATE OR IGNORE intel_entities SET report_id = ? WHERE report_id = ?'
+          ).run(canonical.id, dup.id)
+          db.prepare('DELETE FROM intel_entities WHERE report_id = ?').run(dup.id)
+
+          // Delete duplicate intel_report (mirror row created by HumintService)
+          db.prepare('DELETE FROM intel_reports WHERE id = ?').run(dup.id)
+          // Delete duplicate humint_report
+          db.prepare('DELETE FROM humint_reports WHERE id = ?').run(dup.id)
+
+          rowsMerged++
+        }
+        consolidated++
+      }
+
+      log.info(`Migration 008: consolidated ${rowsMerged} duplicate HUMINT reports across ${consolidated} sessions`)
+    }
   }
 ]
 
