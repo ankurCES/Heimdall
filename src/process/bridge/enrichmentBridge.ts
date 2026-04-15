@@ -19,8 +19,16 @@ function getGraphFromSQLite(params?: {
     vals.push(params.reportId, params.reportId)
   }
   if (params?.linkType && params.linkType !== 'all') {
-    conditions.push('link_type = ?')
-    vals.push(params.linkType)
+    // Treat 'humint' as an umbrella selector matching any of the three
+    // HUMINT-related link subtypes (source / preliminary / cross_session).
+    // The UI exposes a single "HUMINT Links" option while keeping the
+    // underlying colored subtypes rendered distinctly.
+    if (params.linkType === 'humint') {
+      conditions.push("link_type IN ('humint_source', 'humint_preliminary', 'humint_cross_session')")
+    } else {
+      conditions.push('link_type = ?')
+      vals.push(params.linkType)
+    }
   }
 
   if (conditions.length > 0) linkQuery += ` WHERE ${conditions.join(' AND ')}`

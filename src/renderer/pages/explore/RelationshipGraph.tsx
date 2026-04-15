@@ -33,7 +33,33 @@ const DISCIPLINE_COLORS: Record<string, string> = {
 }
 
 const SEVERITY_SIZE: Record<string, number> = {
-  critical: 8, high: 6, medium: 5, low: 4, info: 3
+  critical: 10, high: 8, medium: 7, low: 6, info: 5
+}
+
+// Icons drawn inside each node. Preliminary / HUMINT / Gap have explicit
+// types; regular intel falls back to its discipline emoji.
+const TYPE_ICONS: Record<string, string> = {
+  preliminary: '📋',
+  humint: '🔰',
+  gap: '⚠️'
+}
+const DISCIPLINE_ICONS: Record<string, string> = {
+  osint: '🌐',
+  cybint: '🛡️',
+  finint: '💰',
+  socmint: '💬',
+  geoint: '🌍',
+  sigint: '📡',
+  rumint: '👂',
+  ci: '🔒',
+  agency: '🏛️',
+  imint: '📷'
+}
+
+function iconForNode(node: { type?: string; discipline?: string }): string {
+  if (node.type && TYPE_ICONS[node.type]) return TYPE_ICONS[node.type]
+  if (node.discipline && DISCIPLINE_ICONS[node.discipline]) return DISCIPLINE_ICONS[node.discipline]
+  return '📄'
 }
 
 const LINK_COLORS: Record<string, string> = {
@@ -406,9 +432,7 @@ export function RelationshipGraph() {
               <SelectItem value="shared_entity">Shared Entity</SelectItem>
               <SelectItem value="temporal">Temporal</SelectItem>
               <SelectItem value="preliminary_reference">Preliminary Reference</SelectItem>
-              <SelectItem value="humint_source">HUMINT Source</SelectItem>
-              <SelectItem value="humint_preliminary">HUMINT Preliminary</SelectItem>
-              <SelectItem value="humint_cross_session">HUMINT Cross-Session</SelectItem>
+              <SelectItem value="humint">HUMINT Links (all)</SelectItem>
               <SelectItem value="gap_identified">Gap Identified</SelectItem>
             </SelectContent>
           </Select>
@@ -442,18 +466,21 @@ export function RelationshipGraph() {
 
         {/* Legend */}
         <div className="space-y-1 pt-2 border-t border-border">
-          <Label className="text-[10px] uppercase tracking-wider text-muted-foreground/70">Node Colors</Label>
-          {Object.entries(DISCIPLINE_COLORS).map(([disc, color]) => (
-            <div key={disc} className="flex items-center gap-2 text-[10px]">
-              <span
-                className="h-2.5 w-2.5 rounded-full shrink-0"
-                style={{ background: color }}
-              />
-              <span className="truncate">
-                {disc === 'preliminary' ? '📋 Preliminary' : disc === 'gap' ? '⚠️ Gap' : disc === 'humint' ? '🔰 HUMINT' : (DISCIPLINE_LABELS[disc as keyof typeof DISCIPLINE_LABELS] || disc)}
-              </span>
-            </div>
-          ))}
+          <Label className="text-[10px] uppercase tracking-wider text-muted-foreground/70">Node Icons</Label>
+          {Object.entries(DISCIPLINE_COLORS).map(([disc, color]) => {
+            const icon = TYPE_ICONS[disc] || DISCIPLINE_ICONS[disc] || '📄'
+            const label = disc === 'preliminary' ? 'Preliminary' : disc === 'gap' ? 'Gap' : disc === 'humint' ? 'HUMINT' : (DISCIPLINE_LABELS[disc as keyof typeof DISCIPLINE_LABELS] || disc)
+            return (
+              <div key={disc} className="flex items-center gap-2 text-[10px]">
+                <span className="text-[11px] w-4 text-center">{icon}</span>
+                <span
+                  className="h-2 w-2 rounded-full shrink-0"
+                  style={{ background: color }}
+                />
+                <span className="truncate">{label}</span>
+              </div>
+            )
+          })}
         </div>
 
         <div className="space-y-1">
@@ -503,49 +530,42 @@ export function RelationshipGraph() {
               backgroundColor="#0a0f1a"
               enableNodeDrag={true}
               nodeCanvasObject={(node: any, ctx: CanvasRenderingContext2D, globalScale: number) => {
-                const size = (SEVERITY_SIZE[node.severity] || 3) * 1.5
+                const size = (SEVERITY_SIZE[node.severity] || 5) * 1.6
                 const color = DISCIPLINE_COLORS[node.discipline] || '#6b7280'
                 const isSelected = selectedNode?.id === node.id
 
+                // Glow
                 ctx.shadowColor = color
-                ctx.shadowBlur = isSelected ? 15 : 8
+                ctx.shadowBlur = isSelected ? 18 : 10
 
+                // All nodes are now filled circles with the discipline color
+                // as a thin ring + dark interior so the emoji icon inside is
+                // legible. Shape differentiation now comes from the icon.
                 ctx.beginPath()
-                if (node.type === 'preliminary') {
-                  ctx.moveTo(node.x, node.y - size * 1.3)
-                  ctx.lineTo(node.x + size, node.y)
-                  ctx.lineTo(node.x, node.y + size * 1.3)
-                  ctx.lineTo(node.x - size, node.y)
-                  ctx.closePath()
-                } else if (node.type === 'humint') {
-                  for (let a = 0; a < 6; a++) {
-                    const angle = (Math.PI / 3) * a - Math.PI / 6
-                    const px = node.x + size * 1.2 * Math.cos(angle)
-                    const py = node.y + size * 1.2 * Math.sin(angle)
-                    if (a === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py)
-                  }
-                  ctx.closePath()
-                } else if (node.type === 'gap') {
-                  ctx.moveTo(node.x, node.y - size * 1.2)
-                  ctx.lineTo(node.x + size, node.y + size * 0.8)
-                  ctx.lineTo(node.x - size, node.y + size * 0.8)
-                  ctx.closePath()
-                } else {
-                  ctx.arc(node.x, node.y, size, 0, 2 * Math.PI)
-                }
-                ctx.fillStyle = color
+                ctx.arc(node.x, node.y, size, 0, 2 * Math.PI)
+                ctx.fillStyle = 'rgba(15, 23, 42, 0.95)' // dark interior
                 ctx.fill()
 
                 ctx.shadowBlur = 0
                 ctx.strokeStyle = isSelected ? '#ffffff' : color
-                ctx.lineWidth = isSelected ? 2.5 : 1
+                ctx.lineWidth = isSelected ? 3 : 2
                 ctx.stroke()
 
-                if (globalScale > 1.5) {
-                  ctx.font = `${Math.max(3, 11 / globalScale)}px sans-serif`
+                // Draw emoji icon centered in the node
+                const icon = iconForNode(node)
+                const iconSize = size * 1.3
+                ctx.font = `${iconSize}px -apple-system, "Segoe UI Emoji", "Apple Color Emoji", sans-serif`
+                ctx.textAlign = 'center'
+                ctx.textBaseline = 'middle'
+                ctx.fillText(icon, node.x, node.y + iconSize * 0.05)
+
+                // Title label below node when zoomed in
+                if (globalScale > 1.3) {
+                  ctx.font = `${Math.max(3, 11 / globalScale)}px -apple-system, sans-serif`
                   ctx.fillStyle = '#e2e8f0'
                   ctx.textAlign = 'center'
-                  ctx.fillText((node.title || '').slice(0, 30), node.x, node.y + size + 6)
+                  ctx.textBaseline = 'top'
+                  ctx.fillText(String(node.title || '').slice(0, 30), node.x, node.y + size + 4)
                 }
               }}
             />
