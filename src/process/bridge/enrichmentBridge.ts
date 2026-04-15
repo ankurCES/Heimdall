@@ -18,7 +18,7 @@ type RawNode = Record<string, unknown>
  * top-N recent nodes regardless of deduplication (producing duplicate node
  * ids which d3-force silently collapsed, leaving edges dangling).
  */
-function resolveNodesById(db: ReturnType<typeof getDatabase>, ids: string[]): Map<string, RawNode> {
+export function resolveNodesById(db: ReturnType<typeof getDatabase>, ids: string[]): Map<string, RawNode> {
   const result = new Map<string, RawNode>()
   if (ids.length === 0) return result
 

@@ -4,6 +4,7 @@ import { vectorDbService } from '../vectordb/VectorDbService'
 import { intelRagService } from '../llm/IntelRagService'
 import { intelEnricher } from '../enrichment/IntelEnricher'
 import { kuzuService } from '../graphdb/KuzuService'
+import { resolveNodesById } from '../../bridge/enrichmentBridge'
 import { generateId, timestamp } from '@common/utils/id'
 import log from 'electron-log'
 
@@ -20,7 +21,16 @@ export interface ToolResult {
   data?: unknown
 }
 
-type ToolHandler = (params: Record<string, unknown>) => Promise<ToolResult>
+/**
+ * Optional per-call context passed by the caller (ToolCallingAgent) so tools
+ * can resolve context-sensitive params — e.g. `session_id='current'` in
+ * `humint_recall` resolves to the active chat sessionId.
+ */
+export interface ToolExecContext {
+  sessionId?: string
+}
+
+type ToolHandler = (params: Record<string, unknown>, ctx?: ToolExecContext) => Promise<ToolResult>
 
 class ToolRegistryImpl {
   private tools = new Map<string, { def: ToolDefinition; handler: ToolHandler }>()
@@ -40,7 +50,7 @@ class ToolRegistryImpl {
     }))
   }
 
-  async execute(name: string, params: Record<string, unknown>): Promise<ToolResult> {
+  async execute(name: string, params: Record<string, unknown>, ctx?: ToolExecContext): Promise<ToolResult> {
     const tool = this.tools.get(name)
     if (!tool) return { output: `Unknown tool: ${name}`, error: 'TOOL_NOT_FOUND' }
 
@@ -48,7 +58,7 @@ class ToolRegistryImpl {
     const start = Date.now()
 
     try {
-      const result = await tool.handler(params)
+      const result = await tool.handler(params, ctx)
       log.info(`Tool done: ${name} in ${Date.now() - start}ms`)
       return result
     } catch (err) {
@@ -97,18 +107,53 @@ class ToolRegistryImpl {
     // ── Vector Search ──
     this.register({
       name: 'vector_search',
-      description: 'Semantic similarity search across all intelligence data using vector embeddings.',
+      description: 'Semantic similarity search across all intelligence data using vector embeddings. Pass include_linked: true to also return each hit\'s top-3 graph neighbors (HUMINT findings that cite it, related intel) in one call.',
       parameters: { type: 'object', properties: {
         query: { type: 'string', description: 'Natural language query' },
-        limit: { type: 'number', description: 'Max results (default 8)' }
+        limit: { type: 'number', description: 'Max results (default 8)' },
+        include_linked: { type: 'boolean', description: 'When true, each hit carries up to 3 strongest graph neighbors inline' }
       }, required: ['query'] },
       requiresApproval: false
     }, async (params) => {
       const results = await vectorDbService.search(params.query as string, (params.limit as number) || 8)
+      const includeLinked = params.include_linked === true
+
+      if (!includeLinked) {
+        return {
+          // Each result carries [id:<uuid>] so the LLM can cite by id and
+          // handleSavePreliminaryReport can harvest IDs from tool_call_logs.
+          output: results.map((r) => `[${r.severity}] ${r.title} (score: ${r.score.toFixed(2)})\n${r.snippet}\n[id:${r.id}]`).join('\n---\n'),
+          data: results
+        }
+      }
+
+      // Linked mode — fetch top-3 strongest neighbors per hit via intelEnricher
+      const db = getDatabase()
+      const lines: string[] = []
+      for (const r of results) {
+        lines.push(`[${r.severity}] ${r.title} (score: ${r.score.toFixed(2)})\n${r.snippet}\n[id:${r.id}]`)
+
+        try {
+          const links = intelEnricher.getLinks(r.id).slice(0, 3)
+          if (links.length > 0) {
+            const neighborIds = links.map((l) => l.linkedReportId)
+            const neighbors = resolveNodesById(db, neighborIds)
+            for (const l of links) {
+              const n = neighbors.get(l.linkedReportId) as { title?: string; type?: string; discipline?: string } | undefined
+              const title = n?.title ? String(n.title).slice(0, 60) : '(unknown)'
+              const marker = n?.type === 'humint'
+                ? `[humint:${l.linkedReportId}]`
+                : n?.type === 'preliminary'
+                ? `[preliminary:${l.linkedReportId}]`
+                : `[id:${l.linkedReportId}]`
+              lines.push(`  → ${marker} (${l.linkType}, ${l.strength.toFixed(2)}) "${title}"`)
+            }
+          }
+        } catch {}
+      }
+
       return {
-        // Each result carries [id:<uuid>] so the LLM can cite by id and
-        // handleSavePreliminaryReport can harvest IDs from tool_call_logs.
-        output: results.map((r) => `[${r.severity}] ${r.title} (score: ${r.score.toFixed(2)})\n${r.snippet}\n[id:${r.id}]`).join('\n---\n'),
+        output: lines.join('\n---\n'),
         data: results
       }
     })
@@ -300,6 +345,342 @@ class ToolRegistryImpl {
       return {
         output: filtered.map((l) => `→ ${l.linkedReportId.slice(0, 8)} [${l.linkType}] strength=${l.strength} "${l.reason}"`).join('\n') || 'No linked reports found.',
         data: filtered
+      }
+    })
+
+    // ─────────────────────────────────────────────────────────────────────
+    //  Knowledge-graph tools — surface prior analyst conclusions so the
+    //  agent doesn't re-derive work that's already been recorded.
+    // ─────────────────────────────────────────────────────────────────────
+
+    // ── HUMINT Recall ──
+    this.register({
+      name: 'humint_recall',
+      description: 'Find prior HUMINT analyst reports relevant to a topic. Use BEFORE fresh searches to avoid re-deriving conclusions an analyst already recorded. Returns findings, analyst notes, confidence, and the intel that backed each conclusion.',
+      parameters: { type: 'object', properties: {
+        query: { type: 'string', description: 'Topic or question to match against past HUMINT findings' },
+        limit: { type: 'number', description: 'Max HUMINTs to return (default 5)' },
+        session_id: { type: 'string', description: 'Filter to a specific chat session. Pass "current" to scope to the current chat.' }
+      }, required: ['query'] },
+      requiresApproval: false
+    }, async (params, ctx) => {
+      const query = String(params.query || '')
+      const limit = (params.limit as number) || 5
+      let sessionId: string | undefined = params.session_id as string | undefined
+      if (sessionId === 'current') sessionId = ctx?.sessionId
+
+      const db = getDatabase()
+
+      // Vector search first (semantic recall over findings/analyst_notes)
+      let humintIds: string[] = []
+      try {
+        const vr = await vectorDbService.search(query, Math.min(limit * 3, 30))
+        for (const r of vr) {
+          const id = (r as { id?: string }).id
+          if (!id) continue
+          const row = db.prepare('SELECT 1 FROM humint_reports WHERE id = ?').get(id)
+          if (row) humintIds.push(id)
+        }
+      } catch {}
+
+      // Keyword fallback / augment
+      if (humintIds.length < limit) {
+        const keywords = query.toLowerCase().split(/\s+/).filter((w) => w.length > 3).slice(0, 5)
+        if (keywords.length > 0) {
+          const conds = keywords.map(() => '(LOWER(findings) LIKE ? OR LOWER(analyst_notes) LIKE ?)').join(' OR ')
+          const bind: string[] = []
+          for (const k of keywords) bind.push(`%${k}%`, `%${k}%`)
+          const rows = db.prepare(
+            `SELECT id FROM humint_reports WHERE ${conds} ORDER BY created_at DESC LIMIT ?`
+          ).all(...bind, limit) as Array<{ id: string }>
+          for (const r of rows) if (!humintIds.includes(r.id)) humintIds.push(r.id)
+        }
+      }
+
+      if (humintIds.length === 0) {
+        return { output: `No past HUMINT reports found matching "${query}".`, data: [] }
+      }
+
+      humintIds = humintIds.slice(0, limit)
+      const placeholders = humintIds.map(() => '?').join(',')
+      const sessionFilter = sessionId ? ' AND session_id = ?' : ''
+      const bindArgs: unknown[] = [...humintIds]
+      if (sessionId) bindArgs.push(sessionId)
+      const rows = db.prepare(
+        `SELECT id, session_id, findings, analyst_notes, confidence, source_report_ids, created_at FROM humint_reports WHERE id IN (${placeholders})${sessionFilter} ORDER BY created_at DESC`
+      ).all(...bindArgs) as Array<{
+        id: string; session_id: string; findings: string; analyst_notes: string;
+        confidence: string; source_report_ids: string | null; created_at: number
+      }>
+
+      if (rows.length === 0) {
+        return { output: `No HUMINTs matched${sessionId ? ' in current session' : ''}.`, data: [] }
+      }
+
+      const blocks = rows.map((r) => {
+        let sourceCount = 0
+        try { sourceCount = JSON.parse(r.source_report_ids || '[]').length } catch {}
+        const findings = (r.findings || '').replace(/\s+/g, ' ').slice(0, 500)
+        const notes = (r.analyst_notes || '').replace(/\s+/g, ' ').slice(0, 500)
+        return [
+          `[humint:${r.id}] (confidence: ${r.confidence}, session: ${r.session_id.slice(0, 8)}, ${new Date(r.created_at).toISOString().slice(0, 10)})`,
+          `Findings: ${findings || '(none)'}`,
+          notes ? `Analyst notes: ${notes}` : '',
+          `Cited intel: ${sourceCount} reports`
+        ].filter(Boolean).join('\n')
+      })
+
+      return {
+        output: blocks.join('\n---\n'),
+        data: rows
+      }
+    })
+
+    // ── Preliminary Brief ──
+    this.register({
+      name: 'preliminary_brief',
+      description: 'Retrieve analyst-curated preliminary briefings relevant to a topic. Each brief summarizes prior intel synthesis plus any open information gaps and recommended actions.',
+      parameters: { type: 'object', properties: {
+        query: { type: 'string', description: 'Topic to match against briefing title and content' },
+        limit: { type: 'number', description: 'Max briefings to return (default 3)' }
+      }, required: ['query'] },
+      requiresApproval: false
+    }, async (params) => {
+      const query = String(params.query || '')
+      const limit = (params.limit as number) || 3
+      const db = getDatabase()
+
+      const keywords = query.toLowerCase().split(/\s+/).filter((w) => w.length > 3).slice(0, 5)
+      if (keywords.length === 0) return { output: 'Query too short — use at least one keyword of length >3.', data: [] }
+
+      const conds = keywords.map(() => '(LOWER(title) LIKE ? OR LOWER(content) LIKE ?)').join(' OR ')
+      const bind: string[] = []
+      for (const k of keywords) bind.push(`%${k}%`, `%${k}%`)
+
+      const rows = db.prepare(
+        `SELECT id, title, content, status, source_report_ids, created_at FROM preliminary_reports WHERE ${conds} ORDER BY created_at DESC LIMIT ?`
+      ).all(...bind, limit) as Array<{
+        id: string; title: string; content: string; status: string;
+        source_report_ids: string | null; created_at: number
+      }>
+
+      if (rows.length === 0) return { output: `No preliminary briefings found for "${query}".`, data: [] }
+
+      const blocks = rows.map((r) => {
+        let citedCount = 0
+        try { citedCount = JSON.parse(r.source_report_ids || '[]').length } catch {}
+
+        const gaps = db.prepare(
+          "SELECT description, severity FROM intel_gaps WHERE preliminary_report_id = ? AND status = 'open' LIMIT 5"
+        ).all(r.id) as Array<{ description: string; severity: string }>
+        const actions = db.prepare(
+          "SELECT action, priority FROM recommended_actions WHERE preliminary_report_id = ? AND status = 'pending' LIMIT 5"
+        ).all(r.id) as Array<{ action: string; priority: string }>
+
+        const content = (r.content || '').replace(/\s+/g, ' ').slice(0, 800)
+        const parts = [
+          `[preliminary:${r.id}] "${(r.title || '').slice(0, 80)}" (${new Date(r.created_at).toISOString().slice(0, 10)}, ${citedCount} cited)`,
+          `Summary: ${content}`
+        ]
+        if (gaps.length > 0) parts.push(`Open gaps (${gaps.length}):\n${gaps.map((g) => `  - [${g.severity}] ${g.description.slice(0, 120)}`).join('\n')}`)
+        if (actions.length > 0) parts.push(`Recommended actions (${actions.length}):\n${actions.map((a) => `  - [${a.priority}] ${a.action.slice(0, 120)}`).join('\n')}`)
+        return parts.join('\n')
+      })
+
+      return { output: blocks.join('\n---\n'), data: rows }
+    })
+
+    // ── Cited By (reverse citation) ──
+    this.register({
+      name: 'cited_by',
+      description: 'Reverse citation lookup — given an intel report id, find all preliminary briefings and HUMINT analyst products that cited it. Use to see how a specific intel finding has shaped prior conclusions.',
+      parameters: { type: 'object', properties: {
+        report_id: { type: 'string', description: 'Intel report id to look up citations for' }
+      }, required: ['report_id'] },
+      requiresApproval: false
+    }, async (params) => {
+      const reportId = String(params.report_id || '')
+      if (!reportId) return { output: 'report_id is required.', data: [] }
+
+      const db = getDatabase()
+      const links = db.prepare(
+        "SELECT source_report_id, link_type, strength, reason FROM intel_links WHERE target_report_id = ? AND link_type IN ('preliminary_reference', 'humint_source', 'humint_preliminary') ORDER BY strength DESC LIMIT 30"
+      ).all(reportId) as Array<{ source_report_id: string; link_type: string; strength: number; reason: string }>
+
+      if (links.length === 0) return { output: `Intel ${reportId.slice(0, 8)} has not been cited by any HUMINT or preliminary report.`, data: [] }
+
+      const sourceIds = links.map((l) => l.source_report_id)
+      const nodes = resolveNodesById(db, sourceIds)
+
+      const lines: string[] = []
+      for (const l of links) {
+        const n = nodes.get(l.source_report_id) as { title?: string; type?: string } | undefined
+        if (!n) continue
+        const marker = n.type === 'humint'
+          ? `[humint:${l.source_report_id}]`
+          : n.type === 'preliminary'
+          ? `[preliminary:${l.source_report_id}]`
+          : `[id:${l.source_report_id}]`
+        lines.push(`${marker} "${String(n.title || '').slice(0, 80)}" (${l.link_type}, strength ${l.strength.toFixed(2)})`)
+      }
+
+      return {
+        output: `Intel ${reportId.slice(0, 8)} has been cited by ${lines.length} analyst products:\n${lines.join('\n')}`,
+        data: links
+      }
+    })
+
+    // ── Graph Neighborhood ──
+    this.register({
+      name: 'graph_neighborhood',
+      description: 'Pull the knowledge-graph subgraph around a node (1 or 2 hops). Returns connected intel, HUMINT findings, preliminary briefings, information gaps, and recommended actions — grouped by node type so structure is visible at a glance.',
+      parameters: { type: 'object', properties: {
+        report_id: { type: 'string', description: 'Center node id (intel, humint, preliminary, or gap)' },
+        depth: { type: 'number', description: 'Hop depth (1 or 2, default 1)' },
+        limit: { type: 'number', description: 'Max total nodes to return (default 30)' }
+      }, required: ['report_id'] },
+      requiresApproval: false
+    }, async (params) => {
+      const reportId = String(params.report_id || '')
+      const depth = Math.min(Math.max((params.depth as number) || 1, 1), 2)
+      const limit = (params.limit as number) || 30
+      if (!reportId) return { output: 'report_id is required.', data: null }
+
+      const db = getDatabase()
+
+      // Collect link-connected ids up to depth
+      const visited = new Set<string>([reportId])
+      const frontier = new Set<string>([reportId])
+      const linkRows: Array<{ source: string; target: string; type: string; strength: number }> = []
+
+      for (let hop = 0; hop < depth; hop++) {
+        if (frontier.size === 0) break
+        const currentIds = Array.from(frontier)
+        frontier.clear()
+        const placeholders = currentIds.map(() => '?').join(',')
+        const links = db.prepare(
+          `SELECT source_report_id AS source, target_report_id AS target, link_type AS type, strength FROM intel_links WHERE source_report_id IN (${placeholders}) OR target_report_id IN (${placeholders}) ORDER BY strength DESC LIMIT ?`
+        ).all(...currentIds, ...currentIds, limit * 2) as Array<{ source: string; target: string; type: string; strength: number }>
+        for (const l of links) {
+          linkRows.push(l)
+          for (const id of [l.source, l.target]) {
+            if (!visited.has(id)) { visited.add(id); frontier.add(id) }
+          }
+        }
+      }
+
+      if (visited.size === 1) {
+        return { output: `Node ${reportId.slice(0, 8)} has no graph connections within ${depth} hops.`, data: { nodes: [], links: [] } }
+      }
+
+      const allIds = Array.from(visited).slice(0, limit)
+      const nodes = resolveNodesById(db, allIds)
+
+      // Group by type
+      const groups: Record<string, Array<{ id: string; title: string; discipline?: string; severity?: string }>> = {
+        INTEL: [], HUMINT: [], PRELIMINARY: [], GAP: [], ACTION: [], OTHER: []
+      }
+      for (const [id, n] of nodes) {
+        if (id === reportId) continue
+        const typed = n as { type?: string; discipline?: string; severity?: string; title?: string }
+        const bucket = typed.type === 'humint' ? 'HUMINT'
+          : typed.type === 'preliminary' ? 'PRELIMINARY'
+          : typed.type === 'gap' ? 'GAP'
+          : typed.type === 'action' ? 'ACTION'
+          : 'INTEL'
+        groups[bucket].push({ id, title: String(typed.title || '(untitled)').slice(0, 80), discipline: typed.discipline, severity: typed.severity })
+      }
+
+      const lines: string[] = [`Neighborhood of ${reportId.slice(0, 8)} within ${depth} hop(s) — ${visited.size - 1} nodes, ${linkRows.length} links`]
+      for (const group of ['HUMINT', 'PRELIMINARY', 'INTEL', 'GAP', 'ACTION']) {
+        const items = groups[group]
+        if (items.length === 0) continue
+        lines.push(`\n${group} (${items.length}):`)
+        for (const it of items) {
+          const marker = group === 'HUMINT' ? `[humint:${it.id}]` : group === 'PRELIMINARY' ? `[preliminary:${it.id}]` : `[id:${it.id}]`
+          const meta = [it.discipline, it.severity].filter(Boolean).join('/')
+          lines.push(`  ${marker} "${it.title}" ${meta ? `(${meta})` : ''}`)
+        }
+      }
+
+      return { output: lines.join('\n'), data: { nodes: Array.from(nodes.values()), links: linkRows } }
+    })
+
+    // ── Entity Lineage ──
+    this.register({
+      name: 'entity_lineage',
+      description: 'Walk the graph for a specific entity (IP, CVE, country, org, threat actor, malware). Returns a chronological view: intel reports mentioning the entity → HUMINTs that cite those reports → preliminary briefings → open gaps.',
+      parameters: { type: 'object', properties: {
+        entity_type: { type: 'string', description: 'Entity type: ip, cve, country, organization, threat_actor, malware' },
+        entity_value: { type: 'string', description: 'Entity value to trace' },
+        limit: { type: 'number', description: 'Max intel reports to include per bucket (default 20)' }
+      }, required: ['entity_type', 'entity_value'] },
+      requiresApproval: false
+    }, async (params) => {
+      const entityType = String(params.entity_type || '')
+      const entityValue = String(params.entity_value || '')
+      const limit = (params.limit as number) || 20
+      if (!entityType || !entityValue) return { output: 'entity_type and entity_value are required.', data: null }
+
+      const db = getDatabase()
+
+      // Intel reports citing this entity
+      const intel = db.prepare(
+        'SELECT r.id, r.title, r.discipline, r.severity, r.created_at FROM intel_reports r JOIN intel_entities e ON r.id = e.report_id WHERE e.entity_type = ? AND e.entity_value = ? ORDER BY r.created_at DESC LIMIT ?'
+      ).all(entityType, entityValue, limit) as Array<{ id: string; title: string; discipline: string; severity: string; created_at: number }>
+
+      if (intel.length === 0) return { output: `No intel reports reference ${entityType}=${entityValue}.`, data: null }
+
+      const intelIds = intel.map((r) => r.id)
+      const placeholders = intelIds.map(() => '?').join(',')
+
+      // HUMINTs / preliminaries that cite any of those intel reports
+      const analystLinks = db.prepare(
+        `SELECT source_report_id, target_report_id, link_type FROM intel_links WHERE target_report_id IN (${placeholders}) AND link_type IN ('humint_source', 'preliminary_reference')`
+      ).all(...intelIds) as Array<{ source_report_id: string; target_report_id: string; link_type: string }>
+
+      const productIds = Array.from(new Set(analystLinks.map((l) => l.source_report_id)))
+      const products = productIds.length > 0 ? resolveNodesById(db, productIds) : new Map()
+
+      // Open gaps on those preliminaries
+      const prelimIds = Array.from(products.entries())
+        .filter(([, n]) => (n as { type?: string }).type === 'preliminary')
+        .map(([id]) => id)
+      let gaps: Array<{ id: string; description: string; severity: string; preliminary_report_id: string }> = []
+      if (prelimIds.length > 0) {
+        const ph = prelimIds.map(() => '?').join(',')
+        gaps = db.prepare(
+          `SELECT id, description, severity, preliminary_report_id FROM intel_gaps WHERE preliminary_report_id IN (${ph}) AND status = 'open' LIMIT 15`
+        ).all(...prelimIds) as Array<{ id: string; description: string; severity: string; preliminary_report_id: string }>
+      }
+
+      const lines: string[] = [`Entity lineage — ${entityType} = "${entityValue}"`, '']
+      lines.push(`INTEL (${intel.length}):`)
+      for (const r of intel.slice(0, 10)) {
+        lines.push(`  [id:${r.id}] "${String(r.title || '').slice(0, 60)}" (${r.discipline}/${r.severity}, ${new Date(r.created_at).toISOString().slice(0, 10)})`)
+      }
+
+      const humintCount = Array.from(products.values()).filter((n) => (n as { type?: string }).type === 'humint').length
+      const prelimCount = Array.from(products.values()).filter((n) => (n as { type?: string }).type === 'preliminary').length
+      if (humintCount > 0 || prelimCount > 0) {
+        lines.push(`\nANALYST PRODUCTS (${humintCount} HUMINTs, ${prelimCount} preliminaries):`)
+        for (const [id, n] of products) {
+          const typed = n as { type?: string; title?: string }
+          const marker = typed.type === 'humint' ? `[humint:${id}]` : `[preliminary:${id}]`
+          lines.push(`  ${marker} "${String(typed.title || '').slice(0, 60)}"`)
+        }
+      }
+
+      if (gaps.length > 0) {
+        lines.push(`\nOPEN GAPS (${gaps.length}):`)
+        for (const g of gaps) {
+          lines.push(`  [${g.severity}] ${String(g.description || '').slice(0, 100)}`)
+        }
+      }
+
+      return {
+        output: lines.join('\n'),
+        data: { intel, products: Array.from(products.values()), gaps }
       }
     })
 

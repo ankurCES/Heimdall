@@ -89,7 +89,8 @@ export function registerChatBridge(): void {
                 'INSERT INTO tool_call_logs (id, session_id, tool_name, params, result, created_at) VALUES (?, ?, ?, ?, ?, ?)'
               ).run(generateId(), sessionId, toolName, JSON.stringify(params).slice(0, 2000), String(result).slice(0, 5000), timestamp())
             } catch {}
-          }
+          },
+          sessionId
         )
       } else if (useAgentic) {
         fullResponse = await agenticChatOrchestrator.process(
