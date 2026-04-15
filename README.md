@@ -22,7 +22,55 @@ Built with Electron + React + TypeScript. Runs entirely on your machine — no c
 
 ## Screenshots
 
-> The app includes 17 pages organized into 5 sidebar groups: **Overview** (Dashboard, Intel Feed, Map, Markets), **Intelligence** (Browse Intel, Enriched Data, Watch Terms, Explore), **Sources & Sync** (Sources, Sync Center, Obsidian Vault), **AI & Comms** (Chat, Alerts, Meshtastic), **System** (Token Usage, Audit Log, Settings).
+The app includes 17 pages organized into 5 sidebar groups: **Overview** (Dashboard, Intel Feed, Map, Markets), **Intelligence** (Browse Intel, Enriched Data, Watch Terms, Explore), **Sources & Sync** (Sources, Sync Center, Obsidian Vault), **AI & Comms** (Chat, Alerts, Meshtastic), **System** (Token Usage, Audit Log, Settings).
+
+### Operations Center (Dashboard)
+
+SOC-style overview with 6 KPI cards, 24h activity timeline stacked by severity, discipline doughnut, geo threat heatmap, top entities/sources/movers, and a critical activity feed — auto-refreshing every 30 seconds.
+
+![Dashboard](docs/screenshots/dashboard.png)
+
+### Custom Analytics Reports (Explore) — Power BI-style
+
+Customizable analytics dashboards with saved reports, drag/drop grid canvas, 8 widget types (KPI, bar, line, pie, doughnut, timeline, heatmap, table, markdown), and 3 built-in presets. Global slicers apply to all widgets; each widget can override or ignore them.
+
+**Intel Overview preset** — KPIs + severity/discipline breakdowns + activity timeline + top sources:
+
+![Intel Overview](docs/screenshots/explore-intel-overview.png)
+
+**Cyber Threat Watch preset** — top threat actors, malware families, recent CVEs (pre-filtered to cybint discipline):
+
+![Cyber Threat Watch](docs/screenshots/explore-cyber-threat-watch.png)
+
+**Markets Pulse preset** — tracked tickers, top movers, asset-class mix, recent finint reports:
+
+![Markets Pulse](docs/screenshots/explore-markets-pulse.png)
+
+**Edit mode** — drag, resize, remove widgets; every widget gets hover chrome for settings / duplicate / delete:
+
+![Edit Mode](docs/screenshots/explore-edit-mode.png)
+
+**Widget Editor with live preview** — configure data source, metric, grouping, filters, and display options in a tabbed dialog. Preview renders on the right as you type.
+
+![Widget Editor](docs/screenshots/widget-editor-data.png)
+
+### Geospatial Threat Map
+
+Dark-themed Leaflet map with severity-colored markers, ADS-B / ISS trajectory paths as dotted great-circle interpolations, and discipline layer toggles.
+
+![Map](docs/screenshots/map.png)
+
+### Markets Dashboard
+
+Trader-style dashboard: VIX / USD / gold / oil KPIs, 14-commodity sector heatmap, multi-asset normalized price chart across 24h → 5y ranges, SEC filings, sanctions alerts, and Polymarket geopolitical contracts.
+
+![Markets](docs/screenshots/markets.png)
+
+### Intel Feed
+
+Virtualized list of every collected intel report with discipline / severity / source-type filters, sortable by time, verification score shown in detail pane.
+
+![Intel Feed](docs/screenshots/intel-feed.png)
 
 ---
 
@@ -54,6 +102,28 @@ Add your own intelligence sources via UI without touching code:
 - **RSS/Atom feeds** — any feed URL via UI
 - **Source Preset Gallery** — 30+ curated one-click sources: Bellingcat Telegram, OSINT Defender, CISA advisories, MITRE ATT&CK, Sigma rules, Krebs on Security, Talos, Mandiant, MFAPI funds, Alpaca markets, etc.
 - **Live "Test Source"** before saving — preview sample reports
+
+### Custom Analytics Reports (Power BI-style)
+
+Fully customizable analytics dashboards on the **Explore** page:
+
+- **Saved reports** selectable from a top dropdown — `New / Save / Save As / Rename / Duplicate / Delete / Export JSON / Import JSON`, with an "unsaved changes" indicator
+- **Grid canvas** powered by react-grid-layout — drag to reposition, resize from corners, `Edit` / `View` mode toggle, 12-column responsive grid with auto-packing
+- **8 widget types**:
+  - **KPI / Big Number** — single metric with lucide icon + accent color + optional delta-vs-previous-period arrow
+  - **Bar** (grouped + stacked), **Line** (smoothed), **Pie**, **Doughnut**
+  - **Timeline** — line chart over configurable time buckets
+  - **Day-of-week × Hour Heatmap** — 7×24 intensity matrix
+  - **Sortable Table** — virtualized for large result sets
+  - **Markdown / Text** — for notes, section headers, executive summary
+- **Widget editor** (Dialog + Tabs) with a live preview pane — Basic / Data / Display / Filters tabs cover everything from data source + metric + groupBy to color scheme + legend position + per-widget filter overrides
+- **Global slicers** — dashboard-level time range + discipline + severity chips apply to every widget; each widget can opt out via "Ignore global filters"
+- **3 bundled preset reports** (starred in the selector):
+  - **Intel Overview** — KPIs, severity doughnut, discipline bar, 24h timeline, top sources
+  - **Cyber Threat Watch** — pre-filtered to cybint with top actors/malware, CVE list, cyber timeline
+  - **Markets Pulse** — ticker KPIs, top movers, asset-class mix, recent finint reports
+- **Generic query engine** — `analytics:queryWidget` IPC runs whitelisted `GROUP BY` aggregations across 7 data sources (intel, entities, tags, sources, market_quotes, watch_terms, tokens) with column + operator whitelists (fully injection-safe via better-sqlite3 parameter binding)
+- **Performance** — query hook debounces filter changes (250 ms), deduplicates identical requests across widgets, and keeps a 30-second in-memory cache
 
 ### Markets Dashboard
 
@@ -316,8 +386,9 @@ Heimdall uses SQLite (WAL mode) with 20+ tables:
 - `meshtastic_nodes` — Mesh network node tracking
 - `token_usage` — LLM token consumption tracking
 - `audit_log` — System audit trail
+- `analytics_reports` — Saved custom analytics dashboards (layouts, widgets, global filters as JSON)
 
-Versioned migrations with automatic pre-migration backups ensure zero data loss on upgrades.
+Versioned migrations with automatic pre-migration backups ensure zero data loss on upgrades. Current schema version is **007**.
 
 ---
 
