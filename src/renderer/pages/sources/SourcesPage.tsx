@@ -140,7 +140,7 @@ export function SourcesPage() {
       />
 
       {/* Stats */}
-      <div className="grid grid-cols-4 gap-3">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         <Card>
           <CardContent className="p-3 flex items-center gap-3">
             <Database className="h-8 w-8 text-primary" />

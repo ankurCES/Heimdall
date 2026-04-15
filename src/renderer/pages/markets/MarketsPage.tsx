@@ -275,7 +275,7 @@ export function MarketsPage() {
       {quotes.length > 0 && (
         <div className="p-4 space-y-4">
           {/* Zone 1: KPI Strip */}
-          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
             {kpis.kpiQuotes.map((q) => (
               <KpiCard key={q.ticker} quote={q} sparkline={history[q.ticker]?.map((p) => p.price)} onClick={() => openDrawer(q.ticker)} />
             ))}
@@ -492,7 +492,7 @@ function CommodityDetailDrawer({
   }), [data.history, quote.name])
 
   return (
-    <div className="fixed inset-y-0 right-0 z-[1500] w-[480px] bg-card border-l border-border shadow-2xl flex flex-col">
+    <div className="fixed inset-y-0 right-0 z-[1500] w-full sm:w-[480px] max-w-full bg-card border-l border-border shadow-2xl flex flex-col">
       <div className="flex items-center justify-between p-4 border-b border-border">
         <div>
           <h2 className="text-base font-semibold">{quote.name}</h2>

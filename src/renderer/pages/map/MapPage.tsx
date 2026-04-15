@@ -249,18 +249,18 @@ export function MapPage() {
   return (
     <div className="flex flex-col h-full">
       {/* Toolbar */}
-      <div className="flex items-center justify-between px-4 py-2 border-b border-border bg-card/50 relative z-10">
-        <div className="flex items-center gap-2">
+      <div className="flex items-center justify-between gap-2 flex-wrap px-3 py-2 border-b border-border bg-card/50 relative z-10">
+        <div className="flex items-center gap-2 flex-wrap">
           <MapIcon className="h-4 w-4 text-muted-foreground" />
           <span className="text-sm font-semibold">Threat Map</span>
           <Badge variant="outline" className="text-xs">{stats.total} geo-tagged</Badge>
           {stats.critical > 0 && <Badge variant="destructive" className="text-xs">{stats.critical} critical</Badge>}
           {stats.high > 0 && <Badge variant="warning" className="text-xs">{stats.high} high</Badge>}
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
           {/* Layer selector dropdown */}
           <Select value="layers" onValueChange={() => {}}>
-            <SelectTrigger className="w-40 h-7 text-xs">
+            <SelectTrigger className="w-32 sm:w-40 h-7 text-xs">
               <span className="flex items-center gap-1.5">
                 <Filter className="h-3 w-3" />
                 Layers ({Object.values(layers).filter(Boolean).length})
@@ -421,7 +421,7 @@ export function MapPage() {
 
         {/* Detail panel */}
         {selectedReport && (
-          <div className="absolute top-3 right-3 w-80 bg-card/95 backdrop-blur border border-border rounded-lg shadow-lg z-[1000] max-h-[60vh] overflow-auto">
+          <div className="absolute top-3 right-3 w-[calc(100vw-24px)] sm:w-80 bg-card/95 backdrop-blur border border-border rounded-lg shadow-lg z-[1000] max-h-[60vh] overflow-auto">
             <div className="p-3">
               <div className="flex items-center justify-between mb-2">
                 <Badge
@@ -460,7 +460,7 @@ export function MapPage() {
 
         {/* Mesh node detail panel */}
         {selectedNode && (
-          <div className="absolute top-3 right-3 w-80 bg-card/95 backdrop-blur border border-border rounded-lg shadow-lg z-[1000] max-h-[70vh] overflow-auto">
+          <div className="absolute top-3 right-3 w-[calc(100vw-24px)] sm:w-80 bg-card/95 backdrop-blur border border-border rounded-lg shadow-lg z-[1000] max-h-[70vh] overflow-auto">
             <div className="p-3">
               <div className="flex items-center justify-between mb-2">
                 <Badge variant="outline" className="gap-1 text-green-500 border-green-500/30">

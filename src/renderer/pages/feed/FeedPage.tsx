@@ -100,8 +100,8 @@ export function FeedPage() {
       {/* Left: Feed list */}
       <div className="flex flex-col flex-1 min-w-0 border-r border-border">
         {/* Filters bar */}
-        <div className="flex items-center gap-2 p-3 border-b border-border bg-card/50">
-          <div className="relative flex-1">
+        <div className="flex items-center gap-2 flex-wrap p-3 border-b border-border bg-card/50">
+          <div className="relative flex-1 min-w-[150px]">
             <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
             <Input
               value={searchInput}
@@ -220,16 +220,30 @@ export function FeedPage() {
         </div>
       </div>
 
-      {/* Right: Detail panel */}
-      <div className="w-[420px] overflow-auto bg-card/30">
+      {/* Right: Detail panel — slides in as overlay on mobile, fixed sidebar on desktop */}
+      <div className={cn(
+        'overflow-auto bg-card/95 md:bg-card/30 backdrop-blur md:backdrop-blur-none',
+        'fixed md:relative inset-y-0 right-0 z-40 md:z-auto',
+        'w-full sm:w-[440px] md:w-[420px] border-l border-border md:border-l',
+        selectedReport ? 'block' : 'hidden md:block'
+      )}>
         {selectedReport ? (
-          <ReportDetail
-            report={selectedReport}
-            onMarkReviewed={() => {
-              markReviewed([selectedReport.id])
-              setSelectedReport({ ...selectedReport, reviewed: true })
-            }}
-          />
+          <>
+            {/* Mobile close button */}
+            <button
+              onClick={() => setSelectedReport(null)}
+              className="md:hidden absolute top-3 right-3 z-10 p-1.5 rounded bg-muted hover:bg-accent"
+            >
+              <X className="h-4 w-4" />
+            </button>
+            <ReportDetail
+              report={selectedReport}
+              onMarkReviewed={() => {
+                markReviewed([selectedReport.id])
+                setSelectedReport({ ...selectedReport, reviewed: true })
+              }}
+            />
+          </>
         ) : (
           <div className="flex flex-col items-center justify-center h-full text-muted-foreground">
             <FileText className="h-10 w-10 mb-2 opacity-30" />

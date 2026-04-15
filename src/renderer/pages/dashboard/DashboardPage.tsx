@@ -167,7 +167,7 @@ export function DashboardPage() {
       </div>
 
       {/* Row 1: Hourly trend + Discipline donut */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
         <Card className="lg:col-span-2">
           <CardContent className="p-4">
             <div className="flex items-center justify-between mb-3">
@@ -209,7 +209,7 @@ export function DashboardPage() {
       </div>
 
       {/* Row 2: Mini map + Top sources + Top entities */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
         {/* Mini map */}
         <Card className="lg:col-span-2">
           <CardContent className="p-4">
@@ -283,7 +283,7 @@ export function DashboardPage() {
       </div>
 
       {/* Row 3: Top sources + Markets summary + Recent timeline */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
         {/* Top sources by volume */}
         <Card>
           <CardContent className="p-4">
