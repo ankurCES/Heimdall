@@ -76,6 +76,46 @@ const migrations: Migration[] = [
         CREATE INDEX IF NOT EXISTS idx_market_quotes_category ON market_quotes(category);
       `)
     }
+  },
+  {
+    version: '005',
+    name: 'fix_apikey_placeholders_in_source_configs',
+    up: (db) => {
+      // Migrate existing source configs that still have placeholder API key strings
+      // (YOUR_KEY_ID, YOUR_SECRET, YOUR_API_KEY_HERE) to use settings:apikeys.X refs.
+      // This applies to any source created before the settings-resolver feature shipped.
+      const sources = db.prepare(
+        "SELECT id, name, config FROM sources WHERE config LIKE '%YOUR_KEY_ID%' OR config LIKE '%YOUR_SECRET%' OR config LIKE '%YOUR_API_KEY_HERE%'"
+      ).all() as Array<{ id: string; name: string; config: string }>
+
+      let migrated = 0
+      for (const src of sources) {
+        try {
+          const cfg = JSON.parse(src.config)
+          if (!cfg.headers || typeof cfg.headers !== 'object') continue
+
+          let modified = false
+          for (const [hName, hValue] of Object.entries(cfg.headers as Record<string, string>)) {
+            if (hValue === 'YOUR_KEY_ID') {
+              cfg.headers[hName] = 'settings:apikeys.alpaca_key_id'
+              modified = true
+            } else if (hValue === 'YOUR_SECRET') {
+              cfg.headers[hName] = 'settings:apikeys.alpaca_secret'
+              modified = true
+            } else if (hValue === 'YOUR_API_KEY_HERE') {
+              cfg.headers[hName] = 'settings:apikeys.otx'
+              modified = true
+            }
+          }
+          if (modified) {
+            db.prepare('UPDATE sources SET config = ?, updated_at = ? WHERE id = ?')
+              .run(JSON.stringify(cfg), timestamp(), src.id)
+            migrated++
+          }
+        } catch {}
+      }
+      log.info(`Migration 005: updated ${migrated} source configs to use settings:apikeys refs`)
+    }
   }
 ]
 
