@@ -26,6 +26,7 @@ import { EntitiesPage } from './pages/entities/EntitiesPage'
 import { CounterintelPage } from './pages/counterintel/CounterintelPage'
 import { CybintPage } from './pages/cybint/CybintPage'
 import { QuarantinePage } from './pages/quarantine/QuarantinePage'
+import { OvernightPage } from './pages/overnight/OvernightPage'
 import { Toaster } from 'sonner'
 import { NotificationListener } from './components/NotificationListener'
 import { UnlockGate } from './components/UnlockGate'
@@ -67,6 +68,7 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
           <Route path="/counterintel" element={<CounterintelPage />} />
           <Route path="/cybint" element={<CybintPage />} />
           <Route path="/quarantine" element={<QuarantinePage />} />
+          <Route path="/overnight" element={<OvernightPage />} />
           <Route path="/sync" element={<SyncPage />} />
           <Route path="/tokens" element={<TokensPage />} />
           <Route path="/audit" element={<AuditPage />} />

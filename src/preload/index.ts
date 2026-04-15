@@ -58,7 +58,9 @@ const testChannels = [
   'safety:airgap_status', 'safety:apply_airgap',
   'safety:panic_wipe_targets', 'safety:panic_wipe',
   'inj:screen_corpus', 'inj:screen_report', 'inj:release',
-  'inj:quarantined', 'inj:flagged', 'inj:latest', 'inj:rules'
+  'inj:quarantined', 'inj:flagged', 'inj:latest', 'inj:rules',
+  'overnight:run_now', 'overnight:latest', 'overnight:recent',
+  'overnight:prune_expired'
 ]
 const allowedChannels = [...Object.values(IPC_CHANNELS), ...testChannels]
 const chatEvents = ['chat:chunk', 'chat:done', 'chat:error']

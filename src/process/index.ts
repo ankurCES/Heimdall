@@ -17,6 +17,7 @@ import { agentOrchestrator } from './agents/AgentOrchestrator'
 import { intelPipeline } from './services/vectordb/IntelPipeline'
 import { enrichmentOrchestrator } from './services/enrichment/EnrichmentOrchestrator'
 import { resourceManager } from './services/resource/ResourceManager'
+import { overnightService } from './services/overnight/OvernightService'
 // Kuzu graph DB removed — buggy native module, dormant for entire history,
 // SQLite handled every graph query in practice. See migration 012.
 
@@ -101,6 +102,13 @@ async function initializeDeferred(): Promise<void> {
 
   // Start resource manager (memory cleanup, WAL checkpoint, cache pruning)
   resourceManager.start()
+
+  // Overnight collection cycle — 02:30 local, daily. Writes no files, only
+  // DB rows, so clash-with-migration is not a concern.
+  cronService.schedule('overnight.cycle', '30 2 * * *', 'Overnight collection cycle', async () => {
+    try { await overnightService.runCycle({ periodHours: 24 }) }
+    catch (err) { log.error(`overnight.cycle failed: ${err}`) }
+  })
 
   // Auto-pull Meshtastic data on startup if configured. Outer catch logs at
   // debug because a missing/malformed config is expected on first run; inner

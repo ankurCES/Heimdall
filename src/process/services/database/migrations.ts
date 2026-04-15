@@ -1354,6 +1354,43 @@ const migrations: Migration[] = [
 
       log.info('Migration 023: injection_flags + injection_runs + quarantined column')
     }
+  },
+  {
+    version: '024',
+    name: 'overnight_cycle',
+    up: (db) => {
+      // Cross-cutting B — Autonomous overnight collection cycle.
+      //
+      // Adds an expires_at column to watch_terms so the overnight cycle
+      // can spawn short-lived targeted terms (24h by default) without
+      // permanently polluting the analyst's watchlist.
+      //
+      // overnight_runs tracks each cycle: identified gaps, generated
+      // terms, reports collected, and DPB id produced.
+      try {
+        db.exec(`ALTER TABLE watch_terms ADD COLUMN expires_at INTEGER`)
+      } catch { /* idempotent */ }
+      try {
+        db.exec(`CREATE INDEX IF NOT EXISTS idx_watch_terms_expiry ON watch_terms(expires_at)`)
+      } catch { /* idempotent */ }
+
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS overnight_runs (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          started_at INTEGER NOT NULL,
+          finished_at INTEGER,
+          gaps_considered INTEGER,
+          terms_spawned INTEGER,
+          reports_collected INTEGER,
+          dpb_id TEXT,
+          summary TEXT,
+          duration_ms INTEGER,
+          error TEXT
+        );
+      `)
+
+      log.info('Migration 024: watch_terms.expires_at + overnight_runs table')
+    }
   }
 ]
 
