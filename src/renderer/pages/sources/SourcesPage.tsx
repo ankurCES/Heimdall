@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { useSourceStore } from '@renderer/stores/sourceStore'
 import {
   Database, Play, Pause, RefreshCw, AlertCircle,
-  Clock, CheckCircle, Loader2, Plus, Trash2
+  Clock, CheckCircle, Loader2, Plus, Trash2, Zap
 } from 'lucide-react'
 import { AddSourceModal } from '@renderer/components/sources/AddSourceModal'
 import { Button } from '@renderer/components/ui/button'
@@ -23,6 +23,29 @@ export function SourcesPage() {
   const { sources, loading, fetchSources } = useSourceStore()
   const [collectingIds, setCollectingIds] = useState<Set<string>>(new Set())
   const [addModalOpen, setAddModalOpen] = useState(false)
+  const [syncingAll, setSyncingAll] = useState(false)
+  const [syncResult, setSyncResult] = useState<{ total: number; succeeded: number; failed: number; totalStored: number } | null>(null)
+
+  const handleSyncAll = async () => {
+    if (!confirm(`Run all ${sources.length} collectors now? This will trigger every enabled source with a 500ms stagger.`)) return
+    setSyncingAll(true)
+    setSyncResult(null)
+    try {
+      const result = await window.heimdall.invoke('sources:syncAll') as {
+        total: number; succeeded: number; failed: number
+        results: Array<{ sourceName: string; collected: number; stored: number; error: string | null }>
+      }
+      const totalStored = result.results.reduce((s, r) => s + r.stored, 0)
+      setSyncResult({ total: result.total, succeeded: result.succeeded, failed: result.failed, totalStored })
+      // Auto-clear after 30s
+      setTimeout(() => setSyncResult(null), 30000)
+      fetchSources()
+    } catch (err) {
+      alert(`Sync All failed: ${err}`)
+    } finally {
+      setSyncingAll(false)
+    }
+  }
 
   const handleDelete = async (sourceId: string, name: string) => {
     if (!confirm(`Delete source "${name}"? This cannot be undone.`)) return
@@ -87,9 +110,21 @@ export function SourcesPage() {
           </p>
         </div>
         <div className="flex items-center gap-2">
+          {syncResult && (
+            <Badge variant={syncResult.failed > 0 ? 'warning' : 'success'} className="text-xs">
+              Sync: {syncResult.succeeded}/{syncResult.total} ok • {syncResult.totalStored} new
+            </Badge>
+          )}
           <Button variant="outline" size="sm" onClick={fetchSources} disabled={loading}>
             <RefreshCw className={cn('h-4 w-4 mr-2', loading && 'animate-spin')} />
             Refresh
+          </Button>
+          <Button variant="outline" size="sm" onClick={handleSyncAll} disabled={syncingAll}>
+            {syncingAll ? (
+              <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Syncing...</>
+            ) : (
+              <><Zap className="h-4 w-4 mr-2" />Sync All</>
+            )}
           </Button>
           <Button size="sm" onClick={() => setAddModalOpen(true)}>
             <Plus className="h-4 w-4 mr-2" />

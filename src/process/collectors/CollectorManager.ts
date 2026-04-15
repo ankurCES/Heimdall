@@ -1,5 +1,6 @@
 import { IPC_EVENTS } from '@common/adapter/ipcBridge'
 import { emitToAll } from '../services/resource/WindowCache'
+import { debugCollector, debugStore, isDevMode } from '../services/debug/DebugLogger'
 import { BaseCollector, type SourceConfig } from './BaseCollector'
 import { intelStorageService } from '../services/intel/IntelStorageService'
 import { cronService } from '../services/cron/CronService'
@@ -86,21 +87,32 @@ export class CollectorManager {
     }
   }
 
-  async runCollector(sourceId: string): Promise<void> {
+  async runCollector(sourceId: string): Promise<{ collected: number; stored: number; error: string | null }> {
     const collector = this.collectors.get(sourceId)
     if (!collector) {
       throw new Error(`Collector not found: ${sourceId}`)
     }
 
+    // Look up source name for friendly logs
+    const db = getDatabase()
+    const srcRow = db.prepare('SELECT name, type FROM sources WHERE id = ?').get(sourceId) as { name: string; type: string } | undefined
+    const sourceName = srcRow?.name || sourceId.slice(0, 8)
+    const sourceType = srcRow?.type || 'unknown'
+
+    debugCollector(sourceName, `START [${sourceType}]`)
     this.emitStatus(sourceId, 'running')
+
+    const startTime = Date.now()
 
     try {
       const rawReports = await collector.collect()
       const reports = (rawReports || []).filter((r) => r && r.title?.trim() && r.content?.trim())
+      const dropped = (rawReports || []).length - reports.length
       const stored = intelStorageService.store(reports)
+      const dupes = reports.length - stored.length
+      const elapsedMs = Date.now() - startTime
 
       // Update source metadata
-      const db = getDatabase()
       db.prepare(
         'UPDATE sources SET last_collected_at = ?, last_error = NULL, error_count = 0, updated_at = ? WHERE id = ?'
       ).run(timestamp(), timestamp(), sourceId)
@@ -110,18 +122,65 @@ export class CollectorManager {
         this.matchWatchTerms(stored)
       }
 
-      log.info(`Collector ${sourceId}: collected ${reports.length} reports, stored ${stored.length} new`)
+      // Always log result + debug-only granular details
+      log.info(`Collector [${sourceName}] (${sourceType}): collected=${reports.length} stored=${stored.length} dupes=${dupes}${dropped > 0 ? ` dropped=${dropped}` : ''} (${elapsedMs}ms)`)
+      debugStore(sourceName, reports.length, stored.length, dupes)
+      if (isDevMode() && stored.length > 0) {
+        debugCollector(sourceName, `DONE — sample title: "${stored[0].title.slice(0, 80)}"`)
+      } else if (isDevMode() && reports.length === 0) {
+        debugCollector(sourceName, `DONE — NO ITEMS RETURNED (check API endpoint, auth, robots.txt, or feed format)`)
+      }
       this.emitStatus(sourceId, 'idle')
+      return { collected: reports.length, stored: stored.length, error: null }
     } catch (err) {
-      log.error(`Collector ${sourceId} failed:`, err)
+      const errStr = err instanceof Error ? `${err.message}\n${err.stack}` : String(err)
+      log.error(`Collector [${sourceName}] (${sourceType}) FAILED: ${errStr.slice(0, 500)}`)
+      debugCollector(sourceName, `ERROR`, errStr.slice(0, 200))
 
-      const db = getDatabase()
       db.prepare(
         'UPDATE sources SET last_error = ?, error_count = error_count + 1, updated_at = ? WHERE id = ?'
-      ).run(String(err), timestamp(), sourceId)
+      ).run(String(err).slice(0, 500), timestamp(), sourceId)
 
       this.emitStatus(sourceId, 'error', String(err))
+      return { collected: 0, stored: 0, error: String(err) }
     }
+  }
+
+  // Run all enabled collectors with stagger to avoid overwhelming the system
+  async runAllCollectors(): Promise<{ total: number; succeeded: number; failed: number; results: Array<{ sourceId: string; sourceName: string; collected: number; stored: number; error: string | null }> }> {
+    const allIds = Array.from(this.collectors.keys())
+    log.info(`SyncAll: running ${allIds.length} collectors with 500ms stagger`)
+    debugCollector('SYNC_ALL', `Starting ${allIds.length} collectors`)
+
+    const db = getDatabase()
+    const results: Array<{ sourceId: string; sourceName: string; collected: number; stored: number; error: string | null }> = []
+    let succeeded = 0
+    let failed = 0
+
+    for (let i = 0; i < allIds.length; i++) {
+      const sourceId = allIds[i]
+      const srcRow = db.prepare('SELECT name FROM sources WHERE id = ?').get(sourceId) as { name: string } | undefined
+      const sourceName = srcRow?.name || sourceId
+
+      try {
+        const r = await this.runCollector(sourceId)
+        results.push({ sourceId, sourceName, ...r })
+        if (r.error) failed++; else succeeded++
+      } catch (err) {
+        results.push({ sourceId, sourceName, collected: 0, stored: 0, error: String(err) })
+        failed++
+      }
+
+      // 500ms stagger between collectors so we don't slam memory/network
+      if (i < allIds.length - 1) {
+        await new Promise((r) => setTimeout(r, 500))
+      }
+    }
+
+    const totalStored = results.reduce((s, r) => s + r.stored, 0)
+    log.info(`SyncAll DONE: ${succeeded} succeeded, ${failed} failed, ${totalStored} total new reports`)
+    debugCollector('SYNC_ALL', `Completed: ${succeeded}/${allIds.length} succeeded, ${totalStored} new reports`)
+    return { total: allIds.length, succeeded, failed, results }
   }
 
   async createSource(config: Omit<SourceConfig, 'id'>): Promise<SourceConfig> {

@@ -65,6 +65,13 @@ export function registerSourcesBridge(): void {
     await collectorManager.runCollector(params.id)
   })
 
+  // Run all enabled collectors with stagger — returns per-source results
+  ipcMain.handle('sources:syncAll', async () => {
+    log.info('SyncAll triggered from UI')
+    const result = await collectorManager.runAllCollectors()
+    return result
+  })
+
   // List source presets for the gallery UI
   ipcMain.handle('sources:listPresets', () => {
     return SOURCE_PRESETS
