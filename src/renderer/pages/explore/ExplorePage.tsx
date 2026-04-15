@@ -12,9 +12,9 @@ export function ExplorePage() {
   const [viewMode, setViewMode] = useState<ViewMode>('analytics')
 
   return (
-    <div className="flex flex-col h-full">
-      {/* Top view-mode toggle + report selector */}
-      <div className="flex items-center gap-3 px-3 py-2 border-b border-border bg-card/50 flex-wrap">
+    <div className="flex flex-col h-full overflow-hidden">
+      {/* Top view-mode toggle + report selector — sticky at top */}
+      <div className="flex items-center gap-3 px-3 py-2 border-b border-border bg-card/50 flex-wrap shrink-0">
         <div className="flex items-center gap-0.5 bg-muted rounded-md p-0.5">
           <button
             onClick={() => setViewMode('analytics')}
@@ -39,7 +39,7 @@ export function ExplorePage() {
           <DashboardCanvas />
         </>
       ) : (
-        <div className="flex-1">
+        <div className="flex-1 min-h-0 overflow-hidden">
           <RelationshipGraph />
         </div>
       )}

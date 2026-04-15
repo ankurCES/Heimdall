@@ -334,50 +334,55 @@ export function RelationshipGraph() {
   }, [layoutMode, graphData.nodes])
 
   return (
-    <div className="flex h-full">
-      {/* Controls panel */}
-      <div className="w-60 shrink-0 border-r border-border bg-card/50 p-4 space-y-4 overflow-auto">
-        <div className="flex items-center gap-2">
-          <Network className="h-4 w-4 text-primary" />
-          <span className="text-sm font-bold">Relationship Graph</span>
-        </div>
+    <div className="flex h-full overflow-hidden">
+      {/* Controls panel — non-scrolling header + scrollable body */}
+      <div className="w-60 shrink-0 border-r border-border bg-card/50 flex flex-col overflow-hidden">
+        {/* Sticky header: title + counts + layout toggle */}
+        <div className="shrink-0 border-b border-border/50 p-4 space-y-3 bg-card/70">
+          <div className="flex items-center gap-2">
+            <Network className="h-4 w-4 text-primary" />
+            <span className="text-sm font-bold">Relationship Graph</span>
+          </div>
 
-        <div className="text-xs text-muted-foreground">
-          {graphData.nodes.length} nodes · {graphData.links.length} links
-          {updating && <span className="ml-1.5 text-primary">• updating…</span>}
-        </div>
+          <div className="text-xs text-muted-foreground">
+            {graphData.nodes.length} nodes · {graphData.links.length} links
+            {updating && <span className="ml-1.5 text-primary">• updating…</span>}
+          </div>
 
-        {/* Layout mode */}
-        <div className="space-y-1.5">
-          <Label className="text-xs text-muted-foreground">Layout</Label>
-          <div className="grid grid-cols-3 gap-1">
-            <button
-              onClick={() => setLayoutMode('force')}
-              className={cn('flex flex-col items-center gap-0.5 p-1.5 rounded text-[9px] border transition-colors',
-                layoutMode === 'force' ? 'border-primary bg-primary/10 text-primary' : 'border-border text-muted-foreground hover:border-foreground')}
-              title="Force-directed (default, clustered by discipline)"
-            >
-              <Zap className="h-3.5 w-3.5" />Force
-            </button>
-            <button
-              onClick={() => setLayoutMode('timeline')}
-              className={cn('flex flex-col items-center gap-0.5 p-1.5 rounded text-[9px] border transition-colors',
-                layoutMode === 'timeline' ? 'border-primary bg-primary/10 text-primary' : 'border-border text-muted-foreground hover:border-foreground')}
-              title="Timeline swimlane: X=time, Y=discipline"
-            >
-              <Clock className="h-3.5 w-3.5" />Timeline
-            </button>
-            <button
-              onClick={() => setLayoutMode('radial')}
-              className={cn('flex flex-col items-center gap-0.5 p-1.5 rounded text-[9px] border transition-colors',
-                layoutMode === 'radial' ? 'border-primary bg-primary/10 text-primary' : 'border-border text-muted-foreground hover:border-foreground')}
-              title="Radial: concentric rings by discipline"
-            >
-              <Sparkles className="h-3.5 w-3.5" />Radial
-            </button>
+          {/* Layout mode */}
+          <div className="space-y-1.5">
+            <Label className="text-xs text-muted-foreground">Layout</Label>
+            <div className="grid grid-cols-3 gap-1">
+              <button
+                onClick={() => setLayoutMode('force')}
+                className={cn('flex flex-col items-center gap-0.5 p-1.5 rounded text-[9px] border transition-colors',
+                  layoutMode === 'force' ? 'border-primary bg-primary/10 text-primary' : 'border-border text-muted-foreground hover:border-foreground')}
+                title="Force-directed (default, clustered by discipline)"
+              >
+                <Zap className="h-3.5 w-3.5" />Force
+              </button>
+              <button
+                onClick={() => setLayoutMode('timeline')}
+                className={cn('flex flex-col items-center gap-0.5 p-1.5 rounded text-[9px] border transition-colors',
+                  layoutMode === 'timeline' ? 'border-primary bg-primary/10 text-primary' : 'border-border text-muted-foreground hover:border-foreground')}
+                title="Timeline swimlane: X=time, Y=discipline"
+              >
+                <Clock className="h-3.5 w-3.5" />Timeline
+              </button>
+              <button
+                onClick={() => setLayoutMode('radial')}
+                className={cn('flex flex-col items-center gap-0.5 p-1.5 rounded text-[9px] border transition-colors',
+                  layoutMode === 'radial' ? 'border-primary bg-primary/10 text-primary' : 'border-border text-muted-foreground hover:border-foreground')}
+                title="Radial: concentric rings by discipline"
+              >
+                <Sparkles className="h-3.5 w-3.5" />Radial
+              </button>
+            </div>
           </div>
         </div>
 
+        {/* Scrollable body: filters + legend */}
+        <div className="flex-1 overflow-y-auto p-4 space-y-4">
         {/* Filters */}
         <div className="space-y-1.5">
           <Label className="text-xs text-muted-foreground flex items-center gap-1"><Filter className="h-3 w-3" />Discipline</Label>
@@ -459,6 +464,7 @@ export function RelationshipGraph() {
               <span className="truncate">{LINK_LABELS[t]}</span>
             </div>
           ))}
+        </div>
         </div>
       </div>
 
