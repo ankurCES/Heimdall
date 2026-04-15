@@ -24,7 +24,9 @@ const testChannels = [
   'sources:test', 'sources:listPresets', 'sources:syncAll',
   'markets:getLatestQuotes', 'markets:getHistory', 'markets:getKpis',
   'markets:getMarketIntel', 'markets:getCommodityDetail',
-  'markets:backfillHistory', 'markets:backfillStatus'
+  'markets:backfillHistory', 'markets:backfillStatus',
+  'analytics:listReports', 'analytics:getReport', 'analytics:saveReport',
+  'analytics:deleteReport', 'analytics:duplicateReport', 'analytics:queryWidget'
 ]
 const allowedChannels = [...Object.values(IPC_CHANNELS), ...testChannels]
 const chatEvents = ['chat:chunk', 'chat:done', 'chat:error']

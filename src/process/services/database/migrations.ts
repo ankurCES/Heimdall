@@ -3,6 +3,7 @@ import { app } from 'electron'
 import { copyFileSync, existsSync } from 'fs'
 import path from 'path'
 import { timestamp } from '@common/utils/id'
+import { PRESET_REPORTS } from '@common/analytics/presets'
 import log from 'electron-log'
 
 interface Migration {
@@ -144,6 +145,51 @@ const migrations: Migration[] = [
 
       const updated = (stockSrc ? 1 : 0) + (cryptoSrc ? 1 : 0)
       log.info(`Migration 006: converted ${updated} Alpaca sources to dedicated collector types`)
+    }
+  },
+  {
+    version: '007',
+    name: 'analytics_reports',
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS analytics_reports (
+          id TEXT PRIMARY KEY,
+          name TEXT NOT NULL,
+          description TEXT,
+          icon TEXT,
+          layout TEXT NOT NULL,
+          widgets TEXT NOT NULL,
+          global_filters TEXT,
+          is_preset INTEGER NOT NULL DEFAULT 0,
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_analytics_reports_updated ON analytics_reports(updated_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_analytics_reports_preset ON analytics_reports(is_preset);
+      `)
+
+      const now = timestamp()
+      const insert = db.prepare(`
+        INSERT OR IGNORE INTO analytics_reports
+          (id, name, description, icon, layout, widgets, global_filters, is_preset, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
+      `)
+      let seeded = 0
+      for (const preset of PRESET_REPORTS) {
+        const result = insert.run(
+          preset.id,
+          preset.name,
+          preset.description || null,
+          preset.icon || null,
+          JSON.stringify(preset.layout),
+          JSON.stringify(preset.widgets),
+          JSON.stringify(preset.globalFilters || {}),
+          now,
+          now
+        )
+        if (result.changes > 0) seeded++
+      }
+      log.info(`Migration 007: analytics_reports table created, seeded ${seeded} preset(s)`)
     }
   }
 ]
