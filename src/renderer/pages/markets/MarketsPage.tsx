@@ -50,7 +50,14 @@ const SEVERITY_BG: Record<string, string> = {
 }
 
 const CHART_COLORS = ['#3b82f6', '#ef4444', '#10b981', '#f59e0b', '#8b5cf6', '#ec4899', '#14b8a6', '#f97316']
-const RANGE_HOURS: Record<string, number> = { '24h': 24, '7d': 168, '30d': 720 }
+const RANGE_HOURS: Record<string, number> = {
+  '24h': 24,
+  '7d': 168,
+  '30d': 720,
+  '90d': 2160,
+  '1y': 8760,
+  '5y': 43800
+}
 
 export function MarketsPage() {
   const [quotes, setQuotes] = useState<Quote[]>([])
@@ -58,7 +65,7 @@ export function MarketsPage() {
   const [intel, setIntel] = useState<{ secFilings: IntelItem[]; sanctions: IntelItem[]; predictions: IntelItem[] }>({ secFilings: [], sanctions: [], predictions: [] })
   const [history, setHistory] = useState<Record<string, Array<{ t: number; price: number }>>>({})
   const [loading, setLoading] = useState(true)
-  const [range, setRange] = useState<'24h' | '7d' | '30d'>('7d')
+  const [range, setRange] = useState<'24h' | '7d' | '30d' | '90d' | '1y' | '5y'>('30d')
   const [selectedTickers, setSelectedTickers] = useState<string[]>(['GC=F', 'CL=F', 'BZ=F', 'DX-Y.NYB'])
   const [normalize, setNormalize] = useState(true)
   const [drawerTicker, setDrawerTicker] = useState<string | null>(null)
@@ -84,7 +91,7 @@ export function MarketsPage() {
     }
   }, [])
 
-  const fetchHistory = useCallback(async (tickers: string[], rangeKey: '24h' | '7d' | '30d') => {
+  const fetchHistory = useCallback(async (tickers: string[], rangeKey: keyof typeof RANGE_HOURS) => {
     if (tickers.length === 0) return
     try {
       const h = await window.heimdall.invoke('markets:getHistory', {
@@ -196,11 +203,15 @@ export function MarketsPage() {
         }
       })
 
-    return {
-      labels: sortedTimes.map((t) => new Date(t).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })),
-      datasets
-    }
-  }, [history, selectedTickers, quotes, normalize])
+    // For long ranges, show date only (no time) for better readability
+    const isLongRange = ['90d', '1y', '5y'].includes(range)
+    const labels = sortedTimes.map((t) => isLongRange
+      ? new Date(t).toLocaleDateString([], { year: '2-digit', month: 'short', day: 'numeric' })
+      : new Date(t).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+    )
+
+    return { labels, datasets }
+  }, [history, selectedTickers, quotes, normalize, range])
 
   const chartOptions = useMemo(() => ({
     responsive: true,
@@ -309,13 +320,16 @@ export function MarketsPage() {
                       {normalize ? 'Normalized' : 'Raw $'}
                     </Button>
                     <Select value={range} onValueChange={(v) => setRange(v as never)}>
-                      <SelectTrigger className="w-20 h-7 text-xs">
+                      <SelectTrigger className="w-24 h-7 text-xs">
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="24h">24h</SelectItem>
+                        <SelectItem value="24h">24 hours</SelectItem>
                         <SelectItem value="7d">7 days</SelectItem>
                         <SelectItem value="30d">30 days</SelectItem>
+                        <SelectItem value="90d">90 days</SelectItem>
+                        <SelectItem value="1y">1 year</SelectItem>
+                        <SelectItem value="5y">5 years</SelectItem>
                       </SelectContent>
                     </Select>
                   </div>
