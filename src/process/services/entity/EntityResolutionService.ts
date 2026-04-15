@@ -306,7 +306,12 @@ export class EntityResolutionService {
         const eUpd = db.prepare('UPDATE intel_entities SET canonical_id = ? WHERE id = ?')
 
         for (const c of clusters) {
-          cIns.run(c.id, c.entity_type, c.canonical_value.slice(0, 200), c.normalized_value.slice(0, 200),
+          // No defensive length cap here — Step 1 deduplicates on the FULL
+          // normalized value, and truncating at insert time was causing
+          // UNIQUE (entity_type, normalized_value) violations on long strings
+          // that differ only after the truncation point. SQLite TEXT has no
+          // real length limit; keep the value verbatim.
+          cIns.run(c.id, c.entity_type, c.canonical_value, c.normalized_value,
             c.alias_count, c.mention_count, now, now)
           for (const rid of c.raw_ids) {
             eUpd.run(c.id, rid)
