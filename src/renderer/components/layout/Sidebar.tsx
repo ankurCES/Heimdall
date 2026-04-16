@@ -4,7 +4,7 @@ import {
   LayoutDashboard, FileText, Database, Bell, Map, MessageSquare,
   Settings, Activity, BookOpen, Coins, BarChart3, Radio,
   Layers, RefreshCw, Sparkles, Eye, AlertOctagon, GitCompare, TrendingUp,
-  Network, Users, ShieldAlert, Shield, Bug, Moon, MapPin, Image, Share2, ChevronLeft, ChevronRight, ChevronDown
+  Network, Users, ShieldAlert, Shield, Bug, Moon, MapPin, Image, Share2, Brain, ChevronLeft, ChevronRight, ChevronDown
 } from 'lucide-react'
 import { cn } from '@renderer/lib/utils'
 import heimdallLogo from '@renderer/assets/heimdall-logo.png'
@@ -65,6 +65,7 @@ const NAV_GROUPS: NavGroup[] = [
     label: 'AI & Comms',
     items: [
       { to: '/chat', icon: MessageSquare, label: 'Chat' },
+      { to: '/memory', icon: Brain, label: 'Memory' },
       { to: '/alerts', icon: Bell, label: 'Alerts' },
       { to: '/meshtastic', icon: Radio, label: 'Meshtastic' }
     ]

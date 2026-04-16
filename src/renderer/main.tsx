@@ -31,6 +31,7 @@ import { GeofencesPage } from './pages/geofences/GeofencesPage'
 import { AnomaliesPage } from './pages/anomalies/AnomaliesPage'
 import { ImagesPage } from './pages/images/ImagesPage'
 import { StixPage } from './pages/stix/StixPage'
+import { MemoryPage } from './pages/memory/MemoryPage'
 import { Toaster } from 'sonner'
 import { NotificationListener } from './components/NotificationListener'
 import { UnlockGate } from './components/UnlockGate'
@@ -77,6 +78,7 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
           <Route path="/anomalies" element={<AnomaliesPage />} />
           <Route path="/images" element={<ImagesPage />} />
           <Route path="/stix" element={<StixPage />} />
+          <Route path="/memory" element={<MemoryPage />} />
           <Route path="/sync" element={<SyncPage />} />
           <Route path="/tokens" element={<TokensPage />} />
           <Route path="/audit" element={<AuditPage />} />

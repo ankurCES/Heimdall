@@ -18,6 +18,7 @@ import { intelPipeline } from './services/vectordb/IntelPipeline'
 import { enrichmentOrchestrator } from './services/enrichment/EnrichmentOrchestrator'
 import { resourceManager } from './services/resource/ResourceManager'
 import { overnightService } from './services/overnight/OvernightService'
+import { consolidationService } from './services/memory/ConsolidationService'
 // Kuzu graph DB removed — buggy native module, dormant for entire history,
 // SQLite handled every graph query in practice. See migration 012.
 
@@ -108,6 +109,13 @@ async function initializeDeferred(): Promise<void> {
   cronService.schedule('overnight.cycle', '30 2 * * *', 'Overnight collection cycle', async () => {
     try { await overnightService.runCycle({ periodHours: 24 }) }
     catch (err) { log.error(`overnight.cycle failed: ${err}`) }
+  })
+
+  // Memory consolidation — 03:00 local, daily. Runs AFTER overnight cycle
+  // so newly-generated sessions from the overnight brief can be included.
+  cronService.schedule('memory.consolidate', '0 3 * * *', 'Memory consolidation', async () => {
+    try { await consolidationService.runOnce() }
+    catch (err) { log.error(`memory.consolidate failed: ${err}`) }
   })
 
   // Auto-pull Meshtastic data on startup if configured. Outer catch logs at

@@ -1574,6 +1574,38 @@ const migrations: Migration[] = [
       try { db.exec(`CREATE INDEX IF NOT EXISTS idx_entities_stix_id ON intel_entities(stix_id)`) } catch { /* idempotent */ }
       log.info('Migration 028: stix_runs + stix_id columns on intel_reports/intel_entities')
     }
+  },
+  {
+    version: '029',
+    name: 'memory_consolidation',
+    up: (db) => {
+      // Cross-cutting H — Memory consolidation.
+      //
+      // Nightly job compresses chat sessions into humint_reports so the
+      // humint_recall tool can surface them in future conversations.
+      // auto_consolidated flag lets us distinguish these rows from ones
+      // an analyst explicitly recorded. consolidation_runs audits the
+      // job.
+      try {
+        db.exec(`ALTER TABLE humint_reports ADD COLUMN auto_consolidated INTEGER NOT NULL DEFAULT 0`)
+      } catch { /* idempotent */ }
+      try {
+        db.exec(`CREATE INDEX IF NOT EXISTS idx_humint_auto ON humint_reports(auto_consolidated)`)
+      } catch { /* idempotent */ }
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS consolidation_runs (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          started_at INTEGER NOT NULL,
+          finished_at INTEGER,
+          sessions_considered INTEGER,
+          sessions_consolidated INTEGER,
+          humints_created INTEGER,
+          duration_ms INTEGER,
+          error TEXT
+        );
+      `)
+      log.info('Migration 029: auto_consolidated column + consolidation_runs table')
+    }
   }
 ]
 
