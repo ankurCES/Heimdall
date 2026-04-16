@@ -89,6 +89,15 @@ class McpClientServiceImpl {
         changed = true
       }
     }
+    // Remove any builtin entries no longer in the current defaults (e.g. a
+    // server was renamed or replaced in a new app version). Custom (non-
+    // builtin) entries are preserved.
+    const beforeLen = servers.length
+    servers = servers.filter((s) => !s.builtin || defaultsById.has(s.id))
+    if (servers.length !== beforeLen) {
+      changed = true
+      log.info(`mcp: removed ${beforeLen - servers.length} stale builtin server(s)`)
+    }
     // Add any new builtins that aren't in storage yet (e.g. after upgrade).
     for (const def of defaults) {
       if (!servers.find((s) => s.id === def.id)) {

@@ -70,10 +70,22 @@ export function defaultMcpServers(): McpServerConfig[] {
       builtin: true
     },
     {
-      id: 'arxiv',
-      name: 'arXiv Papers',
+      // OpenAlex is a strict superset of arXiv (academic papers including
+      // preprints) and is pure Node. Replaces the broken arxiv-mcp-server
+      // wrapper which required Python 3.11/3.12.
+      id: 'academic',
+      name: 'Academic Papers (OpenAlex)',
       command: 'npx',
-      args: ['-y', 'arxiv-mcp-server'],
+      args: ['-y', 'openalex-mcp'],
+      env: {},
+      enabled: true,
+      builtin: true
+    },
+    {
+      id: 'duckduckgo',
+      name: 'DuckDuckGo Search',
+      command: 'npx',
+      args: ['-y', 'duckduckgo-mcp'],
       env: {},
       enabled: true,
       builtin: true
