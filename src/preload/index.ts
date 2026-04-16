@@ -60,7 +60,9 @@ const testChannels = [
   'inj:screen_corpus', 'inj:screen_report', 'inj:release',
   'inj:quarantined', 'inj:flagged', 'inj:latest', 'inj:rules',
   'overnight:run_now', 'overnight:latest', 'overnight:recent',
-  'overnight:prune_expired'
+  'overnight:prune_expired',
+  'geofence:list', 'geofence:create', 'geofence:update', 'geofence:delete',
+  'geofence:scan', 'geofence:alerts', 'geofence:latest', 'geofence:stats'
 ]
 const allowedChannels = [...Object.values(IPC_CHANNELS), ...testChannels]
 const chatEvents = ['chat:chunk', 'chat:done', 'chat:error']

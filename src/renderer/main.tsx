@@ -27,6 +27,7 @@ import { CounterintelPage } from './pages/counterintel/CounterintelPage'
 import { CybintPage } from './pages/cybint/CybintPage'
 import { QuarantinePage } from './pages/quarantine/QuarantinePage'
 import { OvernightPage } from './pages/overnight/OvernightPage'
+import { GeofencesPage } from './pages/geofences/GeofencesPage'
 import { Toaster } from 'sonner'
 import { NotificationListener } from './components/NotificationListener'
 import { UnlockGate } from './components/UnlockGate'
@@ -69,6 +70,7 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
           <Route path="/cybint" element={<CybintPage />} />
           <Route path="/quarantine" element={<QuarantinePage />} />
           <Route path="/overnight" element={<OvernightPage />} />
+          <Route path="/geofences" element={<GeofencesPage />} />
           <Route path="/sync" element={<SyncPage />} />
           <Route path="/tokens" element={<TokensPage />} />
           <Route path="/audit" element={<AuditPage />} />

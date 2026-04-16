@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback, useRef, useMemo } from 'react'
-import { MapContainer, TileLayer, Marker, Popup, Tooltip, CircleMarker, Polyline } from 'react-leaflet'
+import { MapContainer, TileLayer, Marker, Popup, Tooltip, CircleMarker, Polyline, Circle } from 'react-leaflet'
 import L from 'leaflet'
 import { Map as MapIcon, Filter, RefreshCw, Loader2, Play, Pause, Clock } from 'lucide-react'
 import { Button } from '@renderer/components/ui/button'
@@ -190,6 +190,20 @@ export function MapPage() {
   const [liveMode, setLiveMode] = useState(true)
   const [sliderTime, setSliderTime] = useState<number>(() => Date.now())
   const [timeWindowMs, setTimeWindowMs] = useState<number>(24 * 60 * 60 * 1000) // default 24h
+  const [geofences, setGeofences] = useState<Array<{ id: string; name: string; center_lat: number; center_lng: number; radius_km: number; enabled: number }>>([])
+
+  useEffect(() => {
+    let active = true
+    const load = async () => {
+      try {
+        const f = await window.heimdall.invoke('geofence:list') as Array<{ id: string; name: string; center_lat: number; center_lng: number; radius_km: number; enabled: number }>
+        if (active) setGeofences(f.filter((x) => x.enabled === 1))
+      } catch { /* noop — geofence bridge may not be loaded on older preloads */ }
+    }
+    void load()
+    const t = setInterval(load, 60_000)
+    return () => { active = false; clearInterval(t) }
+  }, [])
 
   const loadTrajectories = useCallback(async () => {
     try {
@@ -371,6 +385,20 @@ export function MapPage() {
             attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a>'
             url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
           />
+
+          {/* Geofence overlays (Theme 3.2). Enabled fences rendered as dashed circles. */}
+          {geofences.map((f) => (
+            <Circle
+              key={`geofence-${f.id}`}
+              center={[f.center_lat, f.center_lng]}
+              radius={f.radius_km * 1000}
+              pathOptions={{ color: '#f472b6', weight: 1.5, opacity: 0.7, dashArray: '4 4', fillOpacity: 0.05 }}
+            >
+              <Tooltip direction="top" offset={[0, -8]} opacity={0.9}>
+                <span className="text-xs font-medium">🎯 {f.name}</span>
+              </Tooltip>
+            </Circle>
+          ))}
 
           {filteredReports.filter((r) => layers[r.discipline] !== false).map((report) => {
             const emoji = SOURCE_ICONS[report.sourceName] || DISCIPLINE_ICONS[report.discipline] || '📄'

@@ -1391,6 +1391,62 @@ const migrations: Migration[] = [
 
       log.info('Migration 024: watch_terms.expires_at + overnight_runs table')
     }
+  },
+  {
+    version: '025',
+    name: 'geofences',
+    up: (db) => {
+      // Theme 3.2 — Geofence alerts.
+      //
+      // Analyst draws a circular zone on the map (center + radius_km) with
+      // optional discipline + severity filters. Any intel_reports row with
+      // coordinates inside the zone that also matches the filters produces
+      // a geofence_alert row. Alerts are append-only so a fired alert
+      // survives even if the report is later updated.
+      //
+      // Circle-only for this batch; polygon support comes with leaflet-draw
+      // in a later feature.
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS geofences (
+          id TEXT PRIMARY KEY,
+          name TEXT NOT NULL,
+          center_lat REAL NOT NULL,
+          center_lng REAL NOT NULL,
+          radius_km REAL NOT NULL,
+          discipline_filter TEXT,
+          severity_filter TEXT,
+          enabled INTEGER NOT NULL DEFAULT 1,
+          notes TEXT,
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_geofences_enabled ON geofences(enabled);
+
+        CREATE TABLE IF NOT EXISTS geofence_alerts (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          geofence_id TEXT NOT NULL,
+          report_id TEXT NOT NULL,
+          distance_km REAL NOT NULL,
+          created_at INTEGER NOT NULL,
+          UNIQUE (geofence_id, report_id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_gfa_fence ON geofence_alerts(geofence_id, created_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_gfa_report ON geofence_alerts(report_id);
+
+        CREATE TABLE IF NOT EXISTS geofence_runs (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          started_at INTEGER NOT NULL,
+          finished_at INTEGER,
+          fences_scanned INTEGER,
+          reports_scanned INTEGER,
+          alerts_created INTEGER,
+          duration_ms INTEGER,
+          error TEXT
+        );
+      `)
+
+      log.info('Migration 025: geofences + geofence_alerts + geofence_runs tables created')
+    }
   }
 ]
 
