@@ -88,7 +88,11 @@ const testChannels = [
   'document:ingest_pick', 'document:ingest_file', 'document:list', 'document:get', 'document:delete',
   'image:geolocate',
   'redaction:scan', 'redaction:flag_report', 'redaction:apply',
-  'redaction:dismiss', 'redaction:pending', 'redaction:scan_corpus'
+  'redaction:dismiss', 'redaction:pending', 'redaction:scan_corpus',
+  'wargame:start', 'wargame:get', 'wargame:rounds', 'wargame:list',
+  'twoperson:status', 'twoperson:set_passphrase', 'twoperson:disable',
+  'twoperson:require', 'twoperson:approve', 'twoperson:reject',
+  'twoperson:pending', 'twoperson:history'
 ]
 const allowedChannels = [...Object.values(IPC_CHANNELS), ...testChannels]
 const chatEvents = ['chat:chunk', 'chat:done', 'chat:error']

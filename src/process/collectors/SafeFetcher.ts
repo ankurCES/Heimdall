@@ -1,4 +1,5 @@
 import log from 'electron-log'
+import crypto from 'crypto'
 import { RateLimiter } from '../services/ratelimit/RateLimiter'
 import { RobotsChecker } from '../services/ratelimit/RobotsChecker'
 import { auditService } from '../services/audit/AuditService'
@@ -16,6 +17,9 @@ export class SafeFetcher {
   private robotsChecker: RobotsChecker
   private airGapMode = false
   private airGapAllowlist: Set<string> = new Set()
+  private socks5Proxy: { host: string; port: number } | null = null
+  /** SHA-256 hashes of blocked .onion hostnames (CSAM prevention). */
+  private csamBlocklist = new Set<string>()
 
   constructor(requestsPerMinute: number = 30, respectRobots: boolean = true) {
     this.rateLimiter = new RateLimiter(requestsPerMinute)
@@ -47,6 +51,28 @@ export class SafeFetcher {
 
   isAirGapped(): boolean { return this.airGapMode }
 
+  /**
+   * Theme 7.5 — SOCKS5 proxy for .onion domains. Deployers run Tor
+   * externally and point Heimdall at the local SOCKS5 port (default
+   * 127.0.0.1:9050). Non-.onion URLs are NOT routed through the proxy.
+   */
+  setSocks5(host: string | null, port: number = 9050): void {
+    if (host) {
+      this.socks5Proxy = { host, port }
+      log.info(`SafeFetcher: SOCKS5 proxy set to ${host}:${port}`)
+    } else {
+      this.socks5Proxy = null
+      log.info('SafeFetcher: SOCKS5 proxy disabled')
+    }
+  }
+
+  addCsamBlock(domainHash: string): void { this.csamBlocklist.add(domainHash) }
+
+  private isCsamBlocked(hostname: string): boolean {
+    const hash = crypto.createHash('sha256').update(hostname.toLowerCase()).digest('hex')
+    return this.csamBlocklist.has(hash)
+  }
+
   private airGapAllows(hostname: string): boolean {
     if (!this.airGapMode) return true
     const h = hostname.toLowerCase()
@@ -67,6 +93,14 @@ export class SafeFetcher {
       throw new Error(`Blocked by air-gap mode: ${url}`)
     }
 
+    // CSAM gate — SHA-256 hash comparison so the blocklist itself contains
+    // no plaintext domain names.
+    if (this.isCsamBlocked(domain)) {
+      const domainHash = crypto.createHash('sha256').update(domain.toLowerCase()).digest('hex')
+      auditService.log('fetch.csam_blocked', { domain_hash: domainHash })
+      throw new Error(`Blocked by CSAM blocklist`)
+    }
+
     // Check robots.txt
     const allowed = await this.robotsChecker.isAllowed(url)
     if (!allowed) {
@@ -83,14 +117,26 @@ export class SafeFetcher {
       try {
         auditService.log('fetch.start', { url, domain, attempt })
 
-        const response = await fetch(url, {
+        // SOCKS5 proxy for .onion domains (Theme 7.5 dark-web monitoring).
+        // Non-.onion URLs bypass the proxy entirely.
+        const fetchOpts: RequestInit & { dispatcher?: unknown } = {
           headers: {
             'User-Agent': USER_AGENT,
             Accept: 'application/json, text/xml, application/xml, text/html, */*',
             ...headers
           },
           signal: AbortSignal.timeout(timeout)
-        })
+        }
+        if (domain.endsWith('.onion') && this.socks5Proxy) {
+          try {
+            const { SocksProxyAgent } = await import('socks-proxy-agent')
+            const agent = new SocksProxyAgent(`socks5h://${this.socks5Proxy.host}:${this.socks5Proxy.port}`)
+            ;(fetchOpts as Record<string, unknown>).agent = agent
+          } catch (err) {
+            log.warn(`SafeFetcher: SOCKS5 proxy failed to load: ${(err as Error).message}`)
+          }
+        }
+        const response = await fetch(url, fetchOpts)
 
         auditService.log('fetch.success', {
           url,

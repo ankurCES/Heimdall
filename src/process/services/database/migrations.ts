@@ -1850,6 +1850,54 @@ const migrations: Migration[] = [
       `)
       log.info('Migration 032: redaction_events table created')
     }
+  },
+  {
+    version: '033',
+    name: 'wargaming_twoperson',
+    up: (db) => {
+      // Theme 5.5 + 10.8.
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS wargame_runs (
+          id TEXT PRIMARY KEY,
+          scenario TEXT NOT NULL,
+          red_objective TEXT,
+          blue_objective TEXT,
+          total_rounds INTEGER NOT NULL DEFAULT 3,
+          status TEXT NOT NULL DEFAULT 'running',
+          classification TEXT NOT NULL DEFAULT 'UNCLASSIFIED',
+          started_at INTEGER NOT NULL,
+          completed_at INTEGER,
+          created_at INTEGER NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS wargame_rounds (
+          id TEXT PRIMARY KEY,
+          run_id TEXT NOT NULL,
+          round_number INTEGER NOT NULL,
+          role TEXT NOT NULL,
+          content TEXT NOT NULL,
+          duration_ms INTEGER,
+          created_at INTEGER NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_wargame_rounds_run ON wargame_rounds(run_id, round_number, role);
+
+        CREATE TABLE IF NOT EXISTS approval_requests (
+          id TEXT PRIMARY KEY,
+          action TEXT NOT NULL,
+          artifact_type TEXT,
+          artifact_id TEXT,
+          classification TEXT NOT NULL,
+          status TEXT NOT NULL DEFAULT 'pending',
+          requester TEXT NOT NULL DEFAULT 'self',
+          approver TEXT,
+          rejection_reason TEXT,
+          created_at INTEGER NOT NULL,
+          resolved_at INTEGER,
+          expires_at INTEGER NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_approval_status ON approval_requests(status, created_at DESC);
+      `)
+      log.info('Migration 033: wargame_runs + wargame_rounds + approval_requests tables created')
+    }
   }
 ]
 

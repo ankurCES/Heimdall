@@ -32,6 +32,7 @@ import { registerConsolidationBridge } from './consolidationBridge'
 import { registerTradecraftBridge } from './tradecraftBridge'
 import { registerPhase5Bridge } from './phase5Bridge'
 import { registerRedactionBridge } from './redactionBridge'
+import { registerWargameBridge } from './wargameBridge'
 import log from 'electron-log'
 
 export function registerAllBridges(): void {
@@ -69,5 +70,6 @@ export function registerAllBridges(): void {
   registerTradecraftBridge()
   registerPhase5Bridge()
   registerRedactionBridge()
+  registerWargameBridge()
   log.info('All IPC bridges registered')
 }
