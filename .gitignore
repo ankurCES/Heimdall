@@ -7,3 +7,8 @@ dist
 .DS_Store
 thumbs.db
 release/
+
+# Claude Code session-local files
+.claude/scheduled_tasks.lock
+.claude/scheduled_tasks.json
+
