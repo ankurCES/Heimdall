@@ -57,6 +57,29 @@ export interface KevEntry {
 
 const TECHNIQUE_ID_RE = /\bT\d{4}(?:\.\d{3})?\b/g
 
+/**
+ * Curated APT → ATT&CK technique map. Seeded from public MITRE ATT&CK
+ * group profiles (attack.mitre.org/groups). This is intentionally small
+ * and deterministic — adding real group CV here would balloon the file.
+ * Deployers wanting higher fidelity should pull the MITRE STIX group
+ * bundle and extend this map or wire to TAXII.
+ */
+const APT_TTP_MAP: Record<string, string[]> = {
+  'APT28 (Fancy Bear)': ['T1566', 'T1566.001', 'T1566.002', 'T1059.001', 'T1059.003', 'T1003', 'T1003.001', 'T1021.001', 'T1027', 'T1036', 'T1070', 'T1078', 'T1090', 'T1105', 'T1110.003', 'T1547.001', 'T1562.001', 'T1568', 'T1571'],
+  'APT29 (Cozy Bear)': ['T1566', 'T1078', 'T1059.001', 'T1027', 'T1055', 'T1105', 'T1071.001', 'T1001', 'T1567', 'T1041', 'T1053.005', 'T1547.001', 'T1140'],
+  'APT40 (Leviathan)': ['T1566.001', 'T1566.002', 'T1059.001', 'T1003.001', 'T1021.001', 'T1021.002', 'T1133', 'T1078', 'T1071.001', 'T1105'],
+  'APT41': ['T1566.001', 'T1059.001', 'T1059.003', 'T1190', 'T1195', 'T1027', 'T1036', 'T1070', 'T1105', 'T1021.001', 'T1021.002', 'T1078', 'T1053.005', 'T1547.001'],
+  'Lazarus Group': ['T1566', 'T1204', 'T1059.001', 'T1059.003', 'T1027', 'T1036', 'T1070', 'T1105', 'T1083', 'T1041', 'T1071.001', 'T1140', 'T1486'],
+  'Sandworm': ['T1190', 'T1133', 'T1059.001', 'T1059.003', 'T1003', 'T1027', 'T1036', 'T1070', 'T1105', 'T1021.001', 'T1485', 'T1486', 'T1490', 'T1489', 'T1498'],
+  'Turla': ['T1566', 'T1059.001', 'T1027', 'T1055', 'T1070', 'T1071.001', 'T1572', 'T1140', 'T1547.001', 'T1568'],
+  'MuddyWater': ['T1566.001', 'T1059.001', 'T1059.003', 'T1059.005', 'T1204.002', 'T1027', 'T1036', 'T1070', 'T1105', 'T1547.001'],
+  'FIN7': ['T1566.001', 'T1204.002', 'T1059.001', 'T1059.003', 'T1059.005', 'T1027', 'T1036', 'T1070', 'T1055', 'T1547.001', 'T1053.005'],
+  'Conti / Ryuk operators': ['T1566', 'T1059.001', 'T1021.001', 'T1021.002', 'T1003.001', 'T1078', 'T1027', 'T1070', 'T1486', 'T1490', 'T1489'],
+  'Equation Group (leak-era)': ['T1190', 'T1059.003', 'T1003', 'T1027', 'T1055', 'T1140', 'T1568', 'T1572'],
+  'DarkSeoul / Andariel': ['T1566', 'T1059.001', 'T1027', 'T1036', 'T1485', 'T1486', 'T1498']
+}
+
+
 export class CybintService {
   /** Idempotently seed ATT&CK techniques. */
   seedTechniques(): void {
@@ -309,6 +332,71 @@ export class CybintService {
       ORDER BY mention_count DESC, k.date_added DESC
       LIMIT ?
     `).all(limit) as Array<KevEntry & { mention_count: number }>
+  }
+
+  /**
+   * Theme 7.2 — APT attribution scoring.
+   *
+   * Given a set of ATT&CK techniques observed in a report (or cluster),
+   * rank known APT groups by Jaccard similarity of TTP overlap.
+   * Apt-group-to-technique map is seeded from a curated subset of the
+   * MITRE ATT&CK group catalogue.
+   */
+  aptAttribution(techniqueIds: string[], limit = 10): Array<{ group: string; overlap: number; total_group_ttps: number; jaccard: number; evidence: string[] }> {
+    if (!techniqueIds.length) return []
+    const clean = Array.from(new Set(techniqueIds))
+    const results: Array<{ group: string; overlap: number; total_group_ttps: number; jaccard: number; evidence: string[] }> = []
+    for (const [group, ttps] of Object.entries(APT_TTP_MAP)) {
+      const groupSet = new Set(ttps)
+      const evidence = clean.filter((t) => groupSet.has(t))
+      if (evidence.length === 0) continue
+      const union = new Set([...ttps, ...clean]).size
+      const jaccard = evidence.length / union
+      results.push({ group, overlap: evidence.length, total_group_ttps: ttps.length, jaccard, evidence })
+    }
+    results.sort((a, b) => b.jaccard - a.jaccard)
+    return results.slice(0, limit)
+  }
+
+  /**
+   * Theme 7.3 — IOC pivoting.
+   *
+   * Given a seed IOC (ip / hash / url / email / domain / cve), find every
+   * report that contains it, then every other IOC in those reports.
+   * Returns two lists: related reports + related IOCs (with mention
+   * counts across the cohort).
+   */
+  iocPivot(seed: { entity_type: string; entity_value: string; limit?: number }): {
+    seed: { entity_type: string; entity_value: string }
+    reports: Array<{ report_id: string; title: string; discipline: string; source_name: string; created_at: number }>
+    related_iocs: Array<{ entity_type: string; entity_value: string; mention_count: number }>
+  } {
+    const db = getDatabase()
+    const limit = seed.limit ?? 50
+    const reports = db.prepare(`
+      SELECT DISTINCT r.id AS report_id, r.title, r.discipline, r.source_name, r.created_at
+      FROM intel_entities e
+      JOIN intel_reports r ON r.id = e.report_id
+      WHERE lower(e.entity_type) = lower(?) AND lower(e.entity_value) = lower(?)
+        AND (r.quarantined IS NULL OR r.quarantined = 0)
+      ORDER BY r.created_at DESC LIMIT ?
+    `).all(seed.entity_type, seed.entity_value, limit) as Array<{ report_id: string; title: string; discipline: string; source_name: string; created_at: number }>
+
+    if (reports.length === 0) {
+      return { seed: { entity_type: seed.entity_type, entity_value: seed.entity_value }, reports: [], related_iocs: [] }
+    }
+
+    const placeholders = reports.map(() => '?').join(',')
+    const related = db.prepare(`
+      SELECT entity_type, entity_value, COUNT(DISTINCT report_id) AS mention_count
+      FROM intel_entities
+      WHERE report_id IN (${placeholders})
+        AND NOT (lower(entity_type) = lower(?) AND lower(entity_value) = lower(?))
+      GROUP BY entity_type, entity_value
+      ORDER BY mention_count DESC LIMIT 100
+    `).all(...reports.map((r) => r.report_id), seed.entity_type, seed.entity_value) as Array<{ entity_type: string; entity_value: string; mention_count: number }>
+
+    return { seed: { entity_type: seed.entity_type, entity_value: seed.entity_value }, reports, related_iocs: related }
   }
 
   /** Last successful run of a given kind. */

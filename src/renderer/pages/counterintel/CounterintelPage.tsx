@@ -26,7 +26,16 @@ interface CounterintelRun {
 
 interface BiasFlag { id: string; match_type: string; match_value: string; bias_direction: string; note: string | null }
 
-type Tab = 'suspicious' | 'state_media' | 'bias_list'
+type Tab = 'suspicious' | 'state_media' | 'bias_list' | 'source_trust'
+
+interface SourceTrust {
+  source_id: string
+  reliability_grade: string
+  deception_hits: number
+  last_demoted_at: number | null
+  demotion_reason: string | null
+  original_grade: string | null
+}
 
 const SEVERITY_BADGE: Record<string, string> = {
   high: 'bg-red-500/15 border-red-500/40 text-red-300',
@@ -49,6 +58,7 @@ export function CounterintelPage() {
   const [suspicious, setSuspicious] = useState<SuspiciousReport[]>([])
   const [stateMedia, setStateMedia] = useState<StateMediaReport[]>([])
   const [biasList, setBiasList] = useState<BiasFlag[]>([])
+  const [sourceTrust, setSourceTrust] = useState<SourceTrust[]>([])
   const [selected, setSelected] = useState<SuspiciousReport | null>(null)
   const [analyzing, setAnalyzing] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -58,13 +68,14 @@ export function CounterintelPage() {
   async function loadAll() {
     setError(null)
     try {
-      const [latest, top, sm, bias] = await Promise.all([
+      const [latest, top, sm, bias, trust] = await Promise.all([
         window.heimdall.invoke('ci:latest'),
         window.heimdall.invoke('ci:top', { limit: 100 }),
         window.heimdall.invoke('ci:state_media', { limit: 100 }),
-        window.heimdall.invoke('ci:bias_list')
-      ]) as [CounterintelRun | null, SuspiciousReport[], StateMediaReport[], BiasFlag[]]
-      setRun(latest); setSuspicious(top); setStateMedia(sm); setBiasList(bias)
+        window.heimdall.invoke('ci:bias_list'),
+        window.heimdall.invoke('tradecraft:source_trust')
+      ]) as [CounterintelRun | null, SuspiciousReport[], StateMediaReport[], BiasFlag[], SourceTrust[]]
+      setRun(latest); setSuspicious(top); setStateMedia(sm); setBiasList(bias); setSourceTrust(trust)
     } catch (err) {
       setError(String(err).replace(/^Error:\s*/, ''))
     }
@@ -142,6 +153,7 @@ export function CounterintelPage() {
         <TabBtn active={tab === 'suspicious'} onClick={() => setTab('suspicious')} icon={FileWarning} label={`Most flagged (${suspicious.length})`} />
         <TabBtn active={tab === 'state_media'} onClick={() => setTab('state_media')} icon={Radio} label={`State-aligned sources (${stateMedia.length})`} />
         <TabBtn active={tab === 'bias_list'} onClick={() => setTab('bias_list')} icon={Flag} label={`Bias watchlist (${biasList.length})`} />
+        <TabBtn active={tab === 'source_trust'} onClick={() => setTab('source_trust')} icon={ShieldAlert} label={`Source trust (${sourceTrust.length})`} />
       </div>
 
       {empty && !analyzing && tab !== 'bias_list' ? (
@@ -341,6 +353,66 @@ export function CounterintelPage() {
                   ))}
                 </tbody>
               </table>
+            </CardContent>
+          </Card>
+        </div>
+      )}
+
+      {tab === 'source_trust' && (
+        <div className="flex-1 overflow-auto p-6">
+          <Card>
+            <CardHeader>
+              <div className="flex items-center gap-2">
+                <ShieldAlert className="h-4 w-4 text-muted-foreground" />
+                <CardTitle className="text-base">Source trust ledger</CardTitle>
+              </div>
+              <CardDescription className="text-xs">
+                STANAG 2511 reliability grades, with auto-downgrade every 3
+                high-severity deception hits. Demoting a source here haircuts
+                every report's verification score by 30% and logs the event
+                to credibility_events + the audit chain.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              {sourceTrust.length === 0 ? (
+                <p className="text-xs text-muted-foreground italic">
+                  No sources tracked yet — the ledger populates on the first deception hit.
+                </p>
+              ) : (
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="text-xs text-muted-foreground border-b border-border">
+                      <th className="text-left py-2 font-medium">Source ID</th>
+                      <th className="text-left py-2 font-medium">Grade</th>
+                      <th className="text-right py-2 font-medium">Deception hits</th>
+                      <th className="text-left py-2 font-medium">Demoted</th>
+                      <th className="text-left py-2 font-medium">Reason</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {sourceTrust.map((s) => (
+                      <tr key={s.source_id} className="border-b border-border/40">
+                        <td className="py-1.5 text-xs font-mono">{s.source_id}</td>
+                        <td className="py-1.5">
+                          <span className={cn(
+                            'text-[10px] px-2 py-0.5 rounded font-mono font-bold border',
+                            s.reliability_grade === 'A' || s.reliability_grade === 'B'
+                              ? 'border-emerald-500/40 text-emerald-300'
+                              : s.reliability_grade === 'C' || s.reliability_grade === 'D'
+                              ? 'border-amber-500/40 text-amber-300'
+                              : 'border-red-500/40 text-red-300'
+                          )}>{s.reliability_grade}{s.original_grade && s.original_grade !== s.reliability_grade ? ` (was ${s.original_grade})` : ''}</span>
+                        </td>
+                        <td className="py-1.5 text-right text-xs font-mono">{s.deception_hits}</td>
+                        <td className="py-1.5 text-xs text-muted-foreground">
+                          {s.last_demoted_at ? formatRelativeTime(s.last_demoted_at) : '—'}
+                        </td>
+                        <td className="py-1.5 text-xs text-muted-foreground italic">{s.demotion_reason ?? '—'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
             </CardContent>
           </Card>
         </div>

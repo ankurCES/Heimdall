@@ -12,6 +12,12 @@ export function registerCybintBridge(): void {
   ipcMain.handle('cybint:kev_count', () => cybintService.kevCount())
   ipcMain.handle('cybint:kev_in_corpus', (_evt, args?: { limit?: number }) => cybintService.kevInCorpus(args?.limit ?? 100))
   ipcMain.handle('cybint:latest_run', (_evt, kind: string) => cybintService.latestRun(kind))
+  ipcMain.handle('cybint:apt_attribute', (_evt, args: { technique_ids: string[]; limit?: number }) =>
+    cybintService.aptAttribution(args.technique_ids, args.limit ?? 10)
+  )
+  ipcMain.handle('cybint:ioc_pivot', (_evt, args: { entity_type: string; entity_value: string; limit?: number }) =>
+    cybintService.iocPivot(args)
+  )
 
   log.info('cybint bridge registered')
 }

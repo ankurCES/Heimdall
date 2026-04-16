@@ -1606,6 +1606,226 @@ const migrations: Migration[] = [
       `)
       log.info('Migration 029: auto_consolidated column + consolidation_runs table')
     }
+  },
+  {
+    version: '030',
+    name: 'tradecraft_completeness',
+    up: (db) => {
+      // Theme 1.3 / 1.5 / 6.4 / 2.4 completeness.
+      //
+      // credibility_events logs every credibility adjustment with reason
+      // (new corroboration, source demotion, deception hit…). The current
+      // credibility/reliability lives on intel_reports already; this is
+      // the audit trail + Bayesian update history.
+      //
+      // source_trust is the per-source_id reliability store. Collectors
+      // already write intel_reports.source_id; this gives us one row per
+      // source so degradation + demotion propagates cleanly.
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS source_trust (
+          source_id TEXT PRIMARY KEY,
+          reliability_grade TEXT NOT NULL DEFAULT 'F',
+          deception_hits INTEGER NOT NULL DEFAULT 0,
+          last_demoted_at INTEGER,
+          demotion_reason TEXT,
+          original_grade TEXT,
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS credibility_events (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          report_id TEXT NOT NULL,
+          prior_score REAL,
+          new_score REAL NOT NULL,
+          reason TEXT NOT NULL,
+          payload TEXT,
+          created_at INTEGER NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_cred_report ON credibility_events(report_id, created_at DESC);
+      `)
+      log.info('Migration 030: source_trust + credibility_events tables')
+    }
+  },
+  {
+    version: '031',
+    name: 'phase5_sweep',
+    up: (db) => {
+      // Phase 5 sweep — single migration covering batches 5C – 5J:
+      //
+      //   5C   intel_snapshots          — what-changed digests
+      //        briefing_templates       — 9.5 DPB template editor
+      //   5D   disinfo_clusters + items — J daily CIB detection
+      //        insider_events           — 6.6 analyst query anomalies
+      //        canary_tokens            — 6.5 honeypot token catalogue
+      //   5E   reasoning_nodes          — D agent reasoning-graph
+      //   5F   scenarios + forecasts    — 5.4 LLM scenario gens
+      //   5G   detection_rules          — Sigma/YARA LLM output
+      //   5H   misp_syncs               — 7.7 MISP bidir
+      //   5I   taxii_server_runs        — 7.6 TAXII server lifecycle log
+      //   5J   documents                — 8.3 OCR'd documents
+      db.exec(`
+        -- 5C
+        CREATE TABLE IF NOT EXISTS intel_snapshots (
+          id TEXT PRIMARY KEY,
+          taken_at INTEGER NOT NULL,
+          label TEXT,
+          total_reports INTEGER NOT NULL DEFAULT 0,
+          payload TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS briefing_templates (
+          id TEXT PRIMARY KEY,
+          name TEXT NOT NULL UNIQUE,
+          body_md TEXT NOT NULL,
+          is_default INTEGER NOT NULL DEFAULT 0,
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL
+        );
+
+        -- 5D
+        CREATE TABLE IF NOT EXISTS disinfo_clusters (
+          id TEXT PRIMARY KEY,
+          signature_kind TEXT NOT NULL,
+          signature_value TEXT NOT NULL,
+          member_count INTEGER NOT NULL DEFAULT 0,
+          first_seen_at INTEGER NOT NULL,
+          last_seen_at INTEGER NOT NULL,
+          created_at INTEGER NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_disinfo_sig ON disinfo_clusters(signature_kind, signature_value);
+        CREATE TABLE IF NOT EXISTS disinfo_cluster_members (
+          cluster_id TEXT NOT NULL,
+          report_id TEXT NOT NULL,
+          PRIMARY KEY (cluster_id, report_id)
+        );
+        CREATE TABLE IF NOT EXISTS disinfo_runs (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          started_at INTEGER NOT NULL,
+          finished_at INTEGER,
+          reports_scanned INTEGER,
+          clusters_found INTEGER,
+          duration_ms INTEGER,
+          error TEXT
+        );
+
+        CREATE TABLE IF NOT EXISTS insider_events (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          analyst_id TEXT NOT NULL DEFAULT 'self',
+          kind TEXT NOT NULL,
+          severity TEXT NOT NULL,
+          detail TEXT,
+          created_at INTEGER NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_insider_created ON insider_events(created_at DESC);
+
+        CREATE TABLE IF NOT EXISTS canary_tokens (
+          id TEXT PRIMARY KEY,
+          token TEXT NOT NULL UNIQUE,
+          label TEXT NOT NULL,
+          attached_artifact_type TEXT,
+          attached_artifact_id TEXT,
+          observed_at INTEGER,
+          observed_source TEXT,
+          notes TEXT,
+          created_at INTEGER NOT NULL
+        );
+
+        -- 5E
+        CREATE TABLE IF NOT EXISTS reasoning_nodes (
+          id TEXT PRIMARY KEY,
+          session_id TEXT,
+          parent_id TEXT,
+          kind TEXT NOT NULL,
+          summary TEXT NOT NULL,
+          payload TEXT,
+          created_at INTEGER NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_reasoning_session ON reasoning_nodes(session_id, created_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_reasoning_parent ON reasoning_nodes(parent_id);
+
+        -- 5F
+        CREATE TABLE IF NOT EXISTS scenarios (
+          id TEXT PRIMARY KEY,
+          topic TEXT NOT NULL,
+          event_id TEXT,
+          scenario_class TEXT NOT NULL,
+          body_md TEXT NOT NULL,
+          confidence_lo REAL,
+          confidence_hi REAL,
+          created_at INTEGER NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_scenarios_topic ON scenarios(topic);
+        CREATE TABLE IF NOT EXISTS conflict_scores (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          region TEXT NOT NULL,
+          bucket_at INTEGER NOT NULL,
+          event_volume INTEGER NOT NULL DEFAULT 0,
+          negative_sentiment_ratio REAL,
+          iw_red_count INTEGER NOT NULL DEFAULT 0,
+          probability_0_100 INTEGER NOT NULL,
+          computed_at INTEGER NOT NULL,
+          UNIQUE (region, bucket_at)
+        );
+        CREATE INDEX IF NOT EXISTS idx_conflict_region ON conflict_scores(region, bucket_at DESC);
+
+        -- 5G
+        CREATE TABLE IF NOT EXISTS detection_rules (
+          id TEXT PRIMARY KEY,
+          rule_type TEXT NOT NULL,
+          name TEXT NOT NULL,
+          body TEXT NOT NULL,
+          source_report_id TEXT,
+          notes TEXT,
+          created_at INTEGER NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_detection_type ON detection_rules(rule_type, created_at DESC);
+
+        -- 5H
+        CREATE TABLE IF NOT EXISTS misp_runs (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          direction TEXT NOT NULL,
+          started_at INTEGER NOT NULL,
+          finished_at INTEGER,
+          events_in INTEGER,
+          events_out INTEGER,
+          attributes_in INTEGER,
+          attributes_out INTEGER,
+          endpoint TEXT,
+          summary TEXT,
+          duration_ms INTEGER,
+          error TEXT
+        );
+
+        -- 5I
+        CREATE TABLE IF NOT EXISTS taxii_server_runs (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          event TEXT NOT NULL,
+          bind TEXT,
+          collection_id TEXT,
+          created_at INTEGER NOT NULL
+        );
+
+        -- 5J
+        CREATE TABLE IF NOT EXISTS documents (
+          id TEXT PRIMARY KEY,
+          source_path TEXT NOT NULL,
+          file_name TEXT,
+          file_size INTEGER,
+          mime_type TEXT,
+          sha256 TEXT,
+          page_count INTEGER,
+          ocr_text TEXT,
+          ocr_confidence REAL,
+          ocr_engine TEXT,
+          redactions_found INTEGER NOT NULL DEFAULT 0,
+          report_id TEXT,
+          ingested_at INTEGER NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_docs_sha ON documents(sha256);
+        CREATE INDEX IF NOT EXISTS idx_docs_report ON documents(report_id);
+      `)
+      log.info('Migration 031: phase 5 sweep — 17 tables across batches 5C-5J')
+    }
   }
 ]
 

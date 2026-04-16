@@ -54,7 +54,7 @@ const testChannels = [
   'cybint:tactics', 'cybint:techniques', 'cybint:tag_techniques',
   'cybint:top_techniques', 'cybint:reports_for_technique',
   'cybint:sync_kev', 'cybint:kev_count', 'cybint:kev_in_corpus',
-  'cybint:latest_run',
+  'cybint:latest_run', 'cybint:apt_attribute', 'cybint:ioc_pivot',
   'safety:airgap_status', 'safety:apply_airgap',
   'safety:panic_wipe_targets', 'safety:panic_wipe',
   'inj:screen_corpus', 'inj:screen_report', 'inj:release',
@@ -67,7 +67,25 @@ const testChannels = [
   'iw:suggest_indicators',
   'image:ingest_file', 'image:ingest_pick', 'image:list', 'image:get', 'image:delete',
   'stix:export', 'stix:import', 'stix:import_pick', 'stix:runs',
-  'memory:consolidate', 'memory:latest_run', 'memory:recent_runs'
+  'memory:consolidate', 'memory:latest_run', 'memory:recent_runs',
+  'tradecraft:adjust_credibility', 'tradecraft:source_trust',
+  'tradecraft:manual_demote', 'tradecraft:credibility_events',
+  'tradecraft:ach_diagnosticity',
+  // Phase 5 sweep
+  'briefing:templates_list', 'briefing:template_save', 'briefing:template_delete',
+  'briefing:tearline', 'briefing:snapshot', 'briefing:snapshots_list', 'briefing:diff',
+  'disinfo:sweep', 'disinfo:clusters', 'disinfo:latest',
+  'canary:create', 'canary:list', 'canary:mark', 'canary:scan_corpus',
+  'insider:scan', 'insider:recent',
+  'influence:simulate',
+  'reasoning:for_session', 'reasoning:by_kind',
+  'forecast:scenarios', 'forecast:recent_scenarios',
+  'conflict:compute', 'conflict:recent', 'conflict:top_regions',
+  'detection:generate_sigma', 'detection:generate_yara',
+  'detection:list', 'detection:get', 'detection:delete',
+  'misp:configured', 'misp:test', 'misp:push', 'misp:pull', 'misp:runs',
+  'taxii:status', 'taxii:start', 'taxii:stop', 'taxii:rotate_token', 'taxii:runs',
+  'document:ingest_pick', 'document:ingest_file', 'document:list', 'document:get', 'document:delete'
 ]
 const allowedChannels = [...Object.values(IPC_CHANNELS), ...testChannels]
 const chatEvents = ['chat:chunk', 'chat:done', 'chat:error']

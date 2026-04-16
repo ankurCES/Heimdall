@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react'
-import { Shield, RefreshCw, Download, Loader2, Flame, Target, Bug } from 'lucide-react'
+import { Shield, RefreshCw, Download, Loader2, Flame, Target, Bug, Crosshair, Search } from 'lucide-react'
+import { Input } from '@renderer/components/ui/input'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@renderer/components/ui/select'
 import { Button } from '@renderer/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@renderer/components/ui/card'
 import { Badge } from '@renderer/components/ui/badge'
@@ -27,7 +29,16 @@ interface TechniqueReport {
   severity: string; created_at: number; confidence: number; matched_via: string
 }
 
-type Tab = 'attack' | 'kev'
+type Tab = 'attack' | 'kev' | 'pivot'
+
+interface AptResult {
+  group: string; overlap: number; total_group_ttps: number; jaccard: number; evidence: string[]
+}
+interface PivotResult {
+  seed: { entity_type: string; entity_value: string }
+  reports: Array<{ report_id: string; title: string; discipline: string; source_name: string; created_at: number }>
+  related_iocs: Array<{ entity_type: string; entity_value: string; mention_count: number }>
+}
 
 export function CybintPage() {
   const [tab, setTab] = useState<Tab>('attack')
@@ -117,6 +128,7 @@ export function CybintPage() {
       <div className="px-6 pt-3 border-b border-border flex items-center gap-1">
         <TabBtn active={tab === 'attack'} onClick={() => setTab('attack')} icon={Target} label="MITRE ATT&CK" />
         <TabBtn active={tab === 'kev'} onClick={() => setTab('kev')} icon={Flame} label="KEV in corpus" />
+        <TabBtn active={tab === 'pivot'} onClick={() => setTab('pivot')} icon={Crosshair} label="APT + pivot" />
       </div>
 
       {tab === 'attack' ? (
@@ -263,6 +275,200 @@ export function CybintPage() {
           </div>
         </div>
       )}
+
+      {tab === 'pivot' && <PivotTab techniques={techniques} />}
+    </div>
+  )
+}
+
+function PivotTab({ techniques }: { techniques: TechniqueFrequency[] }) {
+  const [aptResults, setAptResults] = useState<AptResult[]>([])
+  const [aptBusy, setAptBusy] = useState(false)
+  const [aptSelected, setAptSelected] = useState<Set<string>>(new Set())
+  const [iocType, setIocType] = useState<string>('ip')
+  const [iocValue, setIocValue] = useState('')
+  const [pivot, setPivot] = useState<PivotResult | null>(null)
+  const [pivotBusy, setPivotBusy] = useState(false)
+
+  const runApt = async (ids: string[]) => {
+    if (ids.length === 0) { setAptResults([]); return }
+    setAptBusy(true)
+    try {
+      const rows = await window.heimdall.invoke('cybint:apt_attribute', { technique_ids: ids, limit: 10 }) as AptResult[]
+      setAptResults(rows)
+    } finally { setAptBusy(false) }
+  }
+
+  const toggleTechnique = (id: string) => {
+    const next = new Set(aptSelected)
+    if (next.has(id)) next.delete(id); else next.add(id)
+    setAptSelected(next)
+    void runApt(Array.from(next))
+  }
+
+  const pickAllCorpusTop = () => {
+    const top10 = techniques.slice(0, 15).map((t) => t.id)
+    setAptSelected(new Set(top10))
+    void runApt(top10)
+  }
+
+  const runPivot = async () => {
+    if (!iocValue.trim()) return
+    setPivotBusy(true)
+    try {
+      const r = await window.heimdall.invoke('cybint:ioc_pivot', { entity_type: iocType, entity_value: iocValue.trim(), limit: 50 }) as PivotResult
+      setPivot(r)
+    } finally { setPivotBusy(false) }
+  }
+
+  return (
+    <div className="flex-1 overflow-auto p-6 space-y-6">
+      {/* APT attribution */}
+      <Card>
+        <CardHeader>
+          <div className="flex items-center gap-2">
+            <Crosshair className="h-4 w-4 text-muted-foreground" />
+            <CardTitle className="text-base">APT attribution</CardTitle>
+          </div>
+          <CardDescription className="text-xs">
+            Pick techniques from the corpus and score overlap against a curated
+            APT-to-TTP map (12 groups: APT28/29/40/41, Lazarus, Sandworm, Turla,
+            MuddyWater, FIN7, Conti/Ryuk ops, Equation, DarkSeoul). Ranked by
+            Jaccard similarity — high overlap + few-TTP group is a strong
+            attribution signal. Not decisive.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <div className="flex gap-2 flex-wrap">
+            <Button size="sm" variant="outline" onClick={pickAllCorpusTop} disabled={techniques.length === 0}>
+              Use corpus top-15 techniques
+            </Button>
+            {aptSelected.size > 0 && (
+              <Button size="sm" variant="ghost" onClick={() => { setAptSelected(new Set()); setAptResults([]) }}>
+                Clear
+              </Button>
+            )}
+          </div>
+          <div className="flex flex-wrap gap-1 max-h-24 overflow-auto">
+            {techniques.slice(0, 40).map((t) => (
+              <button key={t.id}
+                onClick={() => toggleTechnique(t.id)}
+                className={cn(
+                  'text-[10px] px-1.5 py-0.5 rounded border font-mono',
+                  aptSelected.has(t.id)
+                    ? 'border-primary bg-primary/15 text-primary'
+                    : 'border-border text-muted-foreground hover:bg-accent/30'
+                )}
+                title={t.name}
+              >{t.id}</button>
+            ))}
+          </div>
+          {aptBusy && <p className="text-xs text-muted-foreground flex items-center gap-2"><Loader2 className="h-3 w-3 animate-spin" />Scoring…</p>}
+          {aptResults.length > 0 && (
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-xs text-muted-foreground border-b border-border">
+                  <th className="text-left py-1 font-medium">Group</th>
+                  <th className="text-right py-1 font-medium">Overlap</th>
+                  <th className="text-right py-1 font-medium">Group TTPs</th>
+                  <th className="text-right py-1 font-medium">Jaccard</th>
+                  <th className="text-left py-1 font-medium">Matched</th>
+                </tr>
+              </thead>
+              <tbody>
+                {aptResults.map((r) => (
+                  <tr key={r.group} className="border-b border-border/40">
+                    <td className="py-1.5 text-xs font-medium">{r.group}</td>
+                    <td className="py-1.5 text-right text-xs font-mono">{r.overlap}</td>
+                    <td className="py-1.5 text-right text-xs font-mono text-muted-foreground">{r.total_group_ttps}</td>
+                    <td className="py-1.5 text-right text-xs font-mono text-primary">{r.jaccard.toFixed(3)}</td>
+                    <td className="py-1.5 text-[10px] font-mono text-muted-foreground">{r.evidence.slice(0, 6).join(', ')}{r.evidence.length > 6 ? '…' : ''}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* IOC pivot */}
+      <Card>
+        <CardHeader>
+          <div className="flex items-center gap-2">
+            <Search className="h-4 w-4 text-muted-foreground" />
+            <CardTitle className="text-base">IOC pivot</CardTitle>
+          </div>
+          <CardDescription className="text-xs">
+            Seed with one IOC (IP / hash / URL / email / CVE), Heimdall
+            finds every report containing it plus every other IOC those
+            reports mention. Quarantined reports are excluded.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <div className="flex gap-2 items-end">
+            <div className="w-32">
+              <Select value={iocType} onValueChange={setIocType}>
+                <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {['ip', 'hash', 'url', 'email', 'cve', 'domain', 'malware', 'threat_actor'].map((t) => (
+                    <SelectItem key={t} value={t}>{t}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="flex-1">
+              <Input
+                value={iocValue}
+                onChange={(e) => setIocValue(e.target.value)}
+                placeholder="e.g. 10.0.0.1 or CVE-2024-1234"
+                onKeyDown={(e) => e.key === 'Enter' && void runPivot()}
+              />
+            </div>
+            <Button onClick={runPivot} disabled={pivotBusy || !iocValue.trim()}>
+              {pivotBusy ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Search className="h-4 w-4 mr-2" />}
+              Pivot
+            </Button>
+          </div>
+          {pivot && (
+            <>
+              <div className="text-xs text-muted-foreground">
+                Seed <span className="font-mono">{pivot.seed.entity_type}:{pivot.seed.entity_value}</span> —
+                found in {pivot.reports.length} report{pivot.reports.length === 1 ? '' : 's'};
+                {' '}{pivot.related_iocs.length} related IOC{pivot.related_iocs.length === 1 ? '' : 's'}.
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <div className="text-xs font-semibold mb-1">Reports</div>
+                  <div className="space-y-0.5 max-h-64 overflow-auto">
+                    {pivot.reports.length === 0 ? (
+                      <p className="text-xs text-muted-foreground">No reports.</p>
+                    ) : pivot.reports.map((r) => (
+                      <div key={r.report_id} className="text-[11px] truncate py-0.5">
+                        <Badge variant="outline" className="text-[9px] py-0 px-1 font-mono mr-1.5">{r.discipline}</Badge>
+                        {r.title}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+                <div>
+                  <div className="text-xs font-semibold mb-1">Related IOCs</div>
+                  <table className="w-full text-xs">
+                    <tbody>
+                      {pivot.related_iocs.slice(0, 30).map((r, i) => (
+                        <tr key={`${r.entity_type}-${r.entity_value}-${i}`} className="border-b border-border/30">
+                          <td className="py-0.5 font-mono text-[10px] text-muted-foreground w-16">{r.entity_type}</td>
+                          <td className="py-0.5 font-mono truncate max-w-[240px]">{r.entity_value}</td>
+                          <td className="py-0.5 text-right font-mono">{r.mention_count}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </>
+          )}
+        </CardContent>
+      </Card>
     </div>
   )
 }

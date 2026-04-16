@@ -266,10 +266,10 @@ export class DeceptionService {
       this.seedSourceBias()
 
       const rows = db.prepare(`
-        SELECT r.id, r.content
+        SELECT r.id, r.content, r.source_id
         FROM intel_reports r
         ${rescoreAll ? '' : 'LEFT JOIN deception_scores d ON d.report_id = r.id WHERE d.report_id IS NULL'}
-      `).all() as Array<{ id: string; content: string }>
+      `).all() as Array<{ id: string; content: string; source_id: string }>
 
       const now = Date.now()
       const ins = db.prepare(`
@@ -284,15 +284,35 @@ export class DeceptionService {
 
       let highFlagCount = 0
       let scoreSum = 0
+      // Collect high-severity hits by source so we can push them to the
+      // tradecraft service AFTER the main transaction closes — avoids
+      // nested-transaction issues.
+      const highHits: Array<{ sourceId: string; reportId: string }> = []
       const tx = db.transaction(() => {
         for (const r of rows) {
           const result = this.scoreText(r.content || '')
           ins.run(r.id, result.overall_score, JSON.stringify(result.flags), result.word_count, now)
           scoreSum += result.overall_score
-          if (result.overall_score >= 40) highFlagCount++
+          if (result.overall_score >= 40) {
+            highFlagCount++
+            if (r.source_id) highHits.push({ sourceId: r.source_id, reportId: r.id })
+          }
         }
       })
       tx()
+
+      // Theme 1.5 — propagate high-severity hits into source_trust.
+      // Lazy-import to avoid a circular dep (tradecraft depends on nothing
+      // from counterintel, but this one call is fine as a late require).
+      if (highHits.length > 0) {
+        try {
+          const { tradecraftService } = require('../tradecraft/TradecraftService') as typeof import('../tradecraft/TradecraftService')
+          for (const { sourceId, reportId } of highHits) {
+            try { tradecraftService.recordDeceptionHit(sourceId, reportId) }
+            catch (err) { log.debug(`tradecraft hit record failed: ${(err as Error).message}`) }
+          }
+        } catch { /* tradecraft service not present yet during migration bootstrap */ }
+      }
 
       const finished = Date.now()
       const avg = rows.length ? scoreSum / rows.length : 0

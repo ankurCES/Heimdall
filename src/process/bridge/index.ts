@@ -29,6 +29,8 @@ import { registerAnomalyBridge } from './anomalyBridge'
 import { registerImageBridge } from './imageBridge'
 import { registerStixBridge } from './stixBridge'
 import { registerConsolidationBridge } from './consolidationBridge'
+import { registerTradecraftBridge } from './tradecraftBridge'
+import { registerPhase5Bridge } from './phase5Bridge'
 import log from 'electron-log'
 
 export function registerAllBridges(): void {
@@ -63,5 +65,7 @@ export function registerAllBridges(): void {
   registerImageBridge()
   registerStixBridge()
   registerConsolidationBridge()
+  registerTradecraftBridge()
+  registerPhase5Bridge()
   log.info('All IPC bridges registered')
 }

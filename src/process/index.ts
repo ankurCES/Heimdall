@@ -19,6 +19,9 @@ import { enrichmentOrchestrator } from './services/enrichment/EnrichmentOrchestr
 import { resourceManager } from './services/resource/ResourceManager'
 import { overnightService } from './services/overnight/OvernightService'
 import { consolidationService } from './services/memory/ConsolidationService'
+import { disinfoService, insiderThreatService } from './services/counterintel/DisinfoService'
+import { conflictService } from './services/forecast/ForecastService'
+import { taxiiServer } from './services/taxii/TaxiiServer'
 // Kuzu graph DB removed — buggy native module, dormant for entire history,
 // SQLite handled every graph query in practice. See migration 012.
 
@@ -117,6 +120,28 @@ async function initializeDeferred(): Promise<void> {
     try { await consolidationService.runOnce() }
     catch (err) { log.error(`memory.consolidate failed: ${err}`) }
   })
+
+  // Daily disinfo sweep (Theme J) — 03:30 local. Pure SQL, always safe to run.
+  cronService.schedule('disinfo.sweep', '30 3 * * *', 'Daily disinfo sweep', async () => {
+    try { disinfoService.sweep(48) }
+    catch (err) { log.error(`disinfo.sweep failed: ${err}`) }
+  })
+
+  // Conflict probability heatmap refresh — 04:00 local.
+  cronService.schedule('conflict.compute', '0 4 * * *', 'Conflict probability recompute', async () => {
+    try { conflictService.compute(14) }
+    catch (err) { log.error(`conflict.compute failed: ${err}`) }
+  })
+
+  // Insider threat scan — 04:30 local, daily.
+  cronService.schedule('insider.scan', '30 4 * * *', 'Insider threat scan', async () => {
+    try { insiderThreatService.scan() }
+    catch (err) { log.error(`insider.scan failed: ${err}`) }
+  })
+
+  // TAXII server — honour the settings.enabled flag. Silent if disabled.
+  try { await taxiiServer.ensureRunning() }
+  catch (err) { log.warn(`taxii ensureRunning: ${(err as Error).message}`) }
 
   // Auto-pull Meshtastic data on startup if configured. Outer catch logs at
   // debug because a missing/malformed config is expected on first run; inner
@@ -241,6 +266,7 @@ if (!gotTheLock) {
     try { agentOrchestrator.stop() } catch (err) { log.debug(`agentOrchestrator.stop: ${err}`) }
     try { collectorManager.shutdownAll() } catch (err) { log.debug(`collectorManager.shutdownAll: ${err}`) }
     try { cronService.stopAll() } catch (err) { log.debug(`cronService.stopAll: ${err}`) }
+    try { void taxiiServer.stop() } catch (err) { log.debug(`taxiiServer.stop: ${err}`) }
     try { closeDatabase() } catch (err) { log.debug(`closeDatabase: ${err}`) }
   }
 

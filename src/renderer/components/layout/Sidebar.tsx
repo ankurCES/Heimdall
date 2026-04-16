@@ -77,6 +77,7 @@ const NAV_GROUPS: NavGroup[] = [
       { to: '/tokens', icon: Coins, label: 'Token Usage' },
       { to: '/audit', icon: Activity, label: 'Audit Log' },
       { to: '/quarantine', icon: Bug, label: 'Quarantine' },
+      { to: '/advanced', icon: Sparkles, label: 'Advanced' },
       { to: '/settings', icon: Settings, label: 'Settings' }
     ]
   }
