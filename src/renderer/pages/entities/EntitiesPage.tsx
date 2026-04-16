@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Users, RefreshCw, Loader2, Tag, FileText, ChevronRight } from 'lucide-react'
+import { Users, RefreshCw, Loader2, Tag, FileText, ChevronRight, Clock } from 'lucide-react'
 import { Button } from '@renderer/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@renderer/components/ui/card'
 import { Badge } from '@renderer/components/ui/badge'
@@ -23,6 +23,18 @@ interface AliasRow {
 interface ReportRow {
   report_id: string
   mention_count: number
+}
+
+interface PolGrid {
+  entity_id: string
+  canonical_value: string | null
+  entity_type: string | null
+  window_days: number
+  total_mentions: number
+  grid: number[][]
+  day_totals: number[]
+  hour_totals: number[]
+  peak_cell: number
 }
 
 interface ResolutionRun {
@@ -52,6 +64,7 @@ export function EntitiesPage() {
   const [selected, setSelected] = useState<CanonicalEntity | null>(null)
   const [aliases, setAliases] = useState<AliasRow[]>([])
   const [reports, setReports] = useState<ReportRow[]>([])
+  const [pol, setPol] = useState<PolGrid | null>(null)
   const [resolving, setResolving] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -104,14 +117,16 @@ export function EntitiesPage() {
 
   const selectEntity = async (e: CanonicalEntity) => {
     setSelected(e)
-    setAliases([]); setReports([])
+    setAliases([]); setReports([]); setPol(null)
     try {
-      const [a, r] = await Promise.all([
+      const [a, r, p] = await Promise.all([
         window.heimdall.invoke('entity:aliases', e.id),
-        window.heimdall.invoke('entity:reports', { id: e.id, limit: 25 })
-      ]) as [AliasRow[], ReportRow[]]
+        window.heimdall.invoke('entity:reports', { id: e.id, limit: 25 }),
+        window.heimdall.invoke('entity:pol', { id: e.id, window_days: 90 })
+      ]) as [AliasRow[], ReportRow[], PolGrid]
       setAliases(a)
       setReports(r)
+      setPol(p)
     } catch (err) {
       setError(String(err).replace(/^Error:\s*/, ''))
     }
@@ -294,6 +309,26 @@ export function EntitiesPage() {
                 <Card>
                   <CardHeader>
                     <div className="flex items-center gap-2">
+                      <Clock className="h-3.5 w-3.5 text-muted-foreground" />
+                      <CardTitle className="text-sm">Pattern of life</CardTitle>
+                    </div>
+                    <CardDescription className="text-xs">
+                      Mention density by day-of-week × hour-of-day over the last {pol?.window_days ?? 90} days
+                      (local time). {pol?.total_mentions ?? 0} total mentions, peak cell {pol?.peak_cell ?? 0}.
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    {pol && pol.total_mentions > 0 ? (
+                      <PolHeatmap grid={pol.grid} peak={pol.peak_cell} />
+                    ) : (
+                      <p className="text-xs text-muted-foreground">No mentions in the window — pattern will appear once the entity has ≥1 timestamped report.</p>
+                    )}
+                  </CardContent>
+                </Card>
+
+                <Card>
+                  <CardHeader>
+                    <div className="flex items-center gap-2">
                       <FileText className="h-3.5 w-3.5 text-muted-foreground" />
                       <CardTitle className="text-sm">Mentioned in reports</CardTitle>
                     </div>
@@ -336,6 +371,50 @@ function Stat({ label, value, hint }: { label: string; value: string | number; h
       <div className="text-[10px] uppercase tracking-wider text-muted-foreground">{label}</div>
       <div className="text-base font-semibold font-mono">{value}</div>
       {hint && <div className="text-[10px] text-muted-foreground mt-0.5 italic">{hint}</div>}
+    </div>
+  )
+}
+
+const DAY_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
+
+/**
+ * 7×24 heatmap. Peak-normalised amber gradient — analyst can eyeball the
+ * "working hours" shape (weekday 9-17 spike) vs coordinated-inauthentic
+ * patterns (uniform, or graveyard-shift clustering).
+ */
+function PolHeatmap({ grid, peak }: { grid: number[][]; peak: number }) {
+  const hours = Array.from({ length: 24 }, (_, i) => i)
+  return (
+    <div className="space-y-1">
+      <div className="flex gap-[1px] pl-8 text-[8px] text-muted-foreground font-mono">
+        {hours.map((h) => (
+          <div key={h} className="w-4 text-center">{h % 3 === 0 ? h.toString().padStart(2, '0') : ''}</div>
+        ))}
+      </div>
+      {grid.map((row, dow) => (
+        <div key={dow} className="flex items-center gap-[1px]">
+          <div className="w-8 text-[9px] text-muted-foreground font-mono">{DAY_LABELS[dow]}</div>
+          {row.map((count, h) => {
+            const intensity = peak > 0 ? count / peak : 0
+            const bg = count === 0
+              ? 'rgba(148,163,184,0.06)'
+              : `rgba(251,146,60,${0.15 + intensity * 0.75})`
+            return (
+              <div
+                key={h}
+                className="w-4 h-4 rounded-sm"
+                style={{ background: bg }}
+                title={`${DAY_LABELS[dow]} ${h.toString().padStart(2, '0')}:00 — ${count} mention${count === 1 ? '' : 's'}`}
+              />
+            )
+          })}
+        </div>
+      ))}
+      <div className="flex items-center gap-1.5 pt-1 text-[9px] text-muted-foreground">
+        <span>0</span>
+        <div className="flex-1 h-1 rounded" style={{ background: 'linear-gradient(to right, rgba(148,163,184,0.06), rgba(251,146,60,0.9))' }} />
+        <span>{peak}</span>
+      </div>
     </div>
   )
 }

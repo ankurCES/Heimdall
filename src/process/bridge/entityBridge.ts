@@ -1,6 +1,7 @@
 import { ipcMain } from 'electron'
 import log from 'electron-log'
 import { entityResolutionService } from '../services/entity/EntityResolutionService'
+import { patternOfLifeService } from '../services/entity/PatternOfLifeService'
 
 /**
  * Theme 4.6 — entity resolution IPC.
@@ -29,6 +30,10 @@ export function registerEntityBridge(): void {
 
   ipcMain.handle('entity:reports', (_evt, args: { id: string; limit?: number }) => {
     return entityResolutionService.reports(args.id, args.limit ?? 50)
+  })
+
+  ipcMain.handle('entity:pol', (_evt, args: { id: string; window_days?: number }) => {
+    return patternOfLifeService.forEntity(args.id, args.window_days ?? 90)
   })
 
   log.info('entity bridge registered')
