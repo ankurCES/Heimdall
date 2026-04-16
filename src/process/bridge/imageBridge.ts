@@ -1,12 +1,24 @@
 import { ipcMain, dialog, BrowserWindow } from 'electron'
 import log from 'electron-log'
+import path from 'path'
+import { app } from 'electron'
 import { imageExifService } from '../services/image/ImageExifService'
 import { geoLocationAssistant } from '../services/llm/GeoLocationAssistant'
 import fs from 'fs'
 
+/** Validate a user-supplied path is within safe bounds (home dir). */
+function validatePath(p: string): string {
+  const resolved = path.resolve(p)
+  const home = app.getPath('home')
+  if (!resolved.startsWith(home)) {
+    throw new Error(`Path traversal blocked: ${resolved} is outside ${home}`)
+  }
+  return resolved
+}
+
 export function registerImageBridge(): void {
   ipcMain.handle('image:ingest_file', async (_evt, args: { path: string; report_id?: string | null }) => {
-    return await imageExifService.ingestFile(args.path, args.report_id ?? null)
+    return await imageExifService.ingestFile(validatePath(args.path), args.report_id ?? null)
   })
 
   ipcMain.handle('image:ingest_pick', async () => {
@@ -49,8 +61,9 @@ export function registerImageBridge(): void {
       const mime = img.mime_type || 'image/jpeg'
       dataUrl = `data:${mime};base64,${buf.toString('base64')}`
     } else if (args.image_path) {
-      const buf = fs.readFileSync(args.image_path)
-      const ext = args.image_path.toLowerCase()
+      const safePath = validatePath(args.image_path)
+      const buf = fs.readFileSync(safePath)
+      const ext = safePath.toLowerCase()
       const mime = ext.endsWith('.png') ? 'image/png' : ext.endsWith('.webp') ? 'image/webp' : 'image/jpeg'
       dataUrl = `data:${mime};base64,${buf.toString('base64')}`
     } else {

@@ -1898,6 +1898,28 @@ const migrations: Migration[] = [
       `)
       log.info('Migration 033: wargame_runs + wargame_rounds + approval_requests tables created')
     }
+  },
+  {
+    version: '034',
+    name: 'performance_indexes',
+    up: (db) => {
+      // Performance indexes identified by the security + perf audit.
+      // Each addresses a full-table-scan on 20K+ row tables.
+      const indexes = [
+        // Composite index for entity lookups (IOC pivot, entity resolution)
+        'CREATE INDEX IF NOT EXISTS idx_entities_type_value ON intel_entities(entity_type, entity_value)',
+        // intel_links.created_at for time-window network recompute
+        'CREATE INDEX IF NOT EXISTS idx_links_created ON intel_links(created_at)',
+        // Composite for deception + state-media filtering
+        'CREATE INDEX IF NOT EXISTS idx_intel_source_discipline ON intel_reports(source_id, discipline)',
+        // intel_reports.created_at covering index for date-range scans
+        'CREATE INDEX IF NOT EXISTS idx_intel_created_disc ON intel_reports(created_at, discipline)'
+      ]
+      for (const sql of indexes) {
+        try { db.exec(sql) } catch { /* index may already exist */ }
+      }
+      log.info('Migration 034: performance indexes (4 composite indexes added)')
+    }
   }
 ]
 

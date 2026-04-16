@@ -27,9 +27,12 @@ interface Props {
   variant?: 'compact' | 'verbose'
 }
 
-// Module-level cache so we only hit IPC once per ticket value across renders
+// Module-level cache with a 10-minute TTL so compartment changes
+// propagate without a full page reload.
 let _allCompartments: Compartment[] | null = null
 let _grantedIds: Set<string> | null = null
+let _cacheExpiry = 0
+const CACHE_TTL_MS = 10 * 60 * 1000
 const _listeners = new Set<() => void>()
 
 async function loadCompartments(): Promise<void> {
@@ -38,10 +41,12 @@ async function loadCompartments(): Promise<void> {
     _allCompartments = list
     const granted = await window.heimdall.invoke('compartments:granted_ids') as string[]
     _grantedIds = new Set(granted)
+    _cacheExpiry = Date.now() + CACHE_TTL_MS
     for (const cb of _listeners) cb()
   } catch {
     _allCompartments = []
     _grantedIds = new Set()
+    _cacheExpiry = Date.now() + CACHE_TTL_MS
   }
 }
 
@@ -56,7 +61,7 @@ export function CompartmentBadge({ compartmentIds, compartments, variant = 'comp
 
   useEffect(() => {
     if (compartments) return // caller already supplied resolved data
-    if (_allCompartments == null) void loadCompartments()
+    if (_allCompartments == null || Date.now() > _cacheExpiry) void loadCompartments()
     const cb = () => force((n) => n + 1)
     _listeners.add(cb)
     return () => { _listeners.delete(cb) }

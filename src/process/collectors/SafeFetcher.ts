@@ -73,6 +73,24 @@ export class SafeFetcher {
     return this.csamBlocklist.has(hash)
   }
 
+  private isPrivateHost(hostname: string): boolean {
+    const h = hostname.toLowerCase()
+    // Loopback
+    if (h === 'localhost' || h === '127.0.0.1' || h === '::1') return true
+    // Link-local, metadata
+    if (h.startsWith('169.254.') || h === '169.254.169.254') return true
+    // Cloud metadata endpoints
+    if (h === 'metadata.google.internal') return true
+    // Private RFC 1918 ranges (rough hostname check — doesn't resolve DNS,
+    // but blocks the obvious cases)
+    if (/^10\./.test(h) || /^172\.(1[6-9]|2\d|3[01])\./.test(h) || /^192\.168\./.test(h)) return true
+    // IPv6 mapped
+    if (h.startsWith('::ffff:127.') || h.startsWith('::ffff:10.') || h.startsWith('::ffff:192.168.')) return true
+    // file:// protocol guard (shouldn't reach here but defence in depth)
+    if (h === '' || h === '0.0.0.0') return true
+    return false
+  }
+
   private airGapAllows(hostname: string): boolean {
     if (!this.airGapMode) return true
     const h = hostname.toLowerCase()
@@ -85,6 +103,12 @@ export class SafeFetcher {
   async fetch(url: string, options: FetchOptions = {}): Promise<Response> {
     const { headers = {}, timeout = 30000, maxRetries = 3 } = options
     const domain = new URL(url).hostname
+
+    // SSRF prevention — block private/loopback/link-local IP ranges.
+    if (this.isPrivateHost(domain)) {
+      auditService.log('fetch.ssrf_blocked', { url, domain })
+      throw new Error(`Blocked: ${domain} resolves to a private/internal address`)
+    }
 
     // Air-gap gate. Hard block BEFORE robots / rate limit / retry — nothing
     // leaves the host unless explicitly allowlisted.

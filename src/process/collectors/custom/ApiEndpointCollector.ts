@@ -168,7 +168,7 @@ export class ApiEndpointCollector extends BaseCollector {
         if (!secret) {
           log.warn(`ApiEndpoint: empty secret for ${key} (configure in Settings → API Keys)`)
         } else {
-          log.info(`ApiEndpoint: resolved ${name} from ${key} (${secret.length} chars, starts with ${secret.slice(0, 3)}...)`)
+          log.info(`ApiEndpoint: resolved ${name} from ${key} (${secret.length} chars)`)
         }
         resolved[name] = secret
       } else {

@@ -57,10 +57,14 @@ export class DisinfoService {
     const runId = Number(db.prepare('INSERT INTO disinfo_runs (started_at) VALUES (?)').run(started).lastInsertRowid)
     try {
       const since = started - windowHours * 60 * 60 * 1000
+      // Cap at 5000 most recent to avoid OOM on large corpora. The
+      // clustering logic only needs enough volume to detect patterns;
+      // beyond 5K diminishing returns vs memory cost.
       const rows = db.prepare(`
         SELECT id, title, source_name, source_url, created_at
         FROM intel_reports
         WHERE created_at >= ? AND title IS NOT NULL
+        ORDER BY created_at DESC LIMIT 5000
       `).all(since) as Array<{ id: string; title: string; source_name: string; source_url: string | null; created_at: number }>
 
       // Cluster by normalised title (template-attack signal)

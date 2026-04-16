@@ -1,6 +1,16 @@
-import { ipcMain, dialog, BrowserWindow } from 'electron'
+import { ipcMain, dialog, BrowserWindow, app } from 'electron'
 import path from 'path'
 import log from 'electron-log'
+
+/** Validate user-supplied paths stay within the home directory. */
+function validatePath(p: string): string {
+  const resolved = path.resolve(p)
+  const home = app.getPath('home')
+  if (!resolved.startsWith(home)) {
+    throw new Error(`Path traversal blocked: ${resolved} is outside ${home}`)
+  }
+  return resolved
+}
 
 import { briefingService } from '../services/briefing/BriefingService'
 import { disinfoService, canaryService, insiderThreatService } from '../services/counterintel/DisinfoService'
@@ -106,7 +116,7 @@ export function registerPhase5Bridge(): void {
     return out
   })
   ipcMain.handle('document:ingest_file', async (_e, args: { path: string; report_id?: string | null }) =>
-    await documentOcrService.ingest(args.path, { report_id: args.report_id ?? null })
+    await documentOcrService.ingest(validatePath(args.path), { report_id: args.report_id ?? null })
   )
   ipcMain.handle('document:list', (_e, args?: { limit?: number }) => documentOcrService.list(args?.limit ?? 100))
   ipcMain.handle('document:get', (_e, id: string) => documentOcrService.get(id))
