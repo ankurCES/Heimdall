@@ -2,6 +2,7 @@ import { settingsService } from '../settings/SettingsService'
 import { getDatabase } from '../database'
 import { generateId, timestamp } from '@common/utils/id'
 import type { LlmConfig, LlmConnection } from '@common/types/settings'
+import { PromptBuilder } from './PromptBuilder'
 import log from 'electron-log'
 
 export interface ChatMessage {
@@ -10,21 +11,6 @@ export interface ChatMessage {
 }
 
 export type ChatMode = 'agentic' | 'direct' | 'caveman'
-
-const SYSTEM_PROMPT = `You are Heimdall, an intelligence analyst AI assistant. You help analyze collected intelligence data from multiple disciplines (OSINT, CYBINT, FININT, SOCMINT, GEOINT, SIGINT, RUMINT, CI, Agency).
-
-When presented with intelligence reports, you:
-- Identify patterns, connections, and anomalies across disciplines
-- Assess threat levels and verification scores critically
-- Cross-reference information from multiple sources
-- Provide actionable analysis with clear recommendations
-- Flag potential misinformation or low-verification data
-- Use proper intelligence analysis tradecraft
-
-Always cite the discipline and source of information you reference. Be precise and concise.`
-
-const CAVEMAN_PROMPT = `U r Heimdall intel analyst. Be ULTRA brief. Use abbrevs. Skip filler words. No intros/outros. Just facts.
-Rules: max 3 sentences per point. Use bullet lists. Skip "I think"/"It appears". Data only. Cite [DISC:SOURCE].`
 
 export class LlmService {
   getConnections(): LlmConnection[] {
@@ -57,7 +43,7 @@ export class LlmService {
     const model = conn.model || conn.customModel
     if (!model) throw new Error(`No model set for connection "${conn.name}". Configure in Settings > LLM.`)
 
-    const systemPrompt = mode === 'caveman' ? CAVEMAN_PROMPT : SYSTEM_PROMPT
+    const systemPrompt = PromptBuilder.build(mode === 'agentic' ? 'agentic' : mode === 'caveman' ? 'caveman' : 'direct')
     let processedMessages = messages
 
     // Caveman mode: compress messages to save tokens

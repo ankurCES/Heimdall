@@ -26,6 +26,7 @@
     "better-sqlite3-multiple-ciphers": "^11.10.0",
     "chart.js": "^4.5.1",
     "cheerio": "^1.2.0",
+    "compromise": "^14.15.0",
     "croner": "^10.0.1",
     "electron-log": "^5.3.0",
     "electron-updater": "^6.3.0",

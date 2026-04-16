@@ -1826,6 +1826,30 @@ const migrations: Migration[] = [
       `)
       log.info('Migration 031: phase 5 sweep — 17 tables across batches 5C-5J')
     }
+  },
+  {
+    version: '032',
+    name: 'redaction_events',
+    up: (db) => {
+      // Theme 10.9 — US-persons / EEA-persons redaction event log.
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS redaction_events (
+          id TEXT PRIMARY KEY,
+          report_id TEXT NOT NULL,
+          kind TEXT NOT NULL,
+          original_snippet TEXT,
+          offset_start INTEGER,
+          offset_end INTEGER,
+          status TEXT NOT NULL DEFAULT 'pending',
+          analyst_decision TEXT,
+          created_at INTEGER NOT NULL,
+          resolved_at INTEGER
+        );
+        CREATE INDEX IF NOT EXISTS idx_redaction_report ON redaction_events(report_id);
+        CREATE INDEX IF NOT EXISTS idx_redaction_status ON redaction_events(status, created_at DESC);
+      `)
+      log.info('Migration 032: redaction_events table created')
+    }
   }
 ]
 

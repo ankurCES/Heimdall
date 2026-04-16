@@ -85,7 +85,10 @@ const testChannels = [
   'detection:list', 'detection:get', 'detection:delete',
   'misp:configured', 'misp:test', 'misp:push', 'misp:pull', 'misp:runs',
   'taxii:status', 'taxii:start', 'taxii:stop', 'taxii:rotate_token', 'taxii:runs',
-  'document:ingest_pick', 'document:ingest_file', 'document:list', 'document:get', 'document:delete'
+  'document:ingest_pick', 'document:ingest_file', 'document:list', 'document:get', 'document:delete',
+  'image:geolocate',
+  'redaction:scan', 'redaction:flag_report', 'redaction:apply',
+  'redaction:dismiss', 'redaction:pending', 'redaction:scan_corpus'
 ]
 const allowedChannels = [...Object.values(IPC_CHANNELS), ...testChannels]
 const chatEvents = ['chat:chunk', 'chat:done', 'chat:error']
