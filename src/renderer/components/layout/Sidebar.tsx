@@ -4,7 +4,7 @@ import {
   LayoutDashboard, FileText, Database, Bell, Map, MessageSquare,
   Settings, Activity, BookOpen, Coins, BarChart3, Radio,
   Layers, RefreshCw, Sparkles, Eye, AlertOctagon, GitCompare, TrendingUp,
-  Network, Users, ShieldAlert, Shield, Bug, Moon, MapPin, Image, ChevronLeft, ChevronRight, ChevronDown
+  Network, Users, ShieldAlert, Shield, Bug, Moon, MapPin, Image, Share2, ChevronLeft, ChevronRight, ChevronDown
 } from 'lucide-react'
 import { cn } from '@renderer/lib/utils'
 import heimdallLogo from '@renderer/assets/heimdall-logo.png'
@@ -56,7 +56,8 @@ const NAV_GROUPS: NavGroup[] = [
     items: [
       { to: '/sources', icon: Database, label: 'Sources' },
       { to: '/sync', icon: RefreshCw, label: 'Sync Center' },
-      { to: '/vault', icon: BookOpen, label: 'Obsidian Vault' }
+      { to: '/vault', icon: BookOpen, label: 'Obsidian Vault' },
+      { to: '/stix', icon: Share2, label: 'STIX Interop' }
     ]
   },
   {

@@ -1540,6 +1540,40 @@ const migrations: Migration[] = [
       `)
       log.info('Migration 027: image_evidence table created')
     }
+  },
+  {
+    version: '028',
+    name: 'stix_interop',
+    up: (db) => {
+      // Theme 7.6 — STIX 2.1 / TAXII 2.1 interoperability.
+      //
+      // stix_runs audits every export + import. On the import side the
+      // stix_id column on imported rows lets us dedupe across repeat
+      // imports of the same bundle — otherwise two imports of a 500-
+      // object bundle would double every row.
+      //
+      // We add nullable stix_id columns to intel_reports and
+      // intel_entities. Legacy rows have stix_id=NULL, which is fine.
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS stix_runs (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          kind TEXT NOT NULL,
+          started_at INTEGER NOT NULL,
+          finished_at INTEGER,
+          objects_in INTEGER,
+          objects_out INTEGER,
+          bundle_path TEXT,
+          summary TEXT,
+          duration_ms INTEGER,
+          error TEXT
+        );
+      `)
+      try { db.exec(`ALTER TABLE intel_reports ADD COLUMN stix_id TEXT`) } catch { /* idempotent */ }
+      try { db.exec(`CREATE INDEX IF NOT EXISTS idx_reports_stix_id ON intel_reports(stix_id)`) } catch { /* idempotent */ }
+      try { db.exec(`ALTER TABLE intel_entities ADD COLUMN stix_id TEXT`) } catch { /* idempotent */ }
+      try { db.exec(`CREATE INDEX IF NOT EXISTS idx_entities_stix_id ON intel_entities(stix_id)`) } catch { /* idempotent */ }
+      log.info('Migration 028: stix_runs + stix_id columns on intel_reports/intel_entities')
+    }
   }
 ]
 
