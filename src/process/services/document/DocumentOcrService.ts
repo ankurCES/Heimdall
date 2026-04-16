@@ -4,27 +4,63 @@ import crypto from 'crypto'
 import log from 'electron-log'
 import { generateId } from '@common/utils/id'
 import { getDatabase } from '../database'
+import { llmService } from '../llm/LlmService'
 
 /**
  * Theme 8.3 — Document OCR + redaction detector.
  *
- *   PDF files        → pdfjs-dist extracts the embedded text layer
- *                      (works for the vast majority of machine-generated
- *                      PDFs without any OCR). If the text layer is empty
- *                      the PDF is flagged as "scan-only" and the analyst
- *                      is told so — full raster→OCR needs the `canvas`
- *                      native module we've deliberately avoided.
- *   Image files      → tesseract.js OCR directly from the Buffer.
+ * Engine priority:
+ *   PDF files        → pdfjs-dist extracts the embedded text layer first
+ *                      (perfect recall for machine-generated PDFs, no
+ *                      vision cost). On empty text layer, the PDF is
+ *                      flagged as "scan-only" — full raster-to-OCR of
+ *                      PDFs still needs `canvas` which we've avoided.
+ *   Image files      → 1. LLM vision (if configured): primary extractor
+ *                         — handles handwriting, complex layouts,
+ *                         multi-language, skewed text. Also catches
+ *                         redaction boxes the analyst would otherwise
+ *                         miss via our heuristic.
+ *                      2. tesseract.js fallback: pure-JS OCR if the LLM
+ *                         path fails, is not configured, or returns
+ *                         empty/short text. Reliable for clean machine
+ *                         text, limited on everything else.
+ *
+ * Each extraction records which engine actually succeeded in the
+ * ocr_engine column; UIs can show this for provenance.
  *
  * Redaction heuristic — counts runs of ≥6 contiguous "█" characters OR
- * long stretches of whitespace (>40 chars) on a line that otherwise has
- * regular text. A real redaction detector needs pixel analysis; this is
- * a linguistic tell useful on OCR'd scans.
+ * long whitespace stretches on otherwise-text lines. LLM-vision
+ * extractions also include whatever the model flagged as a redaction
+ * in its own output.
  *
  * On ingest, substantial documents (≥500 chars) automatically create an
  * intel_reports row (source='document-ocr') so RAG / search / the agent
  * can operate on the extracted text.
  */
+
+const VISION_SYSTEM = `You extract ALL text from the supplied image, preserving the original reading order. Rules:
+- Output the extracted text only — no summary, no commentary, no markdown preamble.
+- Preserve paragraph breaks with blank lines. Preserve line breaks that matter (lists, headers, tables).
+- Render tables as pipe-separated rows, one per line.
+- If a region has been redacted (black box / blacked-out text), insert the literal token [REDACTED] in place.
+- If a region is unreadable (blurred, too small, cut off) insert [UNREADABLE].
+- Do NOT translate. Do NOT correct errors in the source.
+- Do NOT add information that is not visibly in the image.`
+
+async function extractViaLlm(buf: Buffer, mime: string): Promise<{ text: string; engine: string } | null> {
+  if (!llmService.hasUsableConnection()) return null
+  try {
+    const b64 = buf.toString('base64')
+    const dataUrl = `data:${mime};base64,${b64}`
+    const text = await llmService.completeVision(VISION_SYSTEM, [dataUrl])
+    const cleaned = text.trim()
+    if (cleaned.length < 5) return null
+    return { text: cleaned, engine: 'llm-vision' }
+  } catch (err) {
+    log.warn(`document-ocr: LLM vision failed, will fall back: ${(err as Error).message}`)
+    return null
+  }
+}
 
 export interface DocumentRow {
   id: string
@@ -109,12 +145,29 @@ export class DocumentOcrService {
           confidence = 99 // perfect — native text, no OCR error
         }
       } else if (mime && mime.startsWith('image/')) {
-        const tesseract = await import('tesseract.js')
-        const result = await tesseract.recognize(buf, 'eng')
-        text = result.data.text || ''
-        confidence = result.data.confidence || 0
-        pageCount = 1
-        engine = 'tesseract.js'
+        // Primary path: LLM vision.
+        const vision = await extractViaLlm(buf, mime)
+        if (vision) {
+          text = vision.text
+          engine = vision.engine
+          // Vision models don't emit a numeric confidence — we estimate
+          // high (85) when the response is substantial (>200 chars), med
+          // (70) otherwise. This is a heuristic for the UI; it's not
+          // comparable to tesseract's word-level confidence.
+          confidence = text.length > 200 ? 85 : 70
+          pageCount = 1
+          log.info(`document-ocr: LLM vision extracted ${text.length} chars`)
+        }
+        // Fallback: tesseract.js — pure JS, no network, deterministic.
+        if (!text || text.length < 5) {
+          const tesseract = await import('tesseract.js')
+          const result = await tesseract.recognize(buf, 'eng')
+          text = result.data.text || ''
+          confidence = result.data.confidence || 0
+          pageCount = 1
+          engine = text ? 'tesseract.js' : 'tesseract.js:empty'
+          log.info(`document-ocr: tesseract fallback extracted ${text.length} chars (conf ${confidence.toFixed(0)})`)
+        }
       } else {
         throw new Error(`Unsupported file type: ${ext || 'no extension'}`)
       }

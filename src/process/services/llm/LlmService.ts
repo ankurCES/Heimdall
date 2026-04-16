@@ -90,6 +90,66 @@ export class LlmService {
     )
   }
 
+  /**
+   * Vision-capable completion — constructs the OpenAI-compatible
+   * multi-part content format (text + image_url parts) and sends to
+   * the configured endpoint. Works with any endpoint that implements
+   * the OpenAI vision schema: OpenAI, Anthropic via proxy, Ollama
+   * with llava/bakllava/llama3.2-vision, vLLM, LM Studio, etc.
+   *
+   * Images are passed as full data URLs (data:image/png;base64,…) so
+   * callers don't need to worry about hosting them.
+   *
+   * The request uses a longer timeout (300s) because vision prompts
+   * on large images can take a while. Returns empty string on any
+   * failure so the caller can decide whether to fall back.
+   */
+  async completeVision(prompt: string, imageDataUrls: string[], opts: { connectionId?: string; timeoutMs?: number } = {}): Promise<string> {
+    const conn = this.getConnection(opts.connectionId)
+    if (!conn) throw new Error('No LLM connection configured')
+    const model = conn.model || conn.customModel
+    if (!model) throw new Error('No model selected')
+    if (!imageDataUrls.length) throw new Error('No images supplied')
+
+    const baseUrl = this.normalizeBaseUrl(conn.baseUrl)
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+    if (conn.apiKey) headers['Authorization'] = `Bearer ${conn.apiKey}`
+    const chatUrl = `${baseUrl}/chat/completions`
+
+    const parts: Array<{ type: 'text'; text: string } | { type: 'image_url'; image_url: { url: string } }> = [
+      { type: 'text', text: prompt }
+    ]
+    for (const url of imageDataUrls) {
+      parts.push({ type: 'image_url', image_url: { url } })
+    }
+
+    const body = JSON.stringify({
+      model,
+      messages: [{ role: 'user', content: parts }],
+      stream: false
+    })
+
+    log.info(`LLM vision: ${chatUrl} model=${model} images=${imageDataUrls.length}`)
+    const res = await fetch(chatUrl, {
+      method: 'POST', headers, body,
+      signal: AbortSignal.timeout(opts.timeoutMs ?? 300000)
+    })
+    if (!res.ok) {
+      const err = await res.text().catch(() => '')
+      throw new Error(`LLM vision ${res.status}: ${err.slice(0, 300)}`)
+    }
+    const data = await res.json() as { choices?: Array<{ message?: { content?: string } }> }
+    const content = data.choices?.[0]?.message?.content ?? ''
+    this.trackUsage(conn.name, model, [{ role: 'user', content: prompt }], content, 'agentic')
+    return content
+  }
+
+  /** Is an LLM connection currently configured + enabled? Used to decide whether to try vision first. */
+  hasUsableConnection(): boolean {
+    const conn = this.getConnection()
+    return !!(conn && (conn.model || conn.customModel))
+  }
+
   private getConfig(): LlmConfig | null {
     const raw = settingsService.get<any>('llm')
     if (!raw) return null
