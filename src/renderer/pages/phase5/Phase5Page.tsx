@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import {
   Settings2, Flame, Radio, Share2, Moon, Play, Loader2, RefreshCw, Check, X, Download, Upload,
-  Shield, FileText, AlertOctagon, Search, Crosshair, Layers, Brain, MapPin
+  Shield, FileText, AlertOctagon, Search, Crosshair, Layers, Brain, MapPin, Copy, Scroll
 } from 'lucide-react'
 import { Button } from '@renderer/components/ui/button'
 import { Input } from '@renderer/components/ui/input'
@@ -128,6 +128,9 @@ function DisinfoTab() {
 function CanaryTab() {
   const [list, setList] = useState<Array<{ id: string; token: string; label: string; observed_at: number | null; observed_source: string | null; created_at: number }>>([])
   const [label, setLabel] = useState('')
+  const [copied, setCopied] = useState<string | null>(null)
+  const [seeding, setSeeding] = useState<string | null>(null)
+  const [seedResult, setSeedResult] = useState<string | null>(null)
   const load = async () => setList(await window.heimdall.invoke('canary:list') as typeof list)
   useEffect(() => { void load() }, [])
   const create = async () => {
@@ -136,33 +139,78 @@ function CanaryTab() {
     setLabel(''); await load()
   }
   const scan = async () => { await window.heimdall.invoke('canary:scan_corpus'); await load() }
+  const copyToken = (token: string) => {
+    void navigator.clipboard.writeText(token)
+    setCopied(token); setTimeout(() => setCopied(null), 2000)
+  }
+  const seedDpb = async (token: string, tokenLabel: string) => {
+    setSeeding(token); setSeedResult(null)
+    try {
+      const dpb = await window.heimdall.invoke('dpb:generate', { periodHours: 24 }) as { id: string; body_md: string }
+      // Append canary watermark. The token is placed in a comment-style
+      // footer that looks innocuous in the rendered brief but is unique
+      // enough for corpus-scan to detect. It's also appended in plaintext
+      // so a plain-text copy/paste still carries it.
+      const seeded = `${dpb.body_md}\n\n---\n<!-- canary: ${token} | ${tokenLabel} -->\n_Document ref: ${token}_\n`
+      // Write the seeded brief as a new export. We re-use the export:write
+      // channel which saves to a file via the save-dialog.
+      await window.heimdall.invoke('export:write', {
+        source_type: 'dpb', source_id: dpb.id,
+        format: 'markdown',
+        content_override: seeded
+      })
+      setSeedResult(`DPB ${dpb.id} generated and exported with canary ${token}`)
+    } catch (err) {
+      setSeedResult(`Error: ${String(err).replace(/^Error:\s*/, '')}`)
+    } finally { setSeeding(null) }
+  }
   return (
     <div className="p-6 space-y-4">
       <div>
         <h2 className="text-base font-semibold">Canary tokens</h2>
-        <p className="text-xs text-muted-foreground mt-1">Unique tokens to paste into deliberately-seeded briefings. Appearances in the corpus are auto-flagged.</p>
+        <p className="text-xs text-muted-foreground mt-1">
+          Create a token → <strong>Copy</strong> to paste into any external document, OR click
+          <strong> Seed DPB</strong> to generate a Daily Brief with the token embedded as a
+          watermark. Share the seeded brief with a limited audience. If the token later appears
+          in the intel corpus, Heimdall flags the leak source.
+        </p>
       </div>
       <div className="flex gap-2">
-        <Input placeholder="Label (e.g. 'CIA Amy test leak Jul 2026')" value={label} onChange={(e) => setLabel(e.target.value)} />
+        <Input placeholder="Label (e.g. 'Iran desk brief — shared with Amy + Bob')" value={label} onChange={(e) => setLabel(e.target.value)}
+          onKeyDown={(e) => e.key === 'Enter' && void create()} />
         <Button onClick={create} disabled={!label.trim()}>Create</Button>
         <Button variant="outline" onClick={scan}>Scan corpus</Button>
       </div>
+      {seedResult && (
+        <div className={cn('text-xs p-2 rounded border', seedResult.startsWith('Error') ? 'bg-red-500/10 border-red-500/30 text-red-300' : 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300')}>
+          {seedResult}
+        </div>
+      )}
       <Card><CardContent className="p-0">
-        {list.length === 0 ? <p className="p-6 text-center text-xs text-muted-foreground">No tokens.</p> : (
+        {list.length === 0 ? <p className="p-6 text-center text-xs text-muted-foreground">No tokens. Create one, then copy it into a document or seed a DPB.</p> : (
           <table className="w-full text-sm">
             <thead><tr className="text-xs text-muted-foreground border-b border-border">
               <th className="text-left px-3 py-2 font-medium">Label</th>
               <th className="text-left px-3 py-2 font-medium">Token</th>
               <th className="text-left px-3 py-2 font-medium">Observed?</th>
-              <th className="text-left px-3 py-2 font-medium">Created</th>
+              <th className="text-left px-3 py-2 font-medium">Actions</th>
             </tr></thead>
             <tbody>
               {list.map((c) => (
                 <tr key={c.id} className="border-b border-border/30">
                   <td className="px-3 py-1.5 text-xs">{c.label}</td>
                   <td className="px-3 py-1.5 text-[10px] font-mono">{c.token}</td>
-                  <td className="px-3 py-1.5 text-xs">{c.observed_at ? <span className="text-red-300">{formatRelativeTime(c.observed_at)} via {c.observed_source}</span> : <span className="text-muted-foreground">—</span>}</td>
-                  <td className="px-3 py-1.5 text-xs text-muted-foreground">{formatRelativeTime(c.created_at)}</td>
+                  <td className="px-3 py-1.5 text-xs">{c.observed_at ? <span className="text-red-300">{formatRelativeTime(c.observed_at)} via {c.observed_source}</span> : <span className="text-muted-foreground">not yet</span>}</td>
+                  <td className="px-3 py-1.5">
+                    <div className="flex gap-1">
+                      <Button size="sm" variant="ghost" className="h-6 text-[10px] px-2" onClick={() => copyToken(c.token)} title="Copy token to clipboard">
+                        {copied === c.token ? <Check className="h-3 w-3 text-emerald-400" /> : <Copy className="h-3 w-3" />}
+                      </Button>
+                      <Button size="sm" variant="ghost" className="h-6 text-[10px] px-2" onClick={() => void seedDpb(c.token, c.label)} disabled={seeding === c.token} title="Generate a DPB with this canary embedded">
+                        {seeding === c.token ? <Loader2 className="h-3 w-3 animate-spin" /> : <Scroll className="h-3 w-3" />}
+                      </Button>
+                    </div>
+                  </td>
                 </tr>
               ))}
             </tbody>

@@ -42,6 +42,8 @@ export interface ExportRequest {
   filename?: string
   /** Required for `bundle` format. */
   passphrase?: string
+  /** Override the artifact body_md with custom content (used by canary-seeded briefings). */
+  content_override?: string
 }
 
 export interface ExportResult {
@@ -69,6 +71,8 @@ class ExportServiceImpl {
     if (!artifact) {
       return { ok: false, error: `${req.source_type} not found: ${req.source_id}` }
     }
+    // content_override replaces the body for canary-seeded briefings etc.
+    if (req.content_override) artifact.body_md = req.content_override
 
     let body: Buffer
     let extension: string
