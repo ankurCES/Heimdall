@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback } from 'react'
-import { Eye, Plus, RefreshCw, Trash2, ChevronDown, ChevronRight, Loader2, AlertOctagon } from 'lucide-react'
+import { Eye, Plus, RefreshCw, Trash2, ChevronDown, ChevronRight, Loader2, AlertOctagon, Sparkles } from 'lucide-react'
 import { Button } from '@renderer/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@renderer/components/ui/card'
 import { Input } from '@renderer/components/ui/input'
@@ -160,6 +160,7 @@ export function IwPage() {
 
 function EventCard({ event, expanded, onToggle, onChanged }: { event: IwEvent; expanded: boolean; onToggle: () => void; onChanged: () => void }) {
   const [addOpen, setAddOpen] = useState(false)
+  const [suggestOpen, setSuggestOpen] = useState(false)
   const lvl = event.level || 'green'
   const indicators = event.indicators || []
 
@@ -194,6 +195,9 @@ function EventCard({ event, expanded, onToggle, onChanged }: { event: IwEvent; e
             <Button size="sm" variant="ghost" onClick={evaluate} title="Re-evaluate every indicator">
               <RefreshCw className="h-3.5 w-3.5" />
             </Button>
+            <Button size="sm" variant="ghost" onClick={() => setSuggestOpen(true)} title="AI-suggest indicators">
+              <Sparkles className="h-3.5 w-3.5 mr-1" />Suggest
+            </Button>
             <Button size="sm" variant="ghost" onClick={() => setAddOpen(true)}>
               <Plus className="h-3.5 w-3.5 mr-1" />Indicator
             </Button>
@@ -219,6 +223,12 @@ function EventCard({ event, expanded, onToggle, onChanged }: { event: IwEvent; e
         eventId={event.id}
         onClose={() => setAddOpen(false)}
         onAdded={() => { onChanged(); setAddOpen(false) }}
+      />
+      <SuggestIndicatorsDialog
+        open={suggestOpen}
+        event={event}
+        onClose={() => setSuggestOpen(false)}
+        onAdded={onChanged}
       />
     </Card>
   )
@@ -411,6 +421,118 @@ function AddIndicatorDialog({ open, eventId, onClose, onAdded }: { open: boolean
             {submitting ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" /> : <Plus className="h-3.5 w-3.5 mr-1.5" />}
             Add Indicator
           </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+interface Suggestion {
+  name: string
+  description: string
+  query_type: 'intel_count' | 'entity_count'
+  rationale: string
+}
+
+/**
+ * Cross-cutting I — AI-suggested I&W indicators.
+ *
+ * Opens on "Suggest" button click; calls the LLM via iw:suggest_indicators
+ * and renders 6-10 indicator proposals. Each row has a one-click "Add"
+ * that seeds an intel_count indicator with sensible defaults the analyst
+ * can tweak later.
+ */
+function SuggestIndicatorsDialog({ open, event, onClose, onAdded }: { open: boolean; event: IwEvent; onClose: () => void; onAdded: () => void }) {
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [suggestions, setSuggestions] = useState<Suggestion[]>([])
+  const [addedIdx, setAddedIdx] = useState<Set<number>>(new Set())
+
+  useEffect(() => {
+    if (!open) return
+    setSuggestions([]); setAddedIdx(new Set()); setError(null)
+    void (async () => {
+      setLoading(true)
+      try {
+        const rows = await window.heimdall.invoke('iw:suggest_indicators', {
+          name: event.name,
+          description: event.description,
+          scenario_class: event.scenario_class
+        }) as Suggestion[]
+        setSuggestions(rows)
+      } catch (err) {
+        setError(String(err).replace(/^Error:\s*/, ''))
+      } finally {
+        setLoading(false)
+      }
+    })()
+  }, [open, event.name, event.description, event.scenario_class])
+
+  const add = async (idx: number) => {
+    const s = suggestions[idx]
+    const kw = s.name.toLowerCase().replace(/[^a-z0-9 ]+/g, ' ').split(/\s+/).filter((w) => w.length >= 4).slice(0, 3)
+    try {
+      await window.heimdall.invoke('iw:indicators:add', {
+        event_id: event.id,
+        name: s.name,
+        description: s.description,
+        query_type: s.query_type,
+        query_params: { keywords: kw, window_hours: 168 },
+        red_threshold: 10,
+        amber_threshold: 3
+      })
+      setAddedIdx((prev) => new Set(prev).add(idx))
+      onAdded()
+    } catch (err) {
+      setError(String(err).replace(/^Error:\s*/, ''))
+    }
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
+      <DialogContent className="max-w-2xl max-h-[85vh] overflow-hidden flex flex-col">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <Sparkles className="h-4 w-4 text-primary" />AI-suggested indicators
+          </DialogTitle>
+        </DialogHeader>
+        <div className="flex-1 overflow-auto space-y-2 pr-1">
+          {loading && (
+            <div className="flex items-center gap-2 text-xs text-muted-foreground p-4">
+              <Loader2 className="h-4 w-4 animate-spin" />
+              Asking the model for indicators anchored in academic / historical precedent…
+            </div>
+          )}
+          {error && (
+            <div className="text-xs p-2 rounded bg-red-500/10 border border-red-500/30 text-red-300">{error}</div>
+          )}
+          {!loading && !error && suggestions.length === 0 && (
+            <p className="text-xs text-muted-foreground italic p-4">No suggestions returned. The model may be unreachable — configure an LLM connection in Settings.</p>
+          )}
+          {suggestions.map((s, i) => (
+            <div key={i} className="p-3 rounded border border-border bg-card/30">
+              <div className="flex items-start gap-3">
+                <div className="flex-1 min-w-0">
+                  <div className="text-sm font-medium">{s.name}</div>
+                  <div className="text-xs text-muted-foreground mt-1">{s.description}</div>
+                  <div className="flex items-center gap-2 mt-1.5 flex-wrap">
+                    <span className="text-[9px] font-mono uppercase tracking-wider bg-muted px-1.5 py-0.5 rounded">{s.query_type}</span>
+                    <span className="text-[10px] text-muted-foreground italic">{s.rationale}</span>
+                  </div>
+                </div>
+                {addedIdx.has(i) ? (
+                  <span className="text-xs text-emerald-400 shrink-0">Added</span>
+                ) : (
+                  <Button size="sm" variant="outline" onClick={() => void add(i)}>
+                    <Plus className="h-3 w-3 mr-1" />Add
+                  </Button>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+        <DialogFooter>
+          <Button variant="ghost" onClick={onClose}>Close</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

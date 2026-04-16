@@ -1447,6 +1447,53 @@ const migrations: Migration[] = [
 
       log.info('Migration 025: geofences + geofence_alerts + geofence_runs tables created')
     }
+  },
+  {
+    version: '026',
+    name: 'anomalies',
+    up: (db) => {
+      // Theme 5.3 — Anomaly detection on time-series signals.
+      //
+      // Stores detected anomalies so the UI can show a historical list
+      // rather than recomputing on every view. An anomaly is a daily
+      // bucket whose modified-z-score against the trailing-window
+      // baseline crosses the threshold. Signals covered so far:
+      //   report_volume — daily intel_reports count, optionally
+      //                   filtered by discipline.
+      //   watch_hits    — daily sum of watch_terms.hits.
+      //
+      // The same run may detect multiple anomalies across multiple
+      // signals; UNIQUE (signal, bucket_at) keeps repeat scans idempotent.
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS anomalies (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          signal TEXT NOT NULL,
+          signal_label TEXT NOT NULL,
+          bucket_at INTEGER NOT NULL,
+          value REAL NOT NULL,
+          baseline_median REAL NOT NULL,
+          baseline_mad REAL NOT NULL,
+          modified_z REAL NOT NULL,
+          direction TEXT NOT NULL,
+          severity TEXT NOT NULL,
+          created_at INTEGER NOT NULL,
+          UNIQUE (signal, bucket_at)
+        );
+        CREATE INDEX IF NOT EXISTS idx_anomalies_signal ON anomalies(signal, bucket_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_anomalies_severity ON anomalies(severity);
+
+        CREATE TABLE IF NOT EXISTS anomaly_runs (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          started_at INTEGER NOT NULL,
+          finished_at INTEGER,
+          signals_scanned INTEGER,
+          anomalies_found INTEGER,
+          duration_ms INTEGER,
+          error TEXT
+        );
+      `)
+      log.info('Migration 026: anomalies + anomaly_runs tables created')
+    }
   }
 ]
 

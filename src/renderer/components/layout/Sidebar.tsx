@@ -45,6 +45,7 @@ const NAV_GROUPS: NavGroup[] = [
       { to: '/counterintel', icon: ShieldAlert, label: 'Counter-intel' },
       { to: '/cybint', icon: Shield, label: 'CYBINT' },
       { to: '/overnight', icon: Moon, label: 'Overnight' },
+      { to: '/anomalies', icon: Activity, label: 'Anomalies' },
       { to: '/explore', icon: BarChart3, label: 'Explore' }
     ]
   },
