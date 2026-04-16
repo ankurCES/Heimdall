@@ -132,22 +132,22 @@ export class ConflictProbabilityService {
     const now = Date.now()
     const since = now - windowDays * 24 * 60 * 60 * 1000
 
-    // Try to read country; fall back to a geographic keyword in title if
-    // country isn't present. Keep it simple for this batch.
-    let hasCountryCol = true
-    try { db.prepare('SELECT country FROM intel_reports LIMIT 1').get() } catch { hasCountryCol = false }
-
-    const rows = hasCountryCol
-      ? db.prepare(`
-          SELECT COALESCE(country, 'UNKNOWN') AS region,
-            strftime('%Y-%m-%d', created_at/1000, 'unixepoch', 'localtime') AS day,
-            severity,
-            COUNT(*) AS n
-          FROM intel_reports
-          WHERE created_at >= ?
-          GROUP BY region, day, severity
-        `).all(since) as Array<{ region: string; day: string; severity: string; n: number }>
-      : [] // no region data; no scores.
+    // Region is derived from intel_entities (entity_type='country') —
+    // country names are extracted by IntelEnricher's regex pattern during
+    // the enrichment pipeline. Reports without a country entity are
+    // excluded (they'd go into an "UNKNOWN" bucket that's not useful).
+    const rows = db.prepare(`
+      SELECT e.entity_value AS region,
+        strftime('%Y-%m-%d', r.created_at/1000, 'unixepoch', 'localtime') AS day,
+        r.severity,
+        COUNT(DISTINCT r.id) AS n
+      FROM intel_entities e
+      JOIN intel_reports r ON r.id = e.report_id
+      WHERE e.entity_type = 'country'
+        AND r.created_at >= ?
+        AND (r.quarantined IS NULL OR r.quarantined = 0)
+      GROUP BY region, day, r.severity
+    `).all(since) as Array<{ region: string; day: string; severity: string; n: number }>
 
     const byRegionDay = new Map<string, { region: string; bucket_at: number; events: number; sev_weighted: number }>()
     for (const r of rows) {
