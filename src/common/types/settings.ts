@@ -73,6 +73,37 @@ export type MeshtasticConfig = z.infer<typeof MeshtasticConfigSchema>
 export type SafetyConfig = z.infer<typeof SafetyConfigSchema>
 export type LlmConfig = z.infer<typeof LlmConfigSchema>
 
+// MCP server configuration (Model Context Protocol). Each entry spawns
+// a child process via stdio transport; tools are auto-registered as
+// `mcp:<id>:<tool>` so the agent can call them like any built-in tool.
+export const McpServerConfigSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  command: z.string(),
+  args: z.array(z.string()).default([]),
+  env: z.record(z.string()).default({}),
+  enabled: z.boolean().default(true),
+  builtin: z.boolean().default(false)
+})
+export const McpServersConfigSchema = z.object({
+  servers: z.array(McpServerConfigSchema).default([])
+})
+export type McpServerConfig = z.infer<typeof McpServerConfigSchema>
+export type McpServersConfig = z.infer<typeof McpServersConfigSchema>
+
+// Dark-web scanning configuration. Ahmia is clearnet-safe (no Tor needed);
+// .onion fetching requires the deployer to run Tor at the configured
+// SOCKS5 endpoint. The CSAM blocklist on SafeFetcher always applies.
+export const DarkWebConfigSchema = z.object({
+  enabled: z.boolean().default(false),
+  socks5Host: z.string().default('127.0.0.1'),
+  socks5Port: z.number().default(9050),
+  ahmiaEnabled: z.boolean().default(true),
+  darkSearchEnabled: z.boolean().default(false),
+  watchTerms: z.array(z.string()).default(['ransomware', 'data leak', 'credentials', 'vulnerability'])
+})
+export type DarkWebConfig = z.infer<typeof DarkWebConfigSchema>
+
 export interface ApiKeyEntry {
   service: string
   key: string

@@ -6,6 +6,9 @@ import { PublicRecordsCollector } from './osint/PublicRecordsCollector'
 import { AcademicCollector } from './osint/AcademicCollector'
 import { FactbookCollector } from './osint/FactbookCollector'
 import { GdeltCollector } from './osint/GdeltCollector'
+import { AhmiaCollector } from './osint/AhmiaCollector'
+import { DarkSearchCollector } from './osint/DarkSearchCollector'
+import { OnionFeedCollector } from './osint/OnionFeedCollector'
 import { GovernmentDataCollector } from './osint/GovernmentDataCollector'
 import { GNewsCollector } from './osint/GNewsCollector'
 import { PredictionMarketCollector } from './osint/PredictionMarketCollector'
@@ -87,6 +90,11 @@ export function registerAllCollectors(): void {
   collectorManager.registerFactory('fbi-crime-stats', () => new FbiCrimeStatsCollector())
   collectorManager.registerFactory('prediction-market', () => new PredictionMarketCollector())
   collectorManager.registerFactory('uk-police-crime', () => new UkPoliceCrimeCollector())
+
+  // Dark-web (3) — see Settings → Dark Web for SOCKS5 + watch-term config
+  collectorManager.registerFactory('ahmia', () => new AhmiaCollector())
+  collectorManager.registerFactory('darksearch', () => new DarkSearchCollector())
+  collectorManager.registerFactory('onion-feed', () => new OnionFeedCollector())
 
   // CYBINT (4)
   collectorManager.registerFactory('cve', () => new CveCollector())

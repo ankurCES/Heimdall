@@ -42,6 +42,14 @@ class ToolRegistryImpl {
     this.tools.set(def.name, { def, handler })
   }
 
+  unregister(name: string): boolean {
+    return this.tools.delete(name)
+  }
+
+  hasName(name: string): boolean {
+    return this.tools.has(name)
+  }
+
   getToolSchemas(): Array<{ type: 'function'; function: { name: string; description: string; parameters: Record<string, unknown> } }> {
     return Array.from(this.tools.values()).map(({ def }) => ({
       type: 'function' as const,

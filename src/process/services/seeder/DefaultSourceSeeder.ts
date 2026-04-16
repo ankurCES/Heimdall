@@ -13,6 +13,17 @@ interface SeedSource {
 
 // All publicly available sources that require no API keys
 const FREE_SOURCES: SeedSource[] = [
+  // ── DARK WEB (clearnet, no Tor) ───────────────────────────────────
+  {
+    name: 'Ahmia Dark-Web Search',
+    discipline: 'osint',
+    type: 'ahmia',
+    schedule: '0 */4 * * *', // every 4 hours
+    config: {
+      // Watch terms come from settings.darkWeb.watchTerms by default;
+      // override here per-source by setting `queries: ['term', ...]`
+    }
+  },
   // ── OSINT ──────────────────────────────────────────────────────────
   {
     name: 'Global News RSS',

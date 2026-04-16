@@ -11,7 +11,9 @@ import {
   BookOpen,
   Info,
   Lock,
-  User
+  User,
+  Plug,
+  Globe2
 } from 'lucide-react'
 import { cn } from '@renderer/lib/utils'
 import { ApiKeysTab } from './tabs/ApiKeysTab'
@@ -25,6 +27,8 @@ import { ObsidianTab } from './tabs/ObsidianTab'
 import { AboutTab } from './tabs/AboutTab'
 import { CompartmentsTab } from './tabs/CompartmentsTab'
 import { AnalystProfileTab } from './tabs/AnalystProfileTab'
+import { McpServersTab } from './tabs/McpServersTab'
+import { DarkWebTab } from './tabs/DarkWebTab'
 
 const tabs = [
   { id: 'sources', label: 'Sources', icon: Database, component: SourcesTab },
@@ -37,6 +41,8 @@ const tabs = [
   { id: 'safety', label: 'Safety', icon: ShieldCheck, component: SafetyTab },
   { id: 'compartments', label: 'Compartments', icon: Lock, component: CompartmentsTab },
   { id: 'profile', label: 'Analyst Profile', icon: User, component: AnalystProfileTab },
+  { id: 'mcp', label: 'MCP Servers', icon: Plug, component: McpServersTab },
+  { id: 'darkweb', label: 'Dark Web', icon: Globe2, component: DarkWebTab },
   { id: 'about', label: 'About', icon: Info, component: AboutTab }
 ]
 

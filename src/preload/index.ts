@@ -92,7 +92,9 @@ const testChannels = [
   'wargame:start', 'wargame:get', 'wargame:rounds', 'wargame:list',
   'twoperson:status', 'twoperson:set_passphrase', 'twoperson:disable',
   'twoperson:require', 'twoperson:approve', 'twoperson:reject',
-  'twoperson:pending', 'twoperson:history'
+  'twoperson:pending', 'twoperson:history',
+  'mcp:list_servers', 'mcp:list_tools', 'mcp:add_server',
+  'mcp:update_server', 'mcp:remove_server', 'mcp:restart_server', 'mcp:test_server'
 ]
 const allowedChannels = [...Object.values(IPC_CHANNELS), ...testChannels]
 const chatEvents = ['chat:chunk', 'chat:done', 'chat:error']

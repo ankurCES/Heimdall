@@ -11,7 +11,7 @@ import { collectorManager } from './collectors/CollectorManager'
 import { safeFetcher } from './collectors/SafeFetcher'
 import { settingsService } from './services/settings/SettingsService'
 import { cronService } from './services/cron/CronService'
-import type { SafetyConfig } from '@common/types/settings'
+import type { SafetyConfig, DarkWebConfig } from '@common/types/settings'
 import { seedDefaultSources } from './services/seeder/DefaultSourceSeeder'
 import { agentOrchestrator } from './agents/AgentOrchestrator'
 import { intelPipeline } from './services/vectordb/IntelPipeline'
@@ -79,6 +79,22 @@ async function initializeDeferred(): Promise<void> {
     safeFetcher.setRate(safety.rateLimitPerDomain || 30)
     safeFetcher.setRobotsEnabled(safety.respectRobotsTxt ?? true)
     safeFetcher.setAirGap(safety.airGapMode ?? false, safety.airGapAllowlist ?? [])
+  }
+
+  // Dark-web SOCKS5 proxy (Tor) — only enabled when the user opts in.
+  const darkWeb = settingsService.get<DarkWebConfig>('darkWeb')
+  if (darkWeb?.enabled) {
+    safeFetcher.setSocks5(darkWeb.socks5Host || '127.0.0.1', darkWeb.socks5Port || 9050)
+    log.info(`darkweb: SOCKS5 proxy enabled at ${darkWeb.socks5Host || '127.0.0.1'}:${darkWeb.socks5Port || 9050}`)
+  }
+
+  // MCP servers — spawn child processes for each enabled server, register
+  // their tools in ToolRegistry. Lazy import to keep bootstrap light.
+  try {
+    const { mcpClientService } = await import('./services/mcp/McpClientService')
+    void mcpClientService.start().catch((err) => log.warn(`mcp.start failed: ${err}`))
+  } catch (err) {
+    log.warn(`mcp service load failed: ${err}`)
   }
 
   // Seed default sources on first run
@@ -267,6 +283,11 @@ if (!gotTheLock) {
     try { collectorManager.shutdownAll() } catch (err) { log.debug(`collectorManager.shutdownAll: ${err}`) }
     try { cronService.stopAll() } catch (err) { log.debug(`cronService.stopAll: ${err}`) }
     try { void taxiiServer.stop() } catch (err) { log.debug(`taxiiServer.stop: ${err}`) }
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const mcp = require('./services/mcp/McpClientService') as typeof import('./services/mcp/McpClientService')
+      void mcp.mcpClientService.stop()
+    } catch (err) { log.debug(`mcpClientService.stop: ${err}`) }
     try { closeDatabase() } catch (err) { log.debug(`closeDatabase: ${err}`) }
   }
 
