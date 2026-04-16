@@ -52,17 +52,53 @@ class McpClientServiceImpl {
   private health = new Map<string, McpServerHealth>()
   private starting = false
 
-  /** Read settings, seed defaults if empty, return the configured server list. */
+  /**
+   * Read settings, seed defaults if empty. On every call, also reconcile
+   * builtin server command+args against the current defaultMcpServers()
+   * — this catches the case where an older app version seeded a server
+   * with a broken command (e.g. uvx) that we've since replaced. The
+   * user's `enabled` toggle is preserved.
+   */
   private getServerConfigs(): McpServerConfig[] {
     const cfg = settingsService.get<McpServersConfig>('mcp.servers')
-    if (cfg && Array.isArray(cfg.servers) && cfg.servers.length > 0) {
-      return cfg.servers
-    }
-    // Seed defaults on first run.
     const defaults = defaultMcpServers()
-    settingsService.set('mcp.servers', { servers: defaults })
-    log.info(`mcp: seeded ${defaults.length} default servers`)
-    return defaults
+    const defaultsById = new Map(defaults.map((d) => [d.id, d]))
+
+    let servers: McpServerConfig[]
+    if (cfg && Array.isArray(cfg.servers) && cfg.servers.length > 0) {
+      servers = cfg.servers
+    } else {
+      // First run — seed all defaults.
+      servers = defaults
+      settingsService.set('mcp.servers', { servers })
+      log.info(`mcp: seeded ${defaults.length} default servers`)
+      return servers
+    }
+
+    // Reconcile: for any builtin server in storage, refresh command+args
+    // from the current defaults if they differ. Preserves enabled flag.
+    let changed = false
+    for (let i = 0; i < servers.length; i++) {
+      const s = servers[i]
+      if (!s.builtin) continue
+      const def = defaultsById.get(s.id)
+      if (!def) continue
+      if (s.command !== def.command || JSON.stringify(s.args) !== JSON.stringify(def.args)) {
+        log.info(`mcp: reconciling builtin server "${s.id}" — ${s.command} ${s.args.join(' ')} → ${def.command} ${def.args.join(' ')}`)
+        servers[i] = { ...def, enabled: s.enabled }
+        changed = true
+      }
+    }
+    // Add any new builtins that aren't in storage yet (e.g. after upgrade).
+    for (const def of defaults) {
+      if (!servers.find((s) => s.id === def.id)) {
+        servers.push(def)
+        changed = true
+        log.info(`mcp: added new builtin server "${def.id}"`)
+      }
+    }
+    if (changed) settingsService.set('mcp.servers', { servers })
+    return servers
   }
 
   /** Start (or restart) all enabled servers. Safe to call repeatedly. */

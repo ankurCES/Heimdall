@@ -9,43 +9,25 @@ import type { McpServerConfig } from '@common/types/settings'
  *
  * Selection rules:
  *   - No authentication / API keys required
- *   - stdio transport (covered by official SDK out of the box)
+ *   - npm-installable via `npx -y` (no `uv` / Python dependency to keep
+ *     the out-of-box experience tight; `npx` is bundled with Node which
+ *     Electron always has)
  *   - Useful for HUMINT / OSINT enrichment (web fetch, knowledge lookup,
- *     domain investigation)
+ *     domain investigation, time arithmetic, persistent memory)
  *
- * Servers using `uvx` need `uv` (https://github.com/astral-sh/uv) on PATH;
- * if missing, the McpClientService marks the server as 'error' with a
- * clear message rather than failing app boot.
+ * All packages are public, no-auth, and verified to start via npm.
  */
 export function defaultMcpServers(): McpServerConfig[] {
   const fsSandbox = path.join(app.getPath('userData'), 'mcp-fs')
   // Ensure the sandbox dir exists so the filesystem server doesn't crash on boot.
   try { fs.mkdirSync(fsSandbox, { recursive: true }) } catch { /* noop */ }
   return [
-    // ── Anthropic reference set ──────────────────────────────────────
-    {
-      id: 'fetch',
-      name: 'Web Fetch',
-      command: 'uvx',
-      args: ['mcp-server-fetch'],
-      env: {},
-      enabled: true,
-      builtin: true
-    },
+    // ── Anthropic reference set (npm) ────────────────────────────────
     {
       id: 'memory',
       name: 'Persistent Knowledge Graph',
       command: 'npx',
       args: ['-y', '@modelcontextprotocol/server-memory'],
-      env: {},
-      enabled: true,
-      builtin: true
-    },
-    {
-      id: 'time',
-      name: 'Date/Time Utilities',
-      command: 'uvx',
-      args: ['mcp-server-time'],
       env: {},
       enabled: true,
       builtin: true
@@ -59,12 +41,30 @@ export function defaultMcpServers(): McpServerConfig[] {
       enabled: true,
       builtin: true
     },
-    // ── Research / OSINT ────────────────────────────────────────────
+    // ── Community npm packages (verified) ───────────────────────────
+    {
+      id: 'fetch',
+      name: 'Web Fetch',
+      command: 'npx',
+      args: ['-y', '@kazuph/mcp-fetch'],
+      env: {},
+      enabled: true,
+      builtin: true
+    },
+    {
+      id: 'time',
+      name: 'Date/Time Utilities',
+      command: 'npx',
+      args: ['-y', 'time-mcp'],
+      env: {},
+      enabled: true,
+      builtin: true
+    },
     {
       id: 'wikipedia',
       name: 'Wikipedia',
       command: 'npx',
-      args: ['-y', 'mcp-server-wikipedia'],
+      args: ['-y', 'wikipedia-mcp'],
       env: {},
       enabled: true,
       builtin: true
@@ -91,7 +91,7 @@ export function defaultMcpServers(): McpServerConfig[] {
       id: 'dns',
       name: 'DNS Lookup',
       command: 'npx',
-      args: ['-y', 'dns-mcp'],
+      args: ['-y', 'mcp-server-dns'],
       env: {},
       enabled: true,
       builtin: true
