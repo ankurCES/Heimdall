@@ -237,6 +237,11 @@ export class NetworkAnalysisService {
 
   /** Top N nodes by a given metric. */
   top(metric: 'pagerank' | 'betweenness' | 'degree' | 'eigenvector', limit = 20): NetworkMetric[] {
+    // Defense in depth: the bridge validates too, but the metric column name
+    // is interpolated directly into SQL so we re-check here. Unknown metric =
+    // hard-reject rather than leak into SQL.
+    const allowed = new Set(['pagerank', 'betweenness', 'degree', 'eigenvector'])
+    if (!allowed.has(metric)) throw new Error(`Invalid metric: ${metric}`)
     const db = getDatabase()
     return db.prepare(`
       SELECT node_id, node_type, label, discipline, degree, pagerank, betweenness, eigenvector,

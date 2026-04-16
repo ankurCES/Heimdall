@@ -244,7 +244,12 @@ export class CybintService {
       `)
       const tx = db.transaction(() => {
         for (const v of entries) {
-          const cwes = Array.isArray(v.cwes) ? (v.cwes as string[]).join(',') : null
+          // CISA occasionally reshuffles fields; accept array-of-strings,
+          // already-joined string, or drop it entirely rather than silently
+          // writing [object Object].
+          let cwes: string | null = null
+          if (Array.isArray(v.cwes)) cwes = (v.cwes as unknown[]).map(String).join(',')
+          else if (typeof v.cwes === 'string') cwes = v.cwes
           const rw = typeof v.knownRansomwareCampaignUse === 'string' && v.knownRansomwareCampaignUse.toLowerCase() === 'known' ? 1 : 0
           ins.run(
             String(v.cveID || ''),
