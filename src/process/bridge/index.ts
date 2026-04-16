@@ -26,6 +26,7 @@ import { registerInjectionBridge } from './injectionBridge'
 import { registerOvernightBridge } from './overnightBridge'
 import { registerGeofenceBridge } from './geofenceBridge'
 import { registerAnomalyBridge } from './anomalyBridge'
+import { registerImageBridge } from './imageBridge'
 import log from 'electron-log'
 
 export function registerAllBridges(): void {
@@ -57,5 +58,6 @@ export function registerAllBridges(): void {
   registerOvernightBridge()
   registerGeofenceBridge()
   registerAnomalyBridge()
+  registerImageBridge()
   log.info('All IPC bridges registered')
 }

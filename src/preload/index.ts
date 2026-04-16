@@ -64,7 +64,8 @@ const testChannels = [
   'geofence:list', 'geofence:create', 'geofence:update', 'geofence:delete',
   'geofence:scan', 'geofence:alerts', 'geofence:latest', 'geofence:stats',
   'anomaly:detect', 'anomaly:recent', 'anomaly:latest', 'anomaly:signals',
-  'iw:suggest_indicators'
+  'iw:suggest_indicators',
+  'image:ingest_file', 'image:ingest_pick', 'image:list', 'image:get', 'image:delete'
 ]
 const allowedChannels = [...Object.values(IPC_CHANNELS), ...testChannels]
 const chatEvents = ['chat:chunk', 'chat:done', 'chat:error']

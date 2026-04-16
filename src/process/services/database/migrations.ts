@@ -1494,6 +1494,52 @@ const migrations: Migration[] = [
       `)
       log.info('Migration 026: anomalies + anomaly_runs tables created')
     }
+  },
+  {
+    version: '027',
+    name: 'image_exif',
+    up: (db) => {
+      // Theme 8.1 — Image EXIF extraction.
+      //
+      // image_evidence holds one row per analyzed image file (on disk or
+      // by URL). EXIF/GPS/camera/timestamp fields are first-class so
+      // filtered search ("images geolocated inside polygon X") is an
+      // indexed query, not JSON scan.
+      //
+      // Linked to an intel_report when the image was found as part of
+      // a report; free-standing otherwise (analyst drops an image into
+      // the evidence locker manually).
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS image_evidence (
+          id TEXT PRIMARY KEY,
+          source_path TEXT NOT NULL,
+          source_kind TEXT NOT NULL,
+          file_name TEXT,
+          file_size INTEGER,
+          mime_type TEXT,
+          sha256 TEXT,
+          report_id TEXT,
+          latitude REAL,
+          longitude REAL,
+          altitude_m REAL,
+          captured_at INTEGER,
+          camera_make TEXT,
+          camera_model TEXT,
+          lens_model TEXT,
+          orientation INTEGER,
+          width INTEGER,
+          height INTEGER,
+          gps_accuracy_m REAL,
+          raw_exif TEXT,
+          ingested_at INTEGER NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_image_report ON image_evidence(report_id);
+        CREATE INDEX IF NOT EXISTS idx_image_captured ON image_evidence(captured_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_image_geo ON image_evidence(latitude, longitude);
+        CREATE INDEX IF NOT EXISTS idx_image_sha ON image_evidence(sha256);
+      `)
+      log.info('Migration 027: image_evidence table created')
+    }
   }
 ]
 
