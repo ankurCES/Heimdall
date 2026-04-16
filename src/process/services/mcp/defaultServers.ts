@@ -1,4 +1,5 @@
 import path from 'path'
+import fs from 'fs'
 import { app } from 'electron'
 import type { McpServerConfig } from '@common/types/settings'
 
@@ -18,6 +19,8 @@ import type { McpServerConfig } from '@common/types/settings'
  */
 export function defaultMcpServers(): McpServerConfig[] {
   const fsSandbox = path.join(app.getPath('userData'), 'mcp-fs')
+  // Ensure the sandbox dir exists so the filesystem server doesn't crash on boot.
+  try { fs.mkdirSync(fsSandbox, { recursive: true }) } catch { /* noop */ }
   return [
     // ── Anthropic reference set ──────────────────────────────────────
     {
