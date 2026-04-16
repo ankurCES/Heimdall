@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react'
 import {
   Settings2, Flame, Radio, Share2, Moon, Play, Loader2, RefreshCw, Check, X, Download, Upload,
-  Shield, FileText, AlertOctagon, Search, Crosshair, Layers, Brain, MapPin, Copy, Scroll
+  Shield, FileText, AlertOctagon, Search, Crosshair, Layers, Brain, MapPin, Copy, Scroll,
+  Swords, ChevronRight
 } from 'lucide-react'
 import { Button } from '@renderer/components/ui/button'
 import { Input } from '@renderer/components/ui/input'
@@ -10,7 +11,7 @@ import { Badge } from '@renderer/components/ui/badge'
 import { formatRelativeTime } from '@renderer/lib/utils'
 import { cn } from '@renderer/lib/utils'
 
-type Tab = 'disinfo' | 'canary' | 'insider' | 'forecast' | 'conflict' | 'detection' | 'misp' | 'taxii' | 'document' | 'briefing'
+type Tab = 'disinfo' | 'canary' | 'insider' | 'forecast' | 'conflict' | 'detection' | 'misp' | 'taxii' | 'document' | 'briefing' | 'wargame'
 
 export function Phase5Page() {
   const [tab, setTab] = useState<Tab>('disinfo')
@@ -38,6 +39,7 @@ export function Phase5Page() {
         <TB active={tab === 'taxii'} set={() => setTab('taxii')} icon={Share2} label="TAXII" />
         <TB active={tab === 'document'} set={() => setTab('document')} icon={FileText} label="Documents" />
         <TB active={tab === 'briefing'} set={() => setTab('briefing')} icon={Moon} label="Briefing" />
+        <TB active={tab === 'wargame'} set={() => setTab('wargame')} icon={Swords} label="Wargaming" />
       </div>
       <div className="flex-1 overflow-auto">
         {tab === 'disinfo' && <DisinfoTab />}
@@ -50,6 +52,7 @@ export function Phase5Page() {
         {tab === 'taxii' && <TaxiiTab />}
         {tab === 'document' && <DocumentTab />}
         {tab === 'briefing' && <BriefingTab />}
+        {tab === 'wargame' && <WargameTab />}
       </div>
     </div>
   )
@@ -603,6 +606,150 @@ function BriefingTab() {
           )}
         </CardContent>
       </Card>
+    </div>
+  )
+}
+
+// ───────────── Wargaming ─────────────
+interface WargameRun {
+  id: string; scenario: string; red_objective: string | null; blue_objective: string | null;
+  total_rounds: number; status: string; classification: string; started_at: number; completed_at: number | null
+}
+interface WargameRound {
+  id: string; run_id: string; round_number: number; role: string; content: string; duration_ms: number; created_at: number
+}
+
+const ROLE_COLOR: Record<string, string> = {
+  red_team_player: 'border-red-500/40 bg-red-500/10 text-red-300',
+  blue_team_player: 'border-blue-500/40 bg-blue-500/10 text-blue-300',
+  moderator: 'border-amber-500/40 bg-amber-500/10 text-amber-300'
+}
+const ROLE_LABEL: Record<string, string> = {
+  red_team_player: 'RED TEAM',
+  blue_team_player: 'BLUE TEAM',
+  moderator: 'MODERATOR'
+}
+
+function WargameTab() {
+  const [runs, setRuns] = useState<WargameRun[]>([])
+  const [selected, setSelected] = useState<WargameRun | null>(null)
+  const [rounds, setRounds] = useState<WargameRound[]>([])
+  const [scenario, setScenario] = useState('')
+  const [redObj, setRedObj] = useState('')
+  const [blueObj, setBlueObj] = useState('')
+  const [numRounds, setNumRounds] = useState(3)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const load = async () => {
+    setError(null)
+    try { setRuns(await window.heimdall.invoke('wargame:list', { limit: 20 }) as WargameRun[]) }
+    catch (err) { setError(String(err).replace(/^Error:\s*/, '')) }
+  }
+  useEffect(() => { void load() }, [])
+
+  const selectRun = async (run: WargameRun) => {
+    setSelected(run)
+    try { setRounds(await window.heimdall.invoke('wargame:rounds', run.id) as WargameRound[]) }
+    catch (err) { setError(String(err).replace(/^Error:\s*/, '')) }
+  }
+
+  const start = async () => {
+    if (!scenario.trim()) return
+    setBusy(true); setError(null)
+    try {
+      const run = await window.heimdall.invoke('wargame:start', {
+        scenario: scenario.trim(),
+        red_objective: redObj.trim() || undefined,
+        blue_objective: blueObj.trim() || undefined,
+        total_rounds: numRounds
+      }) as WargameRun
+      setScenario(''); setRedObj(''); setBlueObj('')
+      await load()
+      await selectRun(run)
+    } catch (err) {
+      setError(String(err).replace(/^Error:\s*/, ''))
+    } finally { setBusy(false) }
+  }
+
+  return (
+    <div className="flex h-full overflow-hidden">
+      {/* Left — create + list */}
+      <div className="w-[400px] border-r border-border overflow-auto">
+        <div className="p-3 border-b border-border space-y-2">
+          <div className="flex items-center gap-2 text-xs font-semibold">
+            <Swords className="h-3.5 w-3.5" />New wargame
+          </div>
+          <Input placeholder='Scenario (e.g. "Russian missile strike on UA power grid")' value={scenario}
+            onChange={(e) => setScenario(e.target.value)} />
+          <div className="grid grid-cols-2 gap-1.5">
+            <Input placeholder="Red objective (optional)" value={redObj} onChange={(e) => setRedObj(e.target.value)} className="text-xs" />
+            <Input placeholder="Blue objective (optional)" value={blueObj} onChange={(e) => setBlueObj(e.target.value)} className="text-xs" />
+          </div>
+          <div className="flex items-center gap-2">
+            <label className="text-[10px] text-muted-foreground">Rounds:</label>
+            <Input type="number" min={1} max={10} value={numRounds} onChange={(e) => setNumRounds(parseInt(e.target.value) || 3)}
+              className="w-16 text-xs" />
+            <Button onClick={start} disabled={busy || !scenario.trim()} className="ml-auto">
+              {busy ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Play className="h-4 w-4 mr-2" />}
+              {busy ? 'Running…' : 'Start'}
+            </Button>
+          </div>
+          {error && <div className="text-xs p-2 rounded bg-red-500/10 border border-red-500/30 text-red-300">{error}</div>}
+        </div>
+        {runs.map((r) => (
+          <button key={r.id} onClick={() => void selectRun(r)}
+            className={cn('w-full text-left px-3 py-2 border-b border-border/40 hover:bg-accent/30',
+              selected?.id === r.id && 'bg-accent/50')}>
+            <div className="text-sm font-medium truncate">{r.scenario}</div>
+            <div className="flex items-center gap-2 mt-1 text-[10px] text-muted-foreground">
+              <Badge variant="outline" className="text-[9px] py-0 px-1 font-mono">{r.total_rounds} rds</Badge>
+              <Badge variant={r.status === 'completed' ? 'default' : 'secondary'} className="text-[9px] py-0 px-1">{r.status}</Badge>
+              <span className="ml-auto">{formatRelativeTime(r.started_at)}</span>
+            </div>
+          </button>
+        ))}
+      </div>
+
+      {/* Right — transcript */}
+      <div className="flex-1 overflow-auto">
+        {selected && rounds.length > 0 ? (
+          <div className="p-6 space-y-4">
+            <div>
+              <h2 className="text-lg font-semibold">{selected.scenario}</h2>
+              <div className="flex items-center gap-2 mt-1 text-xs text-muted-foreground flex-wrap">
+                {selected.red_objective && <span>Red: {selected.red_objective}</span>}
+                {selected.blue_objective && <span>Blue: {selected.blue_objective}</span>}
+                <Badge variant="outline" className="font-mono text-[9px]">{selected.classification}</Badge>
+              </div>
+            </div>
+            {Array.from(new Set(rounds.map((r) => r.round_number))).sort().map((rn) => (
+              <Card key={rn}>
+                <CardHeader>
+                  <CardTitle className="text-sm">Round {rn}</CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-3">
+                  {rounds.filter((r) => r.round_number === rn).map((r) => (
+                    <div key={r.id} className={cn('p-3 rounded border', ROLE_COLOR[r.role] || 'border-border')}>
+                      <div className="flex items-center gap-2 mb-1">
+                        <span className="text-[10px] font-bold uppercase tracking-wider">{ROLE_LABEL[r.role] || r.role}</span>
+                        <span className="text-[10px] text-muted-foreground ml-auto">{r.duration_ms}ms</span>
+                      </div>
+                      <div className="text-xs whitespace-pre-wrap">{r.content}</div>
+                    </div>
+                  ))}
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+        ) : (
+          <div className="flex flex-col items-center justify-center h-full text-muted-foreground">
+            <Swords className="h-10 w-10 mb-2 opacity-30" />
+            <p className="text-sm">Create a wargame scenario or select one from the list</p>
+            <p className="text-xs mt-1 opacity-70">Red Team proposes → Blue Team counters → Moderator adjudicates. Each round runs via the configured LLM.</p>
+          </div>
+        )}
+      </div>
     </div>
   )
 }

@@ -10,7 +10,8 @@ import {
   Brain,
   BookOpen,
   Info,
-  Lock
+  Lock,
+  User
 } from 'lucide-react'
 import { cn } from '@renderer/lib/utils'
 import { ApiKeysTab } from './tabs/ApiKeysTab'
@@ -23,6 +24,7 @@ import { LlmTab } from './tabs/LlmTab'
 import { ObsidianTab } from './tabs/ObsidianTab'
 import { AboutTab } from './tabs/AboutTab'
 import { CompartmentsTab } from './tabs/CompartmentsTab'
+import { AnalystProfileTab } from './tabs/AnalystProfileTab'
 
 const tabs = [
   { id: 'sources', label: 'Sources', icon: Database, component: SourcesTab },
@@ -34,6 +36,7 @@ const tabs = [
   { id: 'llm', label: 'LLM', icon: Brain, component: LlmTab },
   { id: 'safety', label: 'Safety', icon: ShieldCheck, component: SafetyTab },
   { id: 'compartments', label: 'Compartments', icon: Lock, component: CompartmentsTab },
+  { id: 'profile', label: 'Analyst Profile', icon: User, component: AnalystProfileTab },
   { id: 'about', label: 'About', icon: Info, component: AboutTab }
 ]
 

@@ -139,6 +139,7 @@ export function SafetyTab() {
 
       <ClearanceCard />
       <EncryptionCard />
+      <TwoPersonCard />
       <AirGapCard />
       <PanicWipeCard />
     </div>
@@ -378,6 +379,106 @@ function EncryptionCard() {
           <p><strong>Scope:</strong> encrypts every byte of <code className="font-mono">heimdall.db</code> and its WAL/SHM companions. Vector index, Obsidian vault cache, and settings DB are <em>not</em> covered by this batch.</p>
           <p><strong>Recovery:</strong> none. Lose the passphrase → lose the data. Store it in a password manager or secure paper backup.</p>
         </div>
+      </CardContent>
+    </Card>
+  )
+}
+
+/**
+ * Two-person integrity — Theme 10.8. A separate passphrase required
+ * to approve SECRET+ exports, panic wipe, encryption change, and
+ * air-gap disable. Single-user mode; multi-user upgrades this to a
+ * different authenticated user in Batch 5.
+ */
+function TwoPersonCard() {
+  const [status, setStatus] = useState<{ enabled: boolean; has_passphrase: boolean } | null>(null)
+  const [pp1, setPp1] = useState('')
+  const [pp2, setPp2] = useState('')
+  const [error, setError] = useState<string | null>(null)
+  const [notice, setNotice] = useState<string | null>(null)
+  const [showForm, setShowForm] = useState(false)
+
+  const load = async () => {
+    try { setStatus(await window.heimdall.invoke('twoperson:status') as { enabled: boolean; has_passphrase: boolean }) }
+    catch { /* noop */ }
+  }
+  useEffect(() => { void load() }, [])
+
+  const save = async () => {
+    setError(null); setNotice(null)
+    if (pp1.length < 8) { setError('Passphrase must be at least 8 characters.'); return }
+    if (pp1 !== pp2) { setError('Passphrases do not match.'); return }
+    try {
+      await window.heimdall.invoke('twoperson:set_passphrase', pp1)
+      setNotice('Two-person integrity enabled. SECRET+ exports and panic-wipe now require this passphrase.')
+      setPp1(''); setPp2(''); setShowForm(false)
+      await load()
+    } catch (err) {
+      setError(String(err).replace(/^Error:\s*/, ''))
+    }
+  }
+
+  const disable = async () => {
+    try {
+      await window.heimdall.invoke('twoperson:disable')
+      setNotice('Two-person integrity disabled.')
+      await load()
+    } catch (err) {
+      setError(String(err).replace(/^Error:\s*/, ''))
+    }
+  }
+
+  return (
+    <Card>
+      <CardHeader>
+        <div className="flex items-center gap-2">
+          <Lock className="h-5 w-5 text-muted-foreground" />
+          <CardTitle className="text-base">Two-person integrity</CardTitle>
+        </div>
+        <CardDescription>
+          Require a separate passphrase to approve SECRET+ exports, panic-wipe,
+          encryption changes, and air-gap toggles. The "second person" in
+          single-user mode is a different passphrase; in multi-user mode it
+          becomes a different authenticated user.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        <div className="flex items-center gap-3 p-3 rounded border border-border bg-card/30">
+          <div className={`h-2 w-2 rounded-full ${status?.enabled ? 'bg-emerald-500' : 'bg-muted-foreground'}`} />
+          <div className="flex-1 text-sm">
+            {status == null ? 'Loading…' : status.enabled ? 'Enabled' : 'Disabled'}
+          </div>
+          {status?.enabled ? (
+            <div className="flex gap-2">
+              <Button size="sm" variant="outline" onClick={() => setShowForm(true)}>Change passphrase</Button>
+              <Button size="sm" variant="ghost" onClick={disable}>Disable</Button>
+            </div>
+          ) : (
+            <Button size="sm" onClick={() => setShowForm(true)}>
+              <Lock className="h-3.5 w-3.5 mr-1.5" />Enable
+            </Button>
+          )}
+        </div>
+        {notice && <div className="text-xs p-2 rounded bg-emerald-500/10 border border-emerald-500/30 text-emerald-300">{notice}</div>}
+        {showForm && (
+          <div className="p-3 rounded border border-amber-500/40 bg-amber-500/5 space-y-3">
+            <div>
+              <Label>{status?.enabled ? 'New passphrase' : 'Second-person passphrase'} (min 8 chars)</Label>
+              <Input type="password" value={pp1} onChange={(e) => setPp1(e.target.value)} />
+            </div>
+            <div>
+              <Label>Confirm passphrase</Label>
+              <Input type="password" value={pp2} onChange={(e) => setPp2(e.target.value)} />
+            </div>
+            {error && <p className="text-xs text-red-300">{error}</p>}
+            <div className="flex gap-2 justify-end">
+              <Button size="sm" variant="ghost" onClick={() => { setShowForm(false); setError(null) }}>Cancel</Button>
+              <Button size="sm" onClick={save} disabled={!pp1 || !pp2}>
+                {status?.enabled ? 'Update' : 'Enable'}
+              </Button>
+            </div>
+          </div>
+        )}
       </CardContent>
     </Card>
   )
