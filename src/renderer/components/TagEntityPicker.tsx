@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
-import { Plus, X, Tag, Shield, Search } from 'lucide-react'
+import { Plus, X, Tag, Shield, Search, Moon } from 'lucide-react'
 import { Badge } from '@renderer/components/ui/badge'
 import { Input } from '@renderer/components/ui/input'
 import { cn } from '@renderer/lib/utils'
@@ -8,6 +8,18 @@ interface PickerItem {
   type: 'tag' | 'entity'
   value: string
   count?: number
+}
+
+/** Friendly group label for darkweb tag prefixes. */
+function darkwebGroupOf(tag: string): string {
+  if (tag.startsWith('actor:'))       return 'Threat actors'
+  if (tag.startsWith('marketplace:')) return 'Marketplaces'
+  if (tag.startsWith('victim:'))      return 'Victims'
+  if (tag.startsWith('darkweb:'))     return 'Activity types'
+  if (tag.startsWith('tech:'))        return 'Tech / CVEs'
+  if (tag.startsWith('ioc:'))         return 'IOC types'
+  if (tag.startsWith('lang:'))        return 'Language'
+  return 'Other'
 }
 
 interface TagEntityPickerProps {
@@ -20,7 +32,8 @@ export function TagEntityPicker({ selected, onSelectionChange }: TagEntityPicker
   const [search, setSearch] = useState('')
   const [tags, setTags] = useState<Array<{ tag: string; count: number }>>([])
   const [entities, setEntities] = useState<Array<{ type: string; value: string; count: number }>>([])
-  const [activeTab, setActiveTab] = useState<'tags' | 'entities'>('tags')
+  const [darkwebTags, setDarkwebTags] = useState<Array<{ tag: string; count: number }>>([])
+  const [activeTab, setActiveTab] = useState<'tags' | 'entities' | 'darkweb'>('tags')
 
   const invoke = useCallback((ch: string, p?: unknown) => window.heimdall.invoke(ch, p), [])
 
@@ -32,12 +45,14 @@ export function TagEntityPicker({ selected, onSelectionChange }: TagEntityPicker
 
   const loadData = async () => {
     try {
-      const [t, e] = await Promise.all([
+      const [t, e, dw] = await Promise.all([
         invoke('enrichment:getTopTags', { limit: 50 }),
-        invoke('enrichment:getTopEntities', { limit: 50 })
+        invoke('enrichment:getTopEntities', { limit: 50 }),
+        invoke('darkweb:tags_for_picker', { limit: 60 }).catch(() => [])
       ])
       setTags((t as any) || [])
       setEntities((e as any) || [])
+      setDarkwebTags((dw as any) || [])
     } catch {}
   }
 
@@ -53,6 +68,15 @@ export function TagEntityPicker({ selected, onSelectionChange }: TagEntityPicker
 
   const filteredTags = tags.filter((t) => !search || t.tag.toLowerCase().includes(search.toLowerCase()))
   const filteredEntities = entities.filter((e) => !search || e.value.toLowerCase().includes(search.toLowerCase()))
+  const filteredDarkweb = darkwebTags.filter((t) => !search || t.tag.toLowerCase().includes(search.toLowerCase()))
+
+  // Group darkweb tags by prefix for visual scanning.
+  const darkwebGrouped: Record<string, Array<{ tag: string; count: number }>> = {}
+  for (const t of filteredDarkweb) {
+    const g = darkwebGroupOf(t.tag)
+    ;(darkwebGrouped[g] = darkwebGrouped[g] || []).push(t)
+  }
+  const darkwebGroupOrder = ['Threat actors', 'Activity types', 'Marketplaces', 'Victims', 'Tech / CVEs', 'IOC types', 'Language', 'Other']
 
   return (
     <div className="relative">
@@ -100,8 +124,11 @@ export function TagEntityPicker({ selected, onSelectionChange }: TagEntityPicker
 
           {/* Tabs */}
           <div className="flex border-b border-border">
-            <button onClick={() => setActiveTab('tags')} className={cn('flex-1 px-3 py-1.5 text-xs', activeTab === 'tags' ? 'border-b-2 border-primary text-primary' : 'text-muted-foreground')}> Tags ({filteredTags.length})</button>
+            <button onClick={() => setActiveTab('tags')} className={cn('flex-1 px-3 py-1.5 text-xs', activeTab === 'tags' ? 'border-b-2 border-primary text-primary' : 'text-muted-foreground')}>Tags ({filteredTags.length})</button>
             <button onClick={() => setActiveTab('entities')} className={cn('flex-1 px-3 py-1.5 text-xs', activeTab === 'entities' ? 'border-b-2 border-primary text-primary' : 'text-muted-foreground')}>Entities ({filteredEntities.length})</button>
+            <button onClick={() => setActiveTab('darkweb')} className={cn('flex-1 px-3 py-1.5 text-xs flex items-center justify-center gap-1', activeTab === 'darkweb' ? 'border-b-2 border-fuchsia-400 text-fuchsia-300' : 'text-muted-foreground')}>
+              <Moon className="h-3 w-3" /> Dark Web ({filteredDarkweb.length})
+            </button>
           </div>
 
           {/* Items */}
@@ -126,6 +153,37 @@ export function TagEntityPicker({ selected, onSelectionChange }: TagEntityPicker
                 </button>
               )
             })}
+            {activeTab === 'darkweb' && (
+              filteredDarkweb.length === 0 ? (
+                <p className="text-[10px] text-muted-foreground text-center py-3 italic">
+                  No dark-web tags yet. Run a sweep on the Dark Web → Explorer tab to populate.
+                </p>
+              ) : (
+                darkwebGroupOrder.filter((g) => darkwebGrouped[g]).map((group) => (
+                  <div key={group} className="mb-1">
+                    <div className="text-[9px] uppercase tracking-wider text-muted-foreground/70 px-2 py-1 font-semibold">{group}</div>
+                    {darkwebGrouped[group].map((t) => {
+                      const isSelected = selected.some((s) => s.type === 'tag' && s.value === t.tag)
+                      // Strip the prefix in display so the picker is scannable.
+                      const display = t.tag.replace(/^[a-z]+:/, '')
+                      return (
+                        <button key={t.tag} onClick={() => isSelected ? removeItem({ type: 'tag', value: t.tag }) : addItem({ type: 'tag', value: t.tag })}
+                          className={cn(
+                            'w-full flex items-center justify-between px-2 py-1 rounded text-xs hover:bg-fuchsia-500/10 transition-colors',
+                            isSelected && 'bg-fuchsia-500/15 text-fuchsia-200'
+                          )}>
+                          <span className="flex items-center gap-1.5 truncate">
+                            <Moon className="h-3 w-3 text-fuchsia-300/70 shrink-0" />
+                            {display}
+                          </span>
+                          <span className="text-muted-foreground shrink-0">{t.count}</span>
+                        </button>
+                      )
+                    })}
+                  </div>
+                ))
+              )
+            )}
           </div>
         </div>
       )}

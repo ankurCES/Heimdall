@@ -49,18 +49,52 @@ export class DetectionRuleService {
     const report = db.prepare('SELECT id, title, content, discipline FROM intel_reports WHERE id = ?').get(reportId) as { id: string; title: string; content: string; discipline: string } | undefined
     if (!report) throw new Error(`No such report: ${reportId}`)
 
+    // Cap entity rows tightly — for rule generation the most actionable IOCs
+    // are typically the first handful (hashes, IPs, domains). 20 rows ≈ 200-400
+    // tokens, keeping the prompt well under typical 4K-context Ollama models.
     const entities = db.prepare(
-      `SELECT entity_type, entity_value FROM intel_entities WHERE report_id = ? LIMIT 50`
+      `SELECT entity_type, entity_value FROM intel_entities WHERE report_id = ? LIMIT 20`
     ).all(reportId) as Array<{ entity_type: string; entity_value: string }>
     const iocSummary = entities.length > 0
       ? entities.map((e) => `${e.entity_type}: ${e.entity_value}`).join('\n')
       : '(no extracted entities)'
 
+    // Budget: keep total prompt + max output ≤ ~3500 tokens so the request
+    // fits comfortably in 4K-context models (most local Ollama defaults).
+    // ~3.5 chars/token => 3000 chars of content ≈ 850 tokens, leaving room
+    // for system prompt (~200) + IOCs (~400) + output budget (~1024).
+    const CONTENT_CHARS = 3000
+    const MAX_OUTPUT_TOKENS = 1024
+    const truncated = report.content.length > CONTENT_CHARS
+    const contentSlice = truncated
+      ? report.content.slice(0, CONTENT_CHARS) + '\n…[truncated for context limit]'
+      : report.content
+
     const system = kind === 'sigma' ? SIGMA_SYSTEM : YARA_SYSTEM
-    const prompt = `${system}\n\n---REPORT---\nTitle: ${report.title}\nDiscipline: ${report.discipline}\n\nContent:\n${report.content.slice(0, 8000)}\n\nExtracted IOCs:\n${iocSummary}\n---END---\n\nGenerate the rule now.`
-    const raw = await llmService.complete(prompt, undefined, 2000)
+    const prompt = `${system}\n\n---REPORT---\nTitle: ${report.title}\nDiscipline: ${report.discipline}\n\nContent:\n${contentSlice}\n\nExtracted IOCs:\n${iocSummary}\n---END---\n\nGenerate the rule now.`
+    let raw: string
+    try {
+      raw = await llmService.complete(prompt, undefined, MAX_OUTPUT_TOKENS)
+    } catch (err) {
+      const msg = (err as Error).message
+      // Re-throw context-length overflow with an actionable hint. The user
+      // controls model selection in Settings → LLM; the input text is largely
+      // out of their hands beyond picking a shorter report.
+      if (/context length|prompt too long|max.{0,5}token/i.test(msg)) {
+        throw new Error(
+          `LLM context window too small for this report (${report.content.length.toLocaleString()} chars). ` +
+          `Switch to a larger-context model in Settings → LLM (e.g. an 8K+ Ollama model, or any cloud model), ` +
+          `or pick a shorter intel_report. Underlying error: ${msg}`
+        )
+      }
+      throw err
+    }
     const body = this.extractFenced(raw, kind)
-    if (!body) throw new Error(`Model did not produce a valid ${kind} rule`)
+    if (!body) {
+      const preview = raw.trim().slice(0, 400).replace(/\s+/g, ' ')
+      log.warn(`detection: ${kind} extraction failed for report ${reportId}. Raw output (truncated): ${preview}`)
+      throw new Error(`Model did not produce a valid ${kind} rule. Raw output starts with: "${preview.slice(0, 200)}${preview.length > 200 ? '…' : ''}"`)
+    }
 
     const id = generateId()
     const now = Date.now()
@@ -77,14 +111,35 @@ export class DetectionRuleService {
   generateYara(reportId: string): Promise<DetectionRule> { return this.generate('yara', reportId) }
 
   private extractFenced(raw: string, kind: 'sigma' | 'yara'): string | null {
-    const tag = kind === 'sigma' ? 'yaml' : 'yara'
-    const fenced = new RegExp('```' + tag + '\\n([\\s\\S]+?)```', 'i').exec(raw)
-    if (fenced) return fenced[1].trim()
-    const anyFence = /```\n?([\s\S]+?)```/.exec(raw)
-    if (anyFence) return anyFence[1].trim()
-    // Accept un-fenced output that looks right.
-    if (kind === 'sigma' && /^\s*title\s*:/m.test(raw)) return raw.trim()
-    if (kind === 'yara' && /^\s*rule\s+\w+\s*\{/m.test(raw)) return raw.trim()
+    if (!raw || !raw.trim()) return null
+    // Accepted language tags per kind. yaml/yml are common Sigma fences;
+    // yara/yar/plaintext/text/empty are all common YARA fences.
+    const tags = kind === 'sigma'
+      ? ['yaml', 'yml', 'sigma']
+      : ['yara', 'yar']
+    // 1. Try a labelled fence first (case-insensitive, tolerant of CR / spaces
+    //    / extra whitespace / no whitespace after the language tag).
+    for (const tag of tags) {
+      const re = new RegExp('```\\s*' + tag + '\\s*\\r?\\n?([\\s\\S]+?)```', 'i')
+      const m = re.exec(raw)
+      if (m && m[1].trim()) return m[1].trim()
+    }
+    // 2. Fall back to ANY fenced block (the model may have used ``` with no
+    //    language tag, or a wrong tag).
+    const anyFence = /```[a-zA-Z]*\s*\r?\n?([\s\S]+?)```/.exec(raw)
+    if (anyFence && anyFence[1].trim()) return anyFence[1].trim()
+    // 3. Accept un-fenced output that structurally looks right anywhere in
+    //    the response (not just at line-start — models sometimes prepend a
+    //    short preamble despite the system prompt).
+    if (kind === 'sigma' && /(^|\n)\s*title\s*:/i.test(raw)) {
+      // Trim any preamble before the first "title:" line.
+      const idx = raw.search(/(^|\n)\s*title\s*:/i)
+      return raw.slice(idx).trim()
+    }
+    if (kind === 'yara' && /\brule\s+\w+\s*\{/i.test(raw)) {
+      const idx = raw.search(/\brule\s+\w+\s*\{/i)
+      return raw.slice(idx).trim()
+    }
     return null
   }
 

@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 import { toast } from 'sonner'
 import {
   MessageSquare, Send, Trash2, Loader2, Plus, FileText, Check, Wrench, Shield,
-  Calendar, BookOpen, Brain, Zap, Bot, Edit2, X
+  Calendar, BookOpen, Brain, Zap, Bot, Edit2, X, Sparkles
 } from 'lucide-react'
 import { Button } from '@renderer/components/ui/button'
 import { Badge } from '@renderer/components/ui/badge'
@@ -10,7 +10,9 @@ import { Input } from '@renderer/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@renderer/components/ui/select'
 import { Switch } from '@renderer/components/ui/switch'
 import { Label } from '@renderer/components/ui/label'
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@renderer/components/ui/dialog'
 import { MarkdownRenderer } from '@renderer/components/MarkdownRenderer'
+import { PlanApprovalModal, type PlanPreview, type PlanEdits } from '@renderer/components/PlanApprovalModal'
 import { IcdProbabilityHints } from '@renderer/components/IcdProbabilityHints'
 import { AnalystCouncilPanel } from '@renderer/components/AnalystCouncilPanel'
 import { ThinkingBlocks } from '@renderer/components/ThinkingBlock'
@@ -23,6 +25,10 @@ interface Message {
   role: 'user' | 'assistant' | 'system'
   content: string
   createdAt: number
+  /** Full streamed thinking trail (planning, tool calls, dark-web search,
+   *  intermediate analyses) captured during the response. Available via
+   *  the "Show thinking" button on the assistant card. */
+  thinkingTrail?: string | null
 }
 
 interface ChatSession {
@@ -55,6 +61,12 @@ export function ChatPage() {
   const [editTitle, setEditTitle] = useState('')
   const [selectedFilters, setSelectedFilters] = useState<Array<{ type: 'tag' | 'entity'; value: string }>>([])
   const [showExplore, setShowExplore] = useState(false)
+  // Plan-approval flow state — only active in agentic mode.
+  const [pendingPlan, setPendingPlan] = useState<PlanPreview | null>(null)
+  const [planBusy, setPlanBusy] = useState(false)
+  const [planReworking, setPlanReworking] = useState(false)
+  // Cached user query + history for re-planning on rework without re-typing.
+  const pendingQueryRef = useRef<{ text: string; enriched: string; sessionId: string; history: Array<{ role: string; content: string }> } | null>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
 
   const invoke = useCallback((ch: string, p?: unknown) => window.heimdall.invoke(ch, p), [])
@@ -93,12 +105,14 @@ export function ChatPage() {
       }
     })
     const unsubDone = window.heimdall.on('chat:done', () => {
-      // Flush any remaining buffer
+      // Flush any remaining buffer. The trail is captured inside sendMessage()
+      // via streamChunksRef so it can be attached to the assistant message
+      // we're about to render — clearing here would lose it.
       if (updateTimerRef.current) clearTimeout(updateTimerRef.current)
       setStreamingContent(streamChunksRef.current.join(''))
-      streamChunksRef.current = []
       setStreaming(false)
-      setStreamingContent('')
+      // Note: streamChunksRef + streamingContent are cleared in sendMessage()
+      // AFTER the assistant message is committed with the trail attached.
     })
     const unsubError = window.heimdall.on('chat:error', (err: unknown) => {
       if (updateTimerRef.current) clearTimeout(updateTimerRef.current)
@@ -110,8 +124,23 @@ export function ChatPage() {
         content: `Error: ${err}`, createdAt: Date.now()
       }])
     })
+    // Background refinement push — merge refined queries into the open
+    // modal's plan WITHOUT overriding any edits the analyst already made.
+    const unsubRefined = window.heimdall.on('chat:planRefined', (payload: unknown) => {
+      const p = payload as { planId: string; refinedQueries: Record<string, string> }
+      setPendingPlan((prev) => {
+        if (!prev || prev.planId !== p.planId) return prev
+        return {
+          ...prev,
+          proposedCalls: prev.proposedCalls.map((c) => {
+            const refined = p.refinedQueries[c.id]
+            return refined && refined !== c.query ? { ...c, query: refined } : c
+          })
+        }
+      })
+    })
     return () => {
-      unsubChunk(); unsubDone(); unsubError()
+      unsubChunk(); unsubDone(); unsubError(); unsubRefined()
       if (updateTimerRef.current) clearTimeout(updateTimerRef.current)
     }
   }, [])
@@ -139,9 +168,10 @@ export function ChatPage() {
   }
 
   const loadMessages = async (sessionId: string) => {
-    const msgs = await invoke('chat:getHistory', { sessionId }) as Array<{ id: string; role: string; content: string; created_at: number }>
+    const msgs = await invoke('chat:getHistory', { sessionId }) as Array<{ id: string; role: string; content: string; created_at: number; thinking_trail?: string | null }>
     setMessages((msgs || []).map((m) => ({
-      id: m.id, role: m.role as Message['role'], content: m.content, createdAt: m.created_at
+      id: m.id, role: m.role as Message['role'], content: m.content, createdAt: m.created_at,
+      thinkingTrail: m.thinking_trail || null
     })))
   }
 
@@ -187,7 +217,7 @@ export function ChatPage() {
 
   const sendMessage = async () => {
     const text = input.trim()
-    if (!text || streaming) return
+    if (!text || streaming || planBusy || pendingPlan) return
 
     // Create session if none active
     let sessionId = activeSessionId
@@ -208,26 +238,160 @@ export function ChatPage() {
     const userMsg: Message = { id: crypto.randomUUID(), role: 'user', content: text, createdAt: Date.now() }
     setMessages((prev) => [...prev, userMsg])
     setInput('')
+
+    const chatHistory = [...messages, userMsg]
+      .filter((m) => m.role !== 'system').slice(-20)
+      .map((m) => ({ role: m.role, content: m.content }))
+
+    // ─── Agentic mode: gate through plan-approval modal ────────────
+    if (chatMode === 'agentic') {
+      pendingQueryRef.current = { text, enriched: enrichedText, sessionId, history: chatHistory }
+      await requestPlan({ reworkFeedback: undefined, previousPlanId: undefined })
+      return
+    }
+
+    // ─── All other modes: streaming send as before ─────────────────
     setStreaming(true)
     setStreamingContent('')
-
     try {
-      const chatHistory = [...messages, userMsg]
-        .filter((m) => m.role !== 'system').slice(-20)
-        .map((m) => ({ role: m.role, content: m.content }))
-
-      const response = await invoke('chat:send', {
+      const result = await invoke('chat:send', {
         messages: chatHistory, query: enrichedText, sessionId,
         connectionId: selectedConnection || undefined,
-        useAgentic: chatMode === 'agentic',
+        useAgentic: false,
         mode: chatMode
-      }) as string
+      }) as { response: string; thinkingTrail?: string | null; messageId?: string } | string
+
+      const response = typeof result === 'string' ? result : result.response
+      const thinkingTrail = typeof result === 'string'
+        ? streamChunksRef.current.join('') || null
+        : (result.thinkingTrail || streamChunksRef.current.join('') || null)
+      const assistantId = (typeof result === 'object' && result.messageId) || crypto.randomUUID()
 
       setMessages((prev) => [...prev, {
-        id: crypto.randomUUID(), role: 'assistant', content: response, createdAt: Date.now()
+        id: assistantId, role: 'assistant', content: response, createdAt: Date.now(),
+        thinkingTrail
       }])
-      loadSessions() // Refresh session list to update title/timestamp
-    } catch {} finally { setStreaming(false); setStreamingContent('') }
+      loadSessions()
+    } catch {} finally {
+      setStreaming(false)
+      setStreamingContent('')
+      streamChunksRef.current = []
+    }
+  }
+
+  /**
+   * Build (or rebuild after rework) a plan for the cached pending query and
+   * open the modal. If the planner can't produce a structured plan we fall
+   * back to the streaming hybridRag path so the analyst still gets an answer.
+   */
+  const requestPlan = async (opts: { reworkFeedback?: string; previousPlanId?: string }) => {
+    const cached = pendingQueryRef.current
+    if (!cached) return
+    setPlanBusy(true)
+    setPlanReworking(!!opts.reworkFeedback)
+    try {
+      const r = await invoke('chat:planRequest', {
+        messages: cached.history,
+        query: cached.enriched,
+        sessionId: cached.sessionId,
+        connectionId: selectedConnection || undefined,
+        reworkFeedback: opts.reworkFeedback,
+        previousPlanId: opts.previousPlanId
+      }) as { ok: boolean; preview?: PlanPreview; reason?: string; message?: string }
+
+      if (!r.ok || !r.preview) {
+        toast.error('Planning failed', { description: r.message || 'Falling back to direct hybrid RAG' })
+        setPendingPlan(null)
+        // Fall back: just stream a direct send so the analyst still gets an answer.
+        await directSendFallback(cached)
+        pendingQueryRef.current = null
+      } else {
+        setPendingPlan(r.preview)
+      }
+    } catch (err) {
+      toast.error('Planning error', { description: String(err) })
+      setPendingPlan(null)
+    } finally {
+      setPlanBusy(false)
+      setPlanReworking(false)
+    }
+  }
+
+  /** Used when planning fails — stream a direct, non-agentic answer so the
+   *  analyst's question doesn't disappear into the void. */
+  const directSendFallback = async (cached: NonNullable<typeof pendingQueryRef.current>) => {
+    setStreaming(true)
+    setStreamingContent('')
+    try {
+      const result = await invoke('chat:send', {
+        messages: cached.history, query: cached.enriched, sessionId: cached.sessionId,
+        connectionId: selectedConnection || undefined,
+        useAgentic: false, mode: 'direct'
+      }) as { response: string; thinkingTrail?: string | null; messageId?: string } | string
+      const response = typeof result === 'string' ? result : result.response
+      const thinkingTrail = typeof result === 'string'
+        ? streamChunksRef.current.join('') || null
+        : (result.thinkingTrail || streamChunksRef.current.join('') || null)
+      const assistantId = (typeof result === 'object' && result.messageId) || crypto.randomUUID()
+      setMessages((prev) => [...prev, {
+        id: assistantId, role: 'assistant', content: response, createdAt: Date.now(), thinkingTrail
+      }])
+      loadSessions()
+    } finally {
+      setStreaming(false); setStreamingContent(''); streamChunksRef.current = []
+    }
+  }
+
+  const handlePlanApprove = async (edits: PlanEdits) => {
+    if (!pendingPlan || !pendingQueryRef.current) return
+    const planId = pendingPlan.planId
+    const cached = pendingQueryRef.current
+    // Close modal, switch to streaming mode.
+    setPendingPlan(null)
+    setStreaming(true)
+    setStreamingContent('')
+    try {
+      const result = await invoke('chat:executePlan', {
+        planId, sessionId: cached.sessionId, edits
+      }) as { ok: boolean; response?: string; thinkingTrail?: string | null; messageId?: string; reason?: string; message?: string }
+
+      if (!result.ok) {
+        toast.error('Execution failed', { description: result.message || 'Plan could not be executed' })
+        return
+      }
+      const thinkingTrail = result.thinkingTrail || streamChunksRef.current.join('') || null
+      const assistantId = result.messageId || crypto.randomUUID()
+      setMessages((prev) => [...prev, {
+        id: assistantId, role: 'assistant', content: result.response || '', createdAt: Date.now(), thinkingTrail
+      }])
+      loadSessions()
+    } catch (err) {
+      toast.error('Execution error', { description: String(err) })
+    } finally {
+      setStreaming(false)
+      setStreamingContent('')
+      streamChunksRef.current = []
+      pendingQueryRef.current = null
+    }
+  }
+
+  const handlePlanRework = async (feedback: string) => {
+    if (!pendingPlan) return
+    const previousPlanId = pendingPlan.planId
+    // Cancel the old plan on the server (frees memory) and request a new one.
+    try { await invoke('chat:cancelPlan', { planId: previousPlanId }) } catch {}
+    await requestPlan({ reworkFeedback: feedback, previousPlanId })
+  }
+
+  const handlePlanCancel = async () => {
+    if (pendingPlan) {
+      try { await invoke('chat:cancelPlan', { planId: pendingPlan.planId }) } catch {}
+    }
+    setPendingPlan(null)
+    pendingQueryRef.current = null
+    // Remove the user message we optimistically rendered, since the analyst chose not to proceed.
+    setMessages((prev) => prev.slice(0, -1))
+    setInput((prev) => prev || pendingQueryRef.current?.text || '')
   }
 
   const generateSummary = async (type: 'daily' | 'weekly') => {
@@ -433,13 +597,16 @@ export function ChatPage() {
                       />
                     )}
                   </div>
-                  {msg.content.length > 200 && (
-                    <div className="border-t border-border/50 px-4 py-2 flex items-center justify-between">
+                  {(msg.content.length > 200 || msg.thinkingTrail) && (
+                    <div className="border-t border-border/50 px-4 py-2 flex items-center justify-between gap-2">
                       <SaveReportButton
                         sessionId={activeSessionId}
                         messageId={msg.id}
                         content={msg.content}
                       />
+                      {msg.thinkingTrail && msg.thinkingTrail.trim().length > 0 && (
+                        <ShowThinkingButton trail={msg.thinkingTrail} />
+                      )}
                     </div>
                   )}
                 </>)}
@@ -457,6 +624,25 @@ export function ChatPage() {
               </div>
             </div>
           )}
+
+          {/* Planning indicator — shown while the planner LLM is producing
+              a plan in agentic mode (the modal opens once it returns). On
+              local Ollama models this can take 60-120s so the user needs
+              feedback that something is happening. */}
+          {planBusy && !pendingPlan && !streaming && (
+            <div className="flex justify-start">
+              <div className="max-w-[80%] rounded-lg px-4 py-3 text-sm bg-card border border-fuchsia-400/30 bg-fuchsia-400/5">
+                <div className="flex items-center gap-2 text-fuchsia-300">
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  <span className="font-semibold">{planReworking ? 'Reworking plan based on your feedback…' : 'Planner LLM is building a research plan…'}</span>
+                </div>
+                <div className="text-[11px] text-muted-foreground mt-1">
+                  This can take 60-120 seconds on local models. The plan-approval modal will open as soon as the planner returns.
+                  Refined per-tool queries will continue arriving in the background after the modal opens.
+                </div>
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Input */}
@@ -470,16 +656,26 @@ export function ChatPage() {
                 className="w-full resize-none rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
                 rows={2} disabled={streaming} />
             </div>
-            <Button onClick={sendMessage} disabled={streaming || !input.trim() || connections.length === 0}>
-              {streaming ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+            <Button onClick={sendMessage} disabled={streaming || planBusy || !!pendingPlan || !input.trim() || connections.length === 0}>
+              {(streaming || planBusy) ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
             </Button>
           </div>
           {activeConn && <p className="text-[10px] text-muted-foreground mt-1">
-            {activeConn.name} ({activeConn.model}) | {chatMode === 'agentic' ? 'Agentic' : chatMode === 'caveman' ? 'Caveman' : 'Direct + Vector'}
+            {activeConn.name} ({activeConn.model}) | {chatMode === 'agentic' ? 'Agentic (plan-approved)' : chatMode === 'caveman' ? 'Caveman' : 'Direct + Vector'}
             {selectedFilters.length > 0 && ` | ${selectedFilters.length} filter${selectedFilters.length > 1 ? 's' : ''} active`}
           </p>}
         </div>
       </div>
+
+      {/* Plan-approval modal — only mounted when there's a pending plan in agentic mode */}
+      <PlanApprovalModal
+        preview={pendingPlan}
+        busy={planBusy}
+        reworking={planReworking}
+        onApprove={handlePlanApprove}
+        onRework={handlePlanRework}
+        onCancel={handlePlanCancel}
+      />
     </div>
   )
 }
@@ -525,5 +721,52 @@ function SaveReportButton({ sessionId, messageId, content }: { sessionId: string
       {saving ? <Loader2 className="h-3 w-3 animate-spin" /> : <FileText className="h-3 w-3" />}
       {saving ? 'Saving...' : 'Save as Preliminary Report'}
     </button>
+  )
+}
+
+/**
+ * "Show thinking" button — opens a popup that replays the full streamed
+ * trail captured during the response (planning steps, tool calls, dark-web
+ * search progress, intermediate analyses, fenced tool results). Renders the
+ * trail with the same ThinkingBlocks parser used in the live progress card,
+ * so steps appear as collapsible color-coded sections.
+ */
+function ShowThinkingButton({ trail }: { trail: string }) {
+  const [open, setOpen] = useState(false)
+  // Quick metric so the button label is informative without parsing twice.
+  // Use word-boundary match so "Plan" doesn't double-count with "Planning".
+  const stepCount = (trail.match(/\*\*\[(Planning|Plan|Researching|Research|Analyzing|Searching|Tool|Executing)\b[^\]]*\]\*\*/gi) || []).length
+  const toolCount = (trail.match(/\*\*\[(Tool|Executing):/gi) || []).length
+
+  return (
+    <>
+      <button
+        onClick={() => setOpen(true)}
+        className="flex items-center gap-1.5 text-[10px] text-muted-foreground hover:text-primary transition-colors"
+        title={`${stepCount} step${stepCount === 1 ? '' : 's'}${toolCount > 0 ? ` · ${toolCount} tool call${toolCount === 1 ? '' : 's'}` : ''}`}
+      >
+        <Sparkles className="h-3 w-3" />
+        Show thinking
+        {stepCount > 0 && <span className="text-muted-foreground/70">({stepCount}{toolCount > 0 ? `, ${toolCount} tool${toolCount === 1 ? '' : 's'}` : ''})</span>}
+      </button>
+      <Dialog open={open} onOpenChange={setOpen}>
+        <DialogContent className="max-w-3xl max-h-[85vh] flex flex-col">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Sparkles className="h-4 w-4 text-primary" />
+              Thinking trail
+            </DialogTitle>
+            <DialogDescription>
+              The full reasoning the agent went through to produce its answer — planning steps,
+              tool calls (vector search, web fetch, dark-web lookups, knowledge-graph traversal),
+              and intermediate analyses.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="overflow-auto flex-1 -mx-6 px-6">
+            <ThinkingBlocks content={trail} isStreaming={false} expanded={true} />
+          </div>
+        </DialogContent>
+      </Dialog>
+    </>
   )
 }

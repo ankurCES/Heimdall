@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import {
-  Brain, Check, Loader2, Link2, RefreshCw, Plus, Trash2, Power
+  Brain, Check, Loader2, Link2, RefreshCw, Plus, Trash2, Power, Cpu
 } from 'lucide-react'
 import { Button } from '@renderer/components/ui/button'
 import { Input } from '@renderer/components/ui/input'
@@ -286,9 +286,108 @@ export function LlmTab() {
         </Card>
       )}
 
+      {config.connections.length > 0 && <ModelRoutingCard saveSignal={didSave} />}
+
       <Button onClick={handleSave} disabled={saving || didSave}>
         {didSave ? <><Check className="h-4 w-4 mr-2" /> Saved</> : 'Save LLM Settings'}
       </Button>
     </div>
+  )
+}
+
+interface RoutingRow {
+  task: string
+  connectionName: string | null
+  connectionId: string | null
+  model: string | null
+  reason: string | null
+  score: number | null
+}
+
+const TASK_LABEL: Record<string, { label: string; hint: string }> = {
+  planner:           { label: 'Planner',            hint: 'Builds the research plan from your query (small/fast model)' },
+  refiner:           { label: 'Search refiner',     hint: 'Rewrites raw queries into tool-aware search strings' },
+  watch_term_refine: { label: 'Watch-term refiner', hint: 'Refines auto-extracted watch terms into scoped phrases' },
+  summary:           { label: 'Short summary',      hint: 'Title generation, brief paraphrases' },
+  chat:              { label: 'Direct chat',        hint: 'Non-agentic responses' },
+  tool_call:         { label: 'Tool-calling agent', hint: 'Function-calling chat mode (requires tool support)' },
+  analysis:          { label: 'Analysis',           hint: 'Final intelligence-briefing synthesis (large/strong model)' },
+  briefing:          { label: 'Briefing',           hint: 'Long-form briefing generation' },
+  wargame:           { label: 'War-gaming',         hint: 'Adversarial scenario simulation' },
+  forecast:          { label: 'Forecasting',        hint: 'Probability + scenario forecasting' },
+  code:              { label: 'Code / detection',   hint: 'Sigma + YARA rule generation' },
+  vision:            { label: 'Vision',             hint: 'Image analysis (IMINT, geolocation hints)' }
+}
+
+/** Auto-routing matrix card. Shows which (connection, model) is selected for
+ *  every task class so the analyst can see exactly how their pipeline is
+ *  composed. Re-fetches whenever LLM settings save. */
+function ModelRoutingCard({ saveSignal }: { saveSignal: boolean }) {
+  const [rows, setRows] = useState<RoutingRow[]>([])
+  const [loading, setLoading] = useState(false)
+
+  const load = async () => {
+    setLoading(true)
+    try {
+      const matrix = await window.heimdall.invoke('llm:routing_matrix') as RoutingRow[]
+      setRows(matrix)
+    } finally { setLoading(false) }
+  }
+  // Reload on mount and whenever a save happens (defaultId / model changes affect routing).
+  useEffect(() => { void load() }, [saveSignal])
+
+  return (
+    <Card>
+      <CardHeader>
+        <div className="flex items-center justify-between">
+          <CardTitle className="text-sm flex items-center gap-2">
+            <Cpu className="h-4 w-4 text-indigo-400" />
+            Auto model routing
+          </CardTitle>
+          <Button size="sm" variant="ghost" onClick={() => void load()} disabled={loading} title="Refresh">
+            {loading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
+          </Button>
+        </div>
+        <CardDescription className="text-xs">
+          Heimdall picks the best model from your enabled connections for each subtask of the agentic pipeline —
+          small/fast for planning + refinement, large/strong for synthesis, vision-capable for image analysis,
+          code-tuned for detection rules. Add or remove connections / models above to change the available pool.
+        </CardDescription>
+      </CardHeader>
+      <CardContent>
+        {rows.length === 0 ? (
+          <p className="text-xs text-muted-foreground italic">No routing matrix available.</p>
+        ) : (
+          <div className="space-y-1">
+            {rows.map((r) => {
+              const meta = TASK_LABEL[r.task] || { label: r.task, hint: '' }
+              return (
+                <div key={r.task} className="flex items-center gap-3 text-xs py-1.5 border-b border-border/50 last:border-0">
+                  <div className="w-32 shrink-0 font-medium">{meta.label}</div>
+                  <div className="flex-1 min-w-0">
+                    {r.model ? (
+                      <>
+                        <code className="font-mono text-indigo-300">{r.connectionName} / {r.model}</code>
+                        <div className="text-[10px] text-muted-foreground italic truncate" title={meta.hint}>{r.reason}</div>
+                      </>
+                    ) : (
+                      <span className="text-muted-foreground italic">no available model</span>
+                    )}
+                  </div>
+                  {r.score !== null && (
+                    <Badge variant="outline" className="text-[9px] font-mono shrink-0">score {r.score.toFixed(1)}</Badge>
+                  )}
+                </div>
+              )
+            })}
+          </div>
+        )}
+        <p className="text-[10px] text-muted-foreground mt-2 italic">
+          Tip: add multiple connections (e.g. Ollama Cloud for synthesis + Ollama Local for planning) and
+          Heimdall will route automatically. To make a single connection offer multiple models, put them
+          comma-separated in its <code className="font-mono">customModel</code> field.
+        </p>
+      </CardContent>
+    </Card>
   )
 }

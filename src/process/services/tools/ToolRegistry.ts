@@ -86,27 +86,75 @@ class ToolRegistryImpl {
     // ── Intel Search ──
     this.register({
       name: 'intel_search',
-      description: 'Search the intelligence database by keyword, discipline, or severity. Returns matching intel reports.',
+      description: `Full-text search across intel reports using SQLite FTS5 with BM25 ranking.
+
+TIPS for best results:
+- Pass 2-6 specific keywords, NOT a full sentence. Drop articles/verbs/conversational fillers.
+- Quote multi-word phrases for exact match: "ballistic missile"
+- Use OR between alternative terms: drone OR uav
+- Use AND to require all terms: nuclear AND iran
+- Prefix wildcard: missile* matches missile, missiles, missilery
+- For an exact entity (CVE, IP, domain, hash), prefer entity_lookup.
+
+EXAMPLES:
+  GOOD: query="China Iran nuclear* OR atomic*"
+  GOOD: query="\\"ballistic missile\\" Iran"
+  BAD:  query="What's the latest on China-Iran nuclear cooperation?"
+
+By default the query goes through QueryPlanner which strips stop-words,
+expands short queries with intel-domain synonyms, and rewrites natural-
+language input into FTS5 syntax. Set auto_refine=false to bypass and pass
+your query straight to FTS5.`,
       parameters: { type: 'object', properties: {
-        query: { type: 'string', description: 'Search keywords' },
+        query: { type: 'string', description: 'Search keywords or FTS5 expression' },
         discipline: { type: 'string', description: 'Filter by discipline (osint, cybint, finint, etc.)' },
         severity: { type: 'string', description: 'Filter by severity (critical, high, medium, low)' },
-        limit: { type: 'number', description: 'Max results (default 10)' }
+        limit: { type: 'number', description: 'Max results (default 10)' },
+        auto_refine: { type: 'boolean', description: 'When true (default), QueryPlanner preprocesses the query. Set false if you have already extracted clean keywords.' }
       }, required: ['query'] },
       requiresApproval: false
     }, async (params) => {
-      const reports = intelRagService.searchReports(params.query as string, (params.limit as number) || 10)
+      const rawQuery = params.query as string
+      const limit = (params.limit as number) || 10
+      const autoRefine = params.auto_refine !== false  // default true
+
+      // Plan + execute. Deterministic plan first; if it returns < 3 hits we
+      // could escalate to LLM via planAdaptive — keep it deterministic-only
+      // here so a single tool call doesn't pay an extra LLM round-trip.
+      // (AgenticChatOrchestrator.runInternalGroup uses planAdaptive when
+      //  the analyst clearly typed natural language.)
+      const { queryPlanner } = await import('../intel/QueryPlanner')
+      const plan = autoRefine ? queryPlanner.plan(rawQuery) : null
+
+      const ftsQueryToUse = plan?.ftsQuery || rawQuery
+      const reports = intelRagService.searchReportsRanked(ftsQueryToUse, limit, { rawFts: !!plan })
+
       const filtered = reports.filter((r) => {
         if (params.discipline && r.discipline !== params.discipline) return false
         if (params.severity && r.severity !== params.severity) return false
         return true
       })
+
+      // Build the output — leading [meta] line so the LLM (and the trail)
+      // can see the actual rewrite + entity hints.
+      const metaLine = plan ? plan.meta : `[meta] FTS query: ${ftsQueryToUse} | source: raw (auto_refine=false)`
+      const entityHintLine = plan && plan.entityHints.length > 0
+        ? `[hint] Detected entities — consider calling entity_lookup for exact matches: ${plan.entityHints.map((e) => `${e.type}=${e.value}`).join(', ')}`
+        : ''
+      const matchedViaLine = filtered.length > 0
+        ? `[match] ${filtered.length} hit(s) via ${filtered[0].matchedVia.toUpperCase()}${filtered[0].matchedVia === 'fts5' ? ' (BM25-ranked)' : ' (LIKE fallback)'}`
+        : '[match] no hits'
+
+      const headerLines = [metaLine, entityHintLine, matchedViaLine].filter(Boolean).join('\n')
+      const resultLines = filtered.map((r) =>
+        `[${r.severity.toUpperCase()}] ${r.title}\nDiscipline: ${r.discipline} | Source: ${r.sourceName} | BM25: ${r.score.toFixed(2)}\n${r.content.slice(0, 300)}\n[id:${r.id}]`
+      ).join('\n---\n')
+
       return {
         // Trailing [id:<uuid>] marker per result lets the LLM cite reports by id
-        // when summarizing ("…per report a1b2c3d4-…") and also lands in
-        // tool_call_logs.result for later source-id extraction when saving a
-        // preliminary report.
-        output: filtered.map((r) => `[${r.severity.toUpperCase()}] ${r.title}\nDiscipline: ${r.discipline} | Source: ${r.sourceName}\n${r.content.slice(0, 300)}\n[id:${r.id}]`).join('\n---\n'),
+        // when summarizing and also lands in tool_call_logs.result for later
+        // source-id extraction when saving a preliminary report.
+        output: resultLines ? `${headerLines}\n\n${resultLines}` : `${headerLines}\n\n(no matching reports — try simpler keywords, or call entity_lookup if you have a specific CVE/IP/domain)`,
         data: filtered
       }
     })
@@ -196,6 +244,103 @@ class ToolRegistryImpl {
     }, async (params) => {
       const text = await safeFetcher.fetchText(params.url as string, { timeout: 15000 })
       return { output: text.slice(0, 3000) }
+    })
+
+    // ── Onion Fetch (Tor-routed) ──
+    // Fetches a `.onion` URL via SafeFetcher. SafeFetcher auto-routes any
+    // host ending in `.onion` through the bound SOCKS5 proxy when one is
+    // set (TorService.connect() does the binding). Pre-checks Tor state so
+    // the LLM gets an actionable error instead of a cryptic timeout.
+    this.register({
+      name: 'onion_fetch',
+      description: 'Fetch a `.onion` URL through the Tor SOCKS5 proxy. Use this on URLs returned by ahmia_search to read the actual dark-web page content. REQUIRES Tor to be connected (Settings → Dark Web → Connect to Tor). Returns truncated text content.',
+      parameters: { type: 'object', properties: {
+        url: { type: 'string', description: 'Full .onion URL (e.g. http://lockbit…onion/leak/page)' },
+        max_chars: { type: 'number', description: 'Max chars of body to return (default 3000, max 10000)' }
+      }, required: ['url'] },
+      requiresApproval: false
+    }, async (params) => {
+      const url = String(params.url || '').trim()
+      if (!url) return { output: 'Empty URL', error: 'EMPTY_URL' }
+      let parsed: URL
+      try { parsed = new URL(url) } catch { return { output: `Invalid URL: ${url}`, error: 'INVALID_URL' } }
+      if (!parsed.hostname.endsWith('.onion')) {
+        return { output: `Not an onion URL: ${parsed.hostname}. Use web_fetch for clearnet URLs.`, error: 'NOT_ONION' }
+      }
+      // Pre-check Tor state — clearer error than a network timeout 30s later.
+      const { torService } = await import('../darkweb/TorService')
+      const torState = torService.getState()
+      if (torState.status !== 'connected_external' && torState.status !== 'connected_managed') {
+        return {
+          output: `Tor is not connected (status: ${torState.status}). Open Settings → Dark Web → "Connect to Tor" before fetching .onion URLs.`,
+          error: 'TOR_NOT_CONNECTED'
+        }
+      }
+      const maxChars = Math.min(Math.max((params.max_chars as number) || 3000, 100), 10000)
+      try {
+        // skipRobots: onion sites typically have no robots.txt; the
+        // SafeFetcher SOCKS5 routing kicks in automatically based on the
+        // .onion suffix.
+        const html = await safeFetcher.fetchText(url, { timeout: 30000, skipRobots: true, maxRetries: 1 })
+        // Strip HTML / scripts / styles for a readable text excerpt.
+        const text = html
+          .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, ' ')
+          .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, ' ')
+          .replace(/<[^>]+>/g, ' ')
+          .replace(/&nbsp;/g, ' ')
+          .replace(/&amp;/g, '&')
+          .replace(/&lt;/g, '<')
+          .replace(/&gt;/g, '>')
+          .replace(/\s+/g, ' ')
+          .trim()
+        return {
+          output: `[onion:${parsed.hostname}] (${text.length} chars text / ${html.length} chars HTML)\n${text.slice(0, maxChars)}${text.length > maxChars ? '\n…[truncated]' : ''}`,
+          data: { url, hostname: parsed.hostname, text, htmlLength: html.length, textLength: text.length }
+        }
+      } catch (err) {
+        return { output: `Onion fetch failed for ${parsed.hostname}: ${(err as Error).message}`, error: String(err) }
+      }
+    })
+
+    // ── Ahmia Dark-Web Search (clearnet, no Tor) ──
+    // Searches ahmia.fi which indexes .onion sites. No auth, no API key.
+    // Result rows include the .onion URL so the analyst can investigate
+    // further via OnionFeedCollector if Tor is configured. Honors the global
+    // DarkWebConfig.enabled + ahmiaEnabled toggles — disabled by default
+    // unless the analyst opts in via Settings → Dark Web.
+    this.register({
+      name: 'ahmia_search',
+      description: 'Search the dark-web (.onion sites) via the Ahmia clearnet index. Use for ransomware, data-leak, credential-dump, threat-actor reconnaissance. Returns onion URLs + descriptions. Requires Settings → Dark Web → Ahmia enabled.',
+      parameters: { type: 'object', properties: {
+        query: { type: 'string', description: 'Search keywords (e.g. "ransomware victim leak", actor name, exposed credential domain)' },
+        limit: { type: 'number', description: 'Max results (default 10, max 25)' }
+      }, required: ['query'] },
+      requiresApproval: false
+    }, async (params) => {
+      const { settingsService } = await import('../settings/SettingsService')
+      const dw = settingsService.get<{ enabled?: boolean; ahmiaEnabled?: boolean }>('darkWeb')
+      if (!dw?.enabled || !dw?.ahmiaEnabled) {
+        return { output: 'Ahmia dark-web search is disabled. Enable it in Settings → Dark Web → Ahmia toggle.', error: 'AHMIA_DISABLED' }
+      }
+      const q = String(params.query || '').trim()
+      if (!q) return { output: 'Empty query', error: 'EMPTY_QUERY' }
+      const limit = Math.min(Math.max((params.limit as number) || 10, 1), 25)
+      try {
+        const { ahmiaSearch } = await import('../darkweb/AhmiaClient')
+        const hits = await ahmiaSearch(q, limit)
+        if (hits.length === 0) {
+          return { output: `Ahmia: no .onion results for "${q}"`, data: [] }
+        }
+        const lines = hits.map((h, i) =>
+          `${i + 1}. ${h.title}\n   .onion: ${h.onionUrl}\n   last seen: ${h.lastSeen || 'unknown'}\n   ${h.description.slice(0, 240)}`
+        )
+        return {
+          output: `Ahmia dark-web search "${q}" — ${hits.length} hit(s):\n\n${lines.join('\n\n')}`,
+          data: hits
+        }
+      } catch (err) {
+        return { output: `Ahmia search failed: ${(err as Error).message}`, error: String(err) }
+      }
     })
 
     // ── WHOIS Lookup ──

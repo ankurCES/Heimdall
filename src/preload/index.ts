@@ -94,12 +94,35 @@ const testChannels = [
   'twoperson:require', 'twoperson:approve', 'twoperson:reject',
   'twoperson:pending', 'twoperson:history',
   'mcp:list_servers', 'mcp:list_tools', 'mcp:add_server',
-  'mcp:update_server', 'mcp:remove_server', 'mcp:restart_server', 'mcp:test_server'
+  'mcp:update_server', 'mcp:remove_server', 'mcp:restart_server', 'mcp:test_server',
+  'tor:status', 'tor:connect', 'tor:disconnect', 'tor:health',
+  'chat:planRequest', 'chat:executePlan', 'chat:cancelPlan',
+  'llm:routing_matrix', 'llm:enabled_models',
+  'darkweb:list', 'darkweb:get_content', 'darkweb:hosts',
+  'darkweb:refresh_all', 'darkweb:refresh_status', 'darkweb:cancel_refresh', 'darkweb:tor_status',
+  'darkweb:seeds_list', 'darkweb:seeds_categories', 'darkweb:seeds_toggle',
+  'darkweb:seeds_add_custom', 'darkweb:seeds_delete', 'darkweb:seeds_run',
+  'darkweb:seeds_run_all', 'darkweb:seeds_cancel', 'darkweb:seeds_status',
+  'darkweb:explorer_search', 'darkweb:add_from_search', 'darkweb:add_batch_from_search',
+  'darkweb:enrich_all', 'darkweb:enrich_status', 'darkweb:enrich_one',
+  'darkweb:hosts_health', 'darkweb:hosts_unquarantine',
+  'darkweb:tags_for_picker', 'darkweb:enrichment_summary',
+  'darkweb:crawler_status', 'darkweb:crawler_toggle', 'darkweb:crawler_reset_visited',
+  'darkweb:graph_data',
+  'telegram-intel:get_config', 'telegram-intel:set_config', 'telegram-intel:test_token',
+  'telegram-intel:start', 'telegram-intel:stop', 'telegram-intel:status',
+  'telegram-intel:list', 'telegram-intel:get',
+  'telegram-intel:approve', 'telegram-intel:reject',
+  'telegram-intel:bulk_approve', 'telegram-intel:bulk_reject',
+  'telegram-intel:delete', 'telegram-intel:media_preview', 'telegram-intel:pending_count'
 ]
 const allowedChannels = [...Object.values(IPC_CHANNELS), ...testChannels]
-const chatEvents = ['chat:chunk', 'chat:done', 'chat:error']
+const chatEvents = ['chat:chunk', 'chat:done', 'chat:error', 'chat:planRefined']
+const darkwebEvents = ['darkweb:refresh_progress', 'darkweb:refresh_complete',
+  'darkweb:seed_progress', 'darkweb:enrich_progress', 'darkweb:crawl_progress']
+const telegramIntelEvents = ['telegram-intel:status_update', 'telegram-intel:new_message']
 const syncEvents = ['sync:progress', 'enrichment:progress', 'watch:hits', 'markets:backfillProgress']
-const allowedEvents = [...Object.values(IPC_EVENTS), ...chatEvents, ...syncEvents]
+const allowedEvents = [...Object.values(IPC_EVENTS), ...chatEvents, ...syncEvents, ...darkwebEvents, ...telegramIntelEvents]
 
 const api = {
   invoke: (channel: string, ...args: unknown[]): Promise<unknown> => {

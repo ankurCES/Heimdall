@@ -1,12 +1,23 @@
 import { useState, useEffect } from 'react'
-import { Globe2, AlertTriangle, Plus, X, Check, Loader2 } from 'lucide-react'
+import { Globe2, AlertTriangle, Plus, X, Check, Loader2, Power, PowerOff, RefreshCw } from 'lucide-react'
 import { Button } from '@renderer/components/ui/button'
 import { Input } from '@renderer/components/ui/input'
 import { Label } from '@renderer/components/ui/label'
 import { Switch } from '@renderer/components/ui/switch'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@renderer/components/ui/card'
+import { Badge } from '@renderer/components/ui/badge'
 import { useSetting } from '@renderer/hooks/useSettings'
 import type { DarkWebConfig } from '@common/types/settings'
+
+interface TorState {
+  status: 'stopped' | 'probing' | 'starting' | 'connected_external' | 'connected_managed' | 'error'
+  socksHost: string
+  socksPort: number
+  managed: boolean
+  bootstrapPercent: number | null
+  lastError: string | null
+  binaryPath: string | null
+}
 
 const DEFAULT: DarkWebConfig = {
   enabled: false,
@@ -34,6 +45,38 @@ export function DarkWebTab() {
   const [config, setConfig] = useState<DarkWebConfig>(DEFAULT)
   const [didSave, setDidSave] = useState(false)
   const [newTerm, setNewTerm] = useState('')
+
+  // Tor on-demand state
+  const [tor, setTor] = useState<TorState | null>(null)
+  const [torBusy, setTorBusy] = useState(false)
+  const [torMsg, setTorMsg] = useState<string | null>(null)
+
+  const refreshTorStatus = async () => {
+    try {
+      const s = await window.heimdall.invoke('tor:status') as TorState
+      setTor(s)
+    } catch { /* ipc error ignored */ }
+  }
+
+  useEffect(() => { void refreshTorStatus() }, [])
+
+  const torConnect = async () => {
+    setTorBusy(true); setTorMsg(null)
+    try {
+      const r = await window.heimdall.invoke('tor:connect') as { ok: boolean; mode?: string; error?: string }
+      if (!r.ok) setTorMsg(r.error || 'Tor connect failed')
+      else setTorMsg(r.mode === 'external' ? 'Attached to existing Tor instance' : 'Managed Tor bootstrapped (100%)')
+      await refreshTorStatus()
+    } finally { setTorBusy(false) }
+  }
+  const torDisconnect = async () => {
+    setTorBusy(true); setTorMsg(null)
+    try {
+      await window.heimdall.invoke('tor:disconnect')
+      setTorMsg('Tor disconnected. .onion fetches will fail until reconnected.')
+      await refreshTorStatus()
+    } finally { setTorBusy(false) }
+  }
 
   useEffect(() => {
     if (saved && typeof saved === 'object') setConfig({ ...DEFAULT, ...saved })
@@ -94,9 +137,8 @@ export function DarkWebTab() {
         <CardHeader>
           <CardTitle className="text-sm">Tor SOCKS5 proxy</CardTitle>
           <CardDescription>
-            For direct .onion fetches via the <code className="font-mono">onion-feed</code> collector.
-            Deployer runs Tor (e.g. <code className="font-mono">brew services start tor</code> on macOS).
-            Default: 127.0.0.1:9050.
+            For direct .onion fetches via the <code className="font-mono">onion-feed</code> collector
+            and (optionally) for routing chat-time dark-web queries. Default: 127.0.0.1:9050.
           </CardDescription>
         </CardHeader>
         <CardContent className="grid grid-cols-2 gap-3">
@@ -108,6 +150,64 @@ export function DarkWebTab() {
             <Label>SOCKS5 port</Label>
             <Input type="number" value={config.socks5Port} onChange={(e) => update('socks5Port', parseInt(e.target.value) || 9050)} className="font-mono" />
           </div>
+        </CardContent>
+      </Card>
+
+      {/* On-demand Tor connection */}
+      <Card>
+        <CardHeader>
+          <div className="flex items-center justify-between">
+            <div>
+              <CardTitle className="text-sm flex items-center gap-2">
+                On-demand Tor
+                <TorStatusBadge state={tor} />
+              </CardTitle>
+              <CardDescription className="mt-1">
+                Connect Heimdall to Tor only when you need it. We first probe the configured SOCKS5 port —
+                if Tor is already running (e.g. from <code className="font-mono">brew services start tor</code> or the Tor Browser),
+                we attach to that. Otherwise we spawn a managed <code className="font-mono">tor</code> child process if the binary
+                is on PATH. While connected, all <code className="font-mono">.onion</code> fetches route through the proxy.
+              </CardDescription>
+            </div>
+            <div className="flex items-center gap-1.5 shrink-0">
+              <Button size="sm" variant="ghost" onClick={refreshTorStatus} disabled={torBusy} title="Refresh status">
+                <RefreshCw className="h-3.5 w-3.5" />
+              </Button>
+              {tor && (tor.status === 'connected_external' || tor.status === 'connected_managed') ? (
+                <Button size="sm" variant="outline" onClick={torDisconnect} disabled={torBusy}
+                  className="border-red-500/30 text-red-400 hover:bg-red-500/10">
+                  {torBusy ? <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" /> : <PowerOff className="h-3.5 w-3.5 mr-1.5" />}
+                  Disconnect
+                </Button>
+              ) : (
+                <Button size="sm" onClick={torConnect} disabled={torBusy}>
+                  {torBusy ? <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" /> : <Power className="h-3.5 w-3.5 mr-1.5" />}
+                  Connect to Tor
+                </Button>
+              )}
+            </div>
+          </div>
+        </CardHeader>
+        <CardContent>
+          {tor && tor.status === 'starting' && tor.bootstrapPercent !== null && (
+            <div className="text-[11px] text-amber-300 mb-2">
+              Bootstrapping Tor circuit… {tor.bootstrapPercent}%
+              <div className="mt-1 h-1 bg-muted rounded overflow-hidden">
+                <div className="h-full bg-amber-400 transition-all" style={{ width: `${tor.bootstrapPercent}%` }} />
+              </div>
+            </div>
+          )}
+          {tor && tor.status === 'error' && tor.lastError && (
+            <div className="text-[11px] text-red-300 p-2 rounded bg-red-500/10 border border-red-500/30 break-words">
+              <span className="font-semibold">Tor error:</span> {tor.lastError}
+            </div>
+          )}
+          {torMsg && (
+            <div className="text-[11px] text-muted-foreground mt-1">{torMsg}</div>
+          )}
+          {tor?.binaryPath && (
+            <div className="text-[10px] text-muted-foreground mt-2">Managed binary: <code className="font-mono">{tor.binaryPath}</code></div>
+          )}
         </CardContent>
       </Card>
 
@@ -169,8 +269,28 @@ export function DarkWebTab() {
       </Button>
 
       <p className="text-[10px] text-muted-foreground italic">
-        Changes take effect after the next collector run. To enable the Tor SOCKS5 immediately, restart Heimdall.
+        Changes take effect after the next collector run. Click "Connect to Tor" above to enable the SOCKS5 proxy immediately without restarting.
       </p>
     </div>
   )
+}
+
+/** Compact status pill for the on-demand Tor controls. */
+function TorStatusBadge({ state }: { state: TorState | null }) {
+  if (!state) return <Badge variant="outline" className="text-[10px]">unknown</Badge>
+  switch (state.status) {
+    case 'connected_external':
+      return <Badge className="text-[10px] bg-emerald-500/20 text-emerald-300 border-emerald-500/40 border">attached: {state.socksHost}:{state.socksPort}</Badge>
+    case 'connected_managed':
+      return <Badge className="text-[10px] bg-emerald-500/20 text-emerald-300 border-emerald-500/40 border">managed: {state.socksHost}:{state.socksPort}</Badge>
+    case 'starting':
+      return <Badge className="text-[10px] bg-amber-500/20 text-amber-300 border-amber-500/40 border animate-pulse">starting {state.bootstrapPercent ?? 0}%</Badge>
+    case 'probing':
+      return <Badge className="text-[10px] bg-amber-500/20 text-amber-300 border-amber-500/40 border animate-pulse">probing</Badge>
+    case 'error':
+      return <Badge className="text-[10px] bg-red-500/20 text-red-300 border-red-500/40 border">error</Badge>
+    case 'stopped':
+    default:
+      return <Badge variant="outline" className="text-[10px]">disconnected</Badge>
+  }
 }

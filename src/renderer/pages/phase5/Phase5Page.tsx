@@ -351,23 +351,41 @@ function DetectionTab() {
   const [rules, setRules] = useState<Array<{ id: string; rule_type: string; name: string; body: string; source_report_id: string | null; created_at: number }>>([])
   const [reportId, setReportId] = useState('')
   const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [info, setInfo] = useState<string | null>(null)
   const load = async () => setRules(await window.heimdall.invoke('detection:list', { limit: 50 }) as typeof rules)
   useEffect(() => { void load() }, [])
   const gen = async (kind: 'sigma' | 'yara') => {
     if (!reportId.trim()) return
-    setBusy(true)
-    try { await window.heimdall.invoke(`detection:generate_${kind}`, reportId.trim()); setReportId(''); await load() }
-    finally { setBusy(false) }
+    setBusy(true); setError(null); setInfo(null)
+    try {
+      const before = rules.length
+      await window.heimdall.invoke(`detection:generate_${kind}`, reportId.trim())
+      setReportId('')
+      await load()
+      setInfo(`${kind.toUpperCase()} rule generated — ${rules.length + 1 > before ? 'see below' : 'list refreshed'}.`)
+      setTimeout(() => setInfo(null), 4000)
+    } catch (err) {
+      setError(String(err).replace(/^Error:\s*(?:Error invoking remote method '[^']+':\s*Error:\s*)?/, ''))
+    } finally { setBusy(false) }
   }
   return (
     <div className="p-6 space-y-4">
       <div><h2 className="text-base font-semibold">Sigma / YARA rule generation</h2>
-        <p className="text-xs text-muted-foreground mt-1">LLM-drafted detection rules anchored in a specific intel_report's content + extracted IOCs.</p></div>
+        <p className="text-xs text-muted-foreground mt-1">LLM-drafted detection rules anchored in a specific intel_report's content + extracted IOCs. Requires an LLM connection in Settings → LLM.</p></div>
       <div className="flex gap-2">
-        <Input placeholder="intel_reports.id (UUID)" value={reportId} onChange={(e) => setReportId(e.target.value)} />
+        <Input placeholder="intel_reports.id (UUID)" value={reportId} onChange={(e) => setReportId(e.target.value)} className="font-mono" />
         <Button onClick={() => gen('sigma')} disabled={busy || !reportId.trim()}>{busy ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : null}Generate Sigma</Button>
-        <Button variant="outline" onClick={() => gen('yara')} disabled={busy || !reportId.trim()}>Generate YARA</Button>
+        <Button variant="outline" onClick={() => gen('yara')} disabled={busy || !reportId.trim()}>{busy ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : null}Generate YARA</Button>
       </div>
+      {error && (
+        <div className="text-xs p-2 rounded bg-red-500/10 border border-red-500/30 text-red-300 break-words">
+          <span className="font-semibold">Generation failed:</span> {error}
+        </div>
+      )}
+      {info && (
+        <div className="text-xs p-2 rounded bg-emerald-500/10 border border-emerald-500/30 text-emerald-300">{info}</div>
+      )}
       <div className="space-y-2">
         {rules.map((r) => (
           <Card key={r.id}>

@@ -64,7 +64,7 @@ export class LlmService {
     return result
   }
 
-  async complete(prompt: string, connectionId?: string, maxTokens: number = 1024): Promise<string> {
+  async complete(prompt: string, connectionId?: string, _maxTokens: number = 1024): Promise<string> {
     const conn = this.getConnection(connectionId)
     if (!conn) throw new Error('No LLM connection configured')
     const model = conn.model || conn.customModel
@@ -74,6 +74,72 @@ export class LlmService {
       conn.baseUrl, conn.apiKey, model,
       [{ role: 'user', content: prompt }]
     )
+  }
+
+  /**
+   * Task-aware completion. Asks ModelRouter for the best (connection,
+   * model) for the given task class — small/fast for planner+refiner,
+   * large/strong for analyst, vision-capable for vision, code-tuned for
+   * code, etc. Falls back to the user's default connection if no model
+   * matches the task profile.
+   *
+   * `connectionIdOverride` pins the connection (the router still picks
+   * the best model THAT connection offers). Pass undefined for full auto.
+   */
+  async completeForTask(
+    task: import('./ModelRouter').TaskClass,
+    prompt: string,
+    connectionIdOverride?: string,
+    _maxTokens: number = 1024
+  ): Promise<string> {
+    const { modelRouter } = await import('./ModelRouter')
+    const choice = modelRouter.selectForTask(task, connectionIdOverride)
+    if (!choice) throw new Error(`No LLM connection available for task "${task}"`)
+    log.info(`LLM[${task}]: routed to ${choice.connection.name}/${choice.model} (${choice.reason})`)
+    const result = await this.chatOpenAICompatible(
+      choice.connection.baseUrl, choice.connection.apiKey, choice.model,
+      [{ role: 'user', content: prompt }]
+    )
+    this.trackUsage(choice.connection.name, choice.model, [{ role: 'user', content: prompt }], result, 'agentic')
+    return result
+  }
+
+  /** Task-aware multi-message chat. Same routing rules as completeForTask. */
+  async chatForTask(
+    task: import('./ModelRouter').TaskClass,
+    messages: ChatMessage[],
+    onChunk?: (chunk: string) => void,
+    connectionIdOverride?: string
+  ): Promise<{ response: string; model: string; connectionName: string }> {
+    const { modelRouter } = await import('./ModelRouter')
+    const choice = modelRouter.selectForTask(task, connectionIdOverride)
+    if (!choice) throw new Error(`No LLM connection available for task "${task}"`)
+    log.info(`LLM[${task}]: routed to ${choice.connection.name}/${choice.model} (${choice.reason})`)
+    const result = await this.chatOpenAICompatible(
+      choice.connection.baseUrl, choice.connection.apiKey, choice.model,
+      messages, onChunk
+    )
+    this.trackUsage(choice.connection.name, choice.model, messages, result, 'agentic')
+    return { response: result, model: choice.model, connectionName: choice.connection.name }
+  }
+
+  /** Same as completeForTask but returns the routing decision so the
+   *  caller can surface it in logs / thinking trail. */
+  async completeForTaskWithMeta(
+    task: import('./ModelRouter').TaskClass,
+    prompt: string,
+    connectionIdOverride?: string
+  ): Promise<{ response: string; model: string; connectionName: string }> {
+    const { modelRouter } = await import('./ModelRouter')
+    const choice = modelRouter.selectForTask(task, connectionIdOverride)
+    if (!choice) throw new Error(`No LLM connection available for task "${task}"`)
+    log.info(`LLM[${task}]: routed to ${choice.connection.name}/${choice.model} (${choice.reason})`)
+    const response = await this.chatOpenAICompatible(
+      choice.connection.baseUrl, choice.connection.apiKey, choice.model,
+      [{ role: 'user', content: prompt }]
+    )
+    this.trackUsage(choice.connection.name, choice.model, [{ role: 'user', content: prompt }], response, 'agentic')
+    return { response, model: choice.model, connectionName: choice.connection.name }
   }
 
   /**
@@ -91,11 +157,18 @@ export class LlmService {
    * failure so the caller can decide whether to fall back.
    */
   async completeVision(prompt: string, imageDataUrls: string[], opts: { connectionId?: string; timeoutMs?: number } = {}): Promise<string> {
-    const conn = this.getConnection(opts.connectionId)
-    if (!conn) throw new Error('No LLM connection configured')
-    const model = conn.model || conn.customModel
-    if (!model) throw new Error('No model selected')
     if (!imageDataUrls.length) throw new Error('No images supplied')
+
+    // Route through ModelRouter so vision tasks auto-pick a vision-capable
+    // model (llava, gpt-4o, claude-3-*, gemini, qwen-vl, llama3.2-vision).
+    // Falls back to whatever the user has if no vision-capable model is
+    // configured (caller catches the inevitable model error).
+    const { modelRouter } = await import('./ModelRouter')
+    const choice = modelRouter.selectForTask('vision', opts.connectionId)
+    if (!choice) throw new Error('No LLM connection configured')
+    const conn = choice.connection
+    const model = choice.model
+    log.info(`LLM[vision]: routed to ${conn.name}/${model} (${choice.reason})`)
 
     const baseUrl = this.normalizeBaseUrl(conn.baseUrl)
     const headers: Record<string, string> = { 'Content-Type': 'application/json' }

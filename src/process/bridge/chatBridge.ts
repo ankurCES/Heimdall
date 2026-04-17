@@ -1,6 +1,7 @@
 import { ipcMain, BrowserWindow } from 'electron'
 import { llmService, type ChatMessage } from '../services/llm/LlmService'
-import { agenticChatOrchestrator } from '../services/llm/AgenticChatOrchestrator'
+import { agenticChatOrchestrator, type PlanEdits } from '../services/llm/AgenticChatOrchestrator'
+import { agenticPlanStore } from '../services/llm/AgenticPlanStore'
 import { memoryService } from '../services/memory/MemoryService'
 import { vectorDbService } from '../services/vectordb/VectorDbService'
 import { syncManager } from '../services/sync/SyncManager'
@@ -65,6 +66,105 @@ export function registerChatBridge(): void {
 
   // ── Chat Messages ──────────────────────────────────────────────────
 
+  // ── Plan-mode (agentic) ────────────────────────────────────────────
+  // Two-phase agentic flow:
+  //   chat:planRequest → returns a PlanPreview the renderer shows in
+  //                      PlanApprovalModal. NO research runs.
+  //   chat:executePlan → runs the approved (possibly edited) plan and
+  //                      streams the result like chat:send.
+
+  ipcMain.handle('chat:planRequest', async (_event, params: {
+    messages: ChatMessage[]
+    query: string
+    sessionId: string
+    connectionId?: string
+    /** Mandatory rework feedback from a previously rejected plan. */
+    reworkFeedback?: string
+    /** The planId that was rejected — its steps inform the regenerated plan. */
+    previousPlanId?: string
+  }) => {
+    const { messages, query, sessionId, connectionId, reworkFeedback, previousPlanId } = params
+    const preview = await agenticChatOrchestrator.buildPlan(
+      query, messages, sessionId, connectionId,
+      { reworkFeedback, previousPlanId }
+    )
+    if (!preview) {
+      return { ok: false, reason: 'planning_failed', message: 'The planner could not produce a structured plan for this query. Try rephrasing or use Direct mode.' }
+    }
+    return { ok: true, preview }
+  })
+
+  ipcMain.handle('chat:executePlan', async (_event, params: {
+    planId: string
+    sessionId: string
+    edits: PlanEdits
+  }) => {
+    const { planId, sessionId, edits } = params
+
+    // Sanity-check the plan exists before kicking off streaming.
+    const stored = agenticPlanStore.get(planId)
+    if (!stored) {
+      return { ok: false, reason: 'plan_expired', message: 'The plan has expired (30 min TTL). Re-submit your query to build a fresh plan.' }
+    }
+
+    // Same chunk-emitting + thinking-trail capture pattern as chat:send.
+    const windows = BrowserWindow.getAllWindows()
+    const safeSend = (channel: string, payload: unknown) => {
+      for (const win of windows) {
+        if (win.isDestroyed()) continue
+        try { win.webContents.send(channel, payload) } catch {}
+      }
+    }
+    const trailChunks: string[] = []
+    const TRAIL_CAP = 100_000
+    let trailLen = 0
+    const emitChunk = (chunk: string) => {
+      if (trailLen < TRAIL_CAP) {
+        const room = TRAIL_CAP - trailLen
+        trailChunks.push(chunk.length > room ? chunk.slice(0, room) + '\n[…trail truncated…]' : chunk)
+        trailLen += chunk.length
+      }
+      safeSend('chat:chunk', chunk)
+    }
+
+    let fullResponse = ''
+    try {
+      fullResponse = await agenticChatOrchestrator.executeApprovedPlan(planId, edits, emitChunk)
+      const thinkingTrail = trailChunks.join('')
+      safeSend('chat:done', { response: fullResponse, thinkingTrail })
+    } catch (err) {
+      log.error('chat:executePlan error:', err)
+      safeSend('chat:error', String(err))
+      throw err
+    }
+
+    // Persist user + assistant messages with the captured trail (mirrors chat:send).
+    const db = getDatabase()
+    const now = timestamp()
+    const assistantMsgId = generateId()
+    const thinkingTrail = trailChunks.join('') || null
+    const persistChat = db.transaction(() => {
+      db.prepare('INSERT INTO chat_messages (id, session_id, role, content, created_at) VALUES (?, ?, ?, ?, ?)').run(generateId(), sessionId, 'user', stored.query, now)
+      db.prepare('INSERT INTO chat_messages (id, session_id, role, content, thinking_trail, created_at) VALUES (?, ?, ?, ?, ?, ?)').run(assistantMsgId, sessionId, 'assistant', fullResponse, thinkingTrail, now)
+      const msgCount = (db.prepare('SELECT COUNT(*) as count FROM chat_messages WHERE session_id = ?').get(sessionId) as { count: number }).count
+      if (msgCount <= 2) {
+        const title = stored.query.slice(0, 60) + (stored.query.length > 60 ? '...' : '')
+        db.prepare('UPDATE chat_sessions SET title = ?, updated_at = ? WHERE id = ?').run(title, now, sessionId)
+      } else {
+        db.prepare('UPDATE chat_sessions SET updated_at = ? WHERE id = ?').run(now, sessionId)
+      }
+    })
+    persistChat()
+
+    return { ok: true, response: fullResponse, thinkingTrail, messageId: assistantMsgId }
+  })
+
+  /** Drop a pending plan when the user cancels the modal. */
+  ipcMain.handle('chat:cancelPlan', (_event, params: { planId: string }) => {
+    agenticPlanStore.remove(params.planId)
+    return { ok: true }
+  })
+
   ipcMain.handle('chat:send', async (_event, params: {
     messages: ChatMessage[]
     query: string
@@ -86,7 +186,23 @@ export function registerChatBridge(): void {
         try { win.webContents.send(channel, payload) } catch {}
       }
     }
-    const emitChunk = (chunk: string) => safeSend('chat:chunk', chunk)
+
+    // Capture the FULL stream (planning, tool calls, dark-web search
+    // progress, intermediate analyses, final tokens) so we can persist
+    // it as the message's thinking trail. The final assistant text often
+    // omits these intermediate steps; without this buffer they're lost
+    // the moment the progress card disappears.
+    const trailChunks: string[] = []
+    const TRAIL_CAP = 100_000 // hard cap to keep DB rows sane (~100 KB)
+    let trailLen = 0
+    const emitChunk = (chunk: string) => {
+      if (trailLen < TRAIL_CAP) {
+        const room = TRAIL_CAP - trailLen
+        trailChunks.push(chunk.length > room ? chunk.slice(0, room) + '\n[…trail truncated…]' : chunk)
+        trailLen += chunk.length
+      }
+      safeSend('chat:chunk', chunk)
+    }
 
     let fullResponse = ''
     try {
@@ -135,20 +251,25 @@ export function registerChatBridge(): void {
         fullResponse = await llmService.chat(fullMessages, connectionId, emitChunk, mode)
       }
 
-      safeSend('chat:done', fullResponse)
+      // Build the trail and ship it alongside the final response so the
+      // client can attach it to the assistant message it's about to render.
+      const thinkingTrail = trailChunks.join('')
+      safeSend('chat:done', { response: fullResponse, thinkingTrail })
     } catch (err) {
       log.error('Chat error:', err)
       safeSend('chat:error', String(err))
       throw err
     }
 
-    // Persist messages to session
-    // Batch all DB writes in a single transaction
+    // Persist messages to session — including the captured thinking trail
+    // on the assistant row. Batch all DB writes in a single transaction.
     const db = getDatabase()
     const now = timestamp()
+    const assistantMsgId = generateId()
+    const thinkingTrail = trailChunks.join('') || null
     const persistChat = db.transaction(() => {
       db.prepare('INSERT INTO chat_messages (id, session_id, role, content, created_at) VALUES (?, ?, ?, ?, ?)').run(generateId(), sessionId, 'user', query, now)
-      db.prepare('INSERT INTO chat_messages (id, session_id, role, content, created_at) VALUES (?, ?, ?, ?, ?)').run(generateId(), sessionId, 'assistant', fullResponse, now)
+      db.prepare('INSERT INTO chat_messages (id, session_id, role, content, thinking_trail, created_at) VALUES (?, ?, ?, ?, ?, ?)').run(assistantMsgId, sessionId, 'assistant', fullResponse, thinkingTrail, now)
       const msgCount = (db.prepare('SELECT COUNT(*) as count FROM chat_messages WHERE session_id = ?').get(sessionId) as { count: number }).count
       if (msgCount <= 2) {
         const title = query.slice(0, 60) + (query.length > 60 ? '...' : '')
@@ -159,7 +280,7 @@ export function registerChatBridge(): void {
     })
     persistChat()
 
-    return fullResponse
+    return { response: fullResponse, thinkingTrail, messageId: assistantMsgId }
   })
 
   ipcMain.handle('chat:getHistory', (_event, params?: { sessionId?: string }) => {
@@ -204,7 +325,7 @@ export function registerChatBridge(): void {
 
   // ── Preliminary Reports ─────────────────────────────────────────
 
-  ipcMain.handle('chat:savePreliminaryReport', (_event, params: { sessionId: string; messageId: string; content: string }) => {
+  ipcMain.handle('chat:savePreliminaryReport', async (_event, params: { sessionId: string; messageId: string; content: string }) => {
     const db = getDatabase()
     const now = timestamp()
     const { sessionId, messageId, content } = params
@@ -307,11 +428,18 @@ export function registerChatBridge(): void {
       )
     }
 
-    // Auto-extract watch terms from actions and gaps
+    // Auto-extract watch terms from actions and gaps. Uses LLM refinement
+    // (when an LLM connection is configured) to drop generic verbs like
+    // "increase monitoring" and add scoped phrases like "Iran nuclear weapons
+    // program" instead of bare "Iran".
     let watchTermsAdded = 0
     try {
-      watchTermsAdded = watchTermsService.extractFromActions(reportId)
-    } catch {}
+      watchTermsAdded = await watchTermsService.extractFromActionsRefined(reportId)
+    } catch (err) {
+      // LLM unavailable — fall back to regex-only.
+      try { watchTermsAdded = watchTermsService.extractFromActions(reportId) } catch {}
+      log.warn(`watchTerms: LLM-refined extraction failed, fell back to regex (${err})`)
+    }
 
     log.info(`Preliminary report saved: ${extracted.title} (${extracted.actions.length} actions, ${extracted.gaps.length} gaps, ${watchTermsAdded} watch terms)`)
 
@@ -372,7 +500,29 @@ export function registerChatBridge(): void {
 
     let localFiles = 0
     let obsidianFiles = 0
+    let obsidianSkipped = 0
+    let obsidianRemaining = 0
     let errorMsg: string | undefined
+
+    // Yields control back to the event loop between batches so IPC handlers
+    // (chat sends, UI clicks) get serviced. The main process becomes
+    // unresponsive without this when ingesting hundreds of files.
+    const yieldToEventLoop = () => new Promise<void>((r) => setImmediate(r))
+
+    // Per-run cap so a "Generate Learnings" click is bounded — remaining
+    // files get picked up on the next click or the */20m cron run. Keeps
+    // any single run under ~5-10 min of embedding time on typical models.
+    const MAX_FILES_PER_RUN = 500
+    // Concurrency cap. The previous value was 10, which fired 10 simultaneous
+    // embedding API calls per batch — that's what made the app feel frozen.
+    // 3 keeps the pipeline saturated without monopolising the event loop.
+    const BATCH_SIZE = 3
+
+    /** Build the differential signature for a file. Two files with the same
+     *  (mtime, size) tuple are assumed identical — Obsidian + local FS both
+     *  honor mtime updates on write. Falls back to size-only when mtime is 0. */
+    const fileSig = (path: string, mtime: number, size: number): string =>
+      mtime > 0 ? `${path}|${mtime}|${size}` : `${path}|0|${size}`
 
     try {
       // 1. Ingest from DB (has its own try/catch internally)
@@ -384,13 +534,18 @@ export function registerChatBridge(): void {
         log.warn(`Learnings: intelPipeline.runIngestion failed (non-fatal): ${err}`)
       }
 
-      // 2. Ingest local ~/.heimdall/memory files (fast — direct filesystem read)
+      // 2. Ingest local ~/.heimdall/memory files (fast — direct filesystem read).
+      //    Differential: signature = path|mtime|size. A file's content changing
+      //    bumps mtime, so the previous sig becomes stale and we re-embed.
       try {
         const { app: electronApp } = await import('electron')
         const { join } = await import('path')
         const { readdirSync, readFileSync, statSync } = await import('fs')
         const memoryDir = join(electronApp.getPath('home'), '.heimdall', 'memory')
 
+        // Walk → collect candidate paths + stats. Embedding happens AFTER walk
+        // so we can yield between embeddings.
+        const candidates: Array<{ fullPath: string; entry: string; mtime: number; size: number; sig: string }> = []
         const walkDir = (dir: string): void => {
           let entries: string[]
           try { entries = readdirSync(dir) } catch { return }
@@ -400,32 +555,52 @@ export function registerChatBridge(): void {
               const stat = statSync(fullPath)
               if (stat.isDirectory()) { walkDir(fullPath); continue }
               if (!entry.endsWith('.md')) continue
-              if (syncManager.isSynced('vector-local', fullPath)) continue
-              const content = readFileSync(fullPath, 'utf-8')
-              if (content.length < 50) continue
-              vectorDbService.addReport({
-                id: `local_${fullPath.replace(/[^a-zA-Z0-9]/g, '_').slice(-60)}`,
-                discipline: 'osint', title: entry.replace('.md', ''),
-                content: content.slice(0, 3000), summary: null, severity: 'info',
-                sourceId: 'local-memory', sourceUrl: null, sourceName: `Local: ${entry}`,
-                contentHash: fullPath, latitude: null, longitude: null,
-                verificationScore: 50, reviewed: false, createdAt: Date.now(), updatedAt: Date.now()
-              } as any)
-              syncManager.markSynced('vector-local', fullPath)
-              localFiles++
-            } catch (err) {
-              log.debug(`Learnings: local file ${fullPath} failed: ${err}`)
-            }
+              const sig = fileSig(fullPath, stat.mtimeMs, stat.size)
+              if (syncManager.isSynced('vector-local', sig)) continue
+              candidates.push({ fullPath, entry, mtime: stat.mtimeMs, size: stat.size, sig })
+            } catch { /* unreadable file */ }
           }
         }
         walkDir(memoryDir)
-        log.info(`Learnings: ingested ${localFiles} local memory files`)
-        notify(`${localFiles} local files processed`)
+
+        // Process serially with a yield each — local FS reads are fast but
+        // vectorDbService.addReport hits the embeddings API.
+        let processed = 0
+        for (const c of candidates) {
+          if (processed >= MAX_FILES_PER_RUN) break
+          try {
+            const content = readFileSync(c.fullPath, 'utf-8')
+            if (content.length < 50) {
+              syncManager.markSynced('vector-local', c.sig) // mark short files done so we don't re-stat them
+              continue
+            }
+            await vectorDbService.addReport({
+              id: `local_${c.fullPath.replace(/[^a-zA-Z0-9]/g, '_').slice(-60)}`,
+              discipline: 'osint', title: c.entry.replace('.md', ''),
+              content: content.slice(0, 3000), summary: null, severity: 'info',
+              sourceId: 'local-memory', sourceUrl: null, sourceName: `Local: ${c.entry}`,
+              contentHash: c.fullPath, latitude: null, longitude: null,
+              verificationScore: 50, reviewed: false, createdAt: Date.now(), updatedAt: Date.now()
+            } as any)
+            syncManager.markSynced('vector-local', c.sig)
+            localFiles++
+            processed++
+            if (processed % 5 === 0) await yieldToEventLoop()
+          } catch (err) {
+            log.debug(`Learnings: local file ${c.fullPath} failed: ${err}`)
+          }
+        }
+        log.info(`Learnings: ingested ${localFiles} local memory files (of ${candidates.length} changed)`)
+        notify(`${localFiles} local files processed${candidates.length > processed ? ` (${candidates.length - processed} deferred to next run)` : ''}`)
       } catch (err) {
         log.warn(`Learnings: local memory walk failed (non-fatal): ${err}`)
       }
 
-      // 3. Ingest Obsidian vault — parallel batches of 10 concurrent reads with per-file timeouts
+      // 3. Ingest Obsidian vault — DIFFERENTIAL: skip files whose
+      //    (path, mtime, size) signature matches the last sync. We use the
+      //    `vnd.olrapi.note+json` endpoint which returns content + stat in
+      //    one round-trip, so unchanged files cost us 1 HTTP call each
+      //    (cheap) but skip the EXPENSIVE embedding step entirely.
       try {
         const { obsidianService } = await import('../services/obsidian/ObsidianService')
         const testConn = await withTimeout(obsidianService.testConnection(), 10_000, 'obsidian.testConnection')
@@ -435,47 +610,76 @@ export function registerChatBridge(): void {
           })
 
         if (testConn.success) {
-          const files = await withTimeout(obsidianService.listFiles(), 30_000, 'obsidian.listFiles')
+          // listFilesCached: 5-min cache so back-to-back clicks don't re-walk
+          // the vault (recursive folder API was the bulk of the slowdown).
+          const files = await withTimeout(obsidianService.listFilesCached(), 60_000, 'obsidian.listFilesCached')
             .catch((err) => {
-              log.warn(`Obsidian listFiles failed: ${err}`)
+              log.warn(`Obsidian listFilesCached failed: ${err}`)
               return [] as string[]
             })
           const allMd = files.filter((f: string) => f.endsWith('.md'))
-          const mdFiles = allMd.filter((f: string) => !syncManager.isSynced('vector-obsidian', f))
-          const skipped = allMd.length - mdFiles.length
-          log.info(`Learnings: found ${allMd.length} Obsidian files, ${skipped} already synced, ${mdFiles.length} new`)
-          notify(`Processing ${mdFiles.length} new Obsidian files (${skipped} already synced)...`)
+          log.info(`Learnings: found ${allMd.length} Obsidian files; running differential sync (cap ${MAX_FILES_PER_RUN}/run)`)
+          notify(`Checking ${allMd.length} Obsidian files for changes…`)
 
-          const BATCH_SIZE = 10
-          for (let i = 0; i < mdFiles.length; i += BATCH_SIZE) {
-            const batch = mdFiles.slice(i, i + BATCH_SIZE)
+          // Walk in concurrency-3 batches with a yield between batches.
+          let scanned = 0
+          for (let i = 0; i < allMd.length; i += BATCH_SIZE) {
+            if (obsidianFiles >= MAX_FILES_PER_RUN) {
+              obsidianRemaining = allMd.length - i
+              log.info(`Learnings: hit per-run cap (${MAX_FILES_PER_RUN}); ${obsidianRemaining} files deferred`)
+              break
+            }
+            const batch = allMd.slice(i, i + BATCH_SIZE)
             const results = await Promise.allSettled(
               batch.map(async (filePath: string) => {
-                const content = await withTimeout(obsidianService.readFile(filePath), 30_000, `obsidian.readFile:${filePath}`)
-                if (!content || content.length < 50) return null
+                // Read with stat — single round-trip via note+json.
+                const file = await withTimeout(
+                  obsidianService.readFileWithStat(filePath),
+                  30_000,
+                  `obsidian.readFileWithStat:${filePath}`
+                )
+                const sig = fileSig(filePath, file.mtime, file.size)
+                if (syncManager.isSynced('vector-obsidian', sig)) {
+                  return { skipped: true } as const
+                }
+                if (!file.content || file.content.length < 50) {
+                  syncManager.markSynced('vector-obsidian', sig)
+                  return { skipped: true } as const
+                }
                 await vectorDbService.addReport({
                   id: `obs_${filePath.replace(/[^a-zA-Z0-9]/g, '_').slice(-60)}`,
                   discipline: 'osint',
                   title: filePath.split('/').pop()?.replace('.md', '') || filePath,
-                  content: content.slice(0, 3000), summary: null, severity: 'info',
+                  content: file.content.slice(0, 3000), summary: null, severity: 'info',
                   sourceId: 'obsidian', sourceUrl: null, sourceName: `Obsidian: ${filePath}`,
                   contentHash: filePath, latitude: null, longitude: null,
                   verificationScore: 60, reviewed: false, createdAt: Date.now(), updatedAt: Date.now()
                 } as any)
-                syncManager.markSynced('vector-obsidian', filePath)
-                return filePath
+                syncManager.markSynced('vector-obsidian', sig)
+                return { ingested: true } as const
               })
             )
-            obsidianFiles += results.filter((r) => r.status === 'fulfilled' && r.value).length
+            for (const r of results) {
+              if (r.status === 'fulfilled') {
+                if ('ingested' in r.value && r.value.ingested) obsidianFiles++
+                else if ('skipped' in r.value && r.value.skipped) obsidianSkipped++
+              }
+            }
+            scanned += batch.length
 
-            // Progress update every 25 files (finer grained than before)
-            if (i > 0 && i % 25 === 0) {
-              log.info(`Learnings: Obsidian progress ${i}/${mdFiles.length}`)
-              notify(`Obsidian: ${i}/${mdFiles.length} files...`)
+            // YIELD: critical — give the event loop a chance to service IPC
+            // (chat sends, UI clicks) between batches. Without this, the main
+            // process is monopolised for the duration of the sync.
+            await yieldToEventLoop()
+
+            if (i > 0 && i % 30 === 0) {
+              log.info(`Learnings: Obsidian progress ${scanned}/${allMd.length} (ingested ${obsidianFiles}, unchanged ${obsidianSkipped})`)
+              notify(`Obsidian: ${scanned}/${allMd.length} (${obsidianFiles} new/changed, ${obsidianSkipped} unchanged)`)
             }
           }
-          log.info(`Learnings: ingested ${obsidianFiles} Obsidian files`)
-          notify(`${obsidianFiles} Obsidian files ingested`, 'success')
+
+          log.info(`Learnings: Obsidian sync complete — ${obsidianFiles} ingested, ${obsidianSkipped} unchanged${obsidianRemaining > 0 ? `, ${obsidianRemaining} deferred to next run` : ''}`)
+          notify(`Obsidian: ${obsidianFiles} new/changed, ${obsidianSkipped} unchanged${obsidianRemaining > 0 ? ` (${obsidianRemaining} deferred)` : ''}`, 'success')
         }
       } catch (err) {
         log.warn(`Learnings: Obsidian ingestion failed (non-fatal): ${err}`)

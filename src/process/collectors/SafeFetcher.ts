@@ -10,6 +10,13 @@ export interface FetchOptions {
   headers?: Record<string, string>
   timeout?: number
   maxRetries?: number
+  /** Skip the robots.txt check for this single call. Use ONLY for explicit
+   *  user-initiated actions (e.g. an analyst typing a dark-web search query
+   *  in chat) where the destination's robots.txt blocks crawlers but not
+   *  individual queries — Ahmia disallows /search/ to keep search engines
+   *  out of its index, not to deny access. Audit log still records every
+   *  fetch so the bypass is traceable. */
+  skipRobots?: boolean
 }
 
 export class SafeFetcher {
@@ -101,7 +108,7 @@ export class SafeFetcher {
   }
 
   async fetch(url: string, options: FetchOptions = {}): Promise<Response> {
-    const { headers = {}, timeout = 30000, maxRetries = 3 } = options
+    const { headers = {}, timeout = 30000, maxRetries = 3, skipRobots = false } = options
     const domain = new URL(url).hostname
 
     // SSRF prevention — block private/loopback/link-local IP ranges.
@@ -125,11 +132,16 @@ export class SafeFetcher {
       throw new Error(`Blocked by CSAM blocklist`)
     }
 
-    // Check robots.txt
-    const allowed = await this.robotsChecker.isAllowed(url)
-    if (!allowed) {
-      auditService.log('fetch.robots_blocked', { url, domain })
-      throw new Error(`Blocked by robots.txt: ${url}`)
+    // Check robots.txt — skipped for explicit user-initiated actions
+    // (skipRobots: true). Audit log still records the bypass below.
+    if (!skipRobots) {
+      const allowed = await this.robotsChecker.isAllowed(url)
+      if (!allowed) {
+        auditService.log('fetch.robots_blocked', { url, domain })
+        throw new Error(`Blocked by robots.txt: ${url}`)
+      }
+    } else {
+      auditService.log('fetch.robots_skipped', { url, domain, reason: 'explicit_skip_robots' })
     }
 
     // Acquire rate limit token
@@ -141,26 +153,28 @@ export class SafeFetcher {
       try {
         auditService.log('fetch.start', { url, domain, attempt })
 
-        // SOCKS5 proxy for .onion domains (Theme 7.5 dark-web monitoring).
-        // Non-.onion URLs bypass the proxy entirely.
-        const fetchOpts: RequestInit & { dispatcher?: unknown } = {
-          headers: {
-            'User-Agent': USER_AGENT,
-            Accept: 'application/json, text/xml, application/xml, text/html, */*',
-            ...headers
-          },
-          signal: AbortSignal.timeout(timeout)
-        }
+        let response: Response
+
+        // SOCKS5 proxy for .onion domains. Node's built-in fetch (undici)
+        // silently ignores the legacy `agent` option, so passing
+        // SocksProxyAgent there does NOTHING — the request goes through
+        // the system DNS resolver, which has no .onion records, and fails
+        // instantly with "fetch failed". For .onion we drop down to the
+        // node:http module which DOES honor the agent option, then wrap
+        // the response back into a Web Response so callers don't notice.
         if (domain.endsWith('.onion') && this.socks5Proxy) {
-          try {
-            const { SocksProxyAgent } = await import('socks-proxy-agent')
-            const agent = new SocksProxyAgent(`socks5h://${this.socks5Proxy.host}:${this.socks5Proxy.port}`)
-            ;(fetchOpts as Record<string, unknown>).agent = agent
-          } catch (err) {
-            log.warn(`SafeFetcher: SOCKS5 proxy failed to load: ${(err as Error).message}`)
+          response = await this.fetchOnionViaSocks(url, headers, timeout)
+        } else {
+          const fetchOpts: RequestInit = {
+            headers: {
+              'User-Agent': USER_AGENT,
+              Accept: 'application/json, text/xml, application/xml, text/html, */*',
+              ...headers
+            },
+            signal: AbortSignal.timeout(timeout)
           }
+          response = await fetch(url, fetchOpts)
         }
-        const response = await fetch(url, fetchOpts)
 
         auditService.log('fetch.success', {
           url,
@@ -208,6 +222,80 @@ export class SafeFetcher {
       throw new Error(`HTTP ${response.status} for ${url}`)
     }
     return response.text()
+  }
+
+  /**
+   * Fetch a `.onion` URL via SOCKS5 using node:http (NOT undici fetch,
+   * which silently drops the agent option). The SocksProxyAgent's
+   * `socks5h://` scheme delegates DNS resolution to the SOCKS server (Tor),
+   * so the .onion hostname is resolved inside the Tor network.
+   *
+   * The response is wrapped in a Web Response object so callers of fetch()
+   * see the same shape regardless of clearnet vs. .onion path.
+   *
+   * Only HTTP (not HTTPS) is supported here — onion services typically use
+   * unencrypted HTTP because the Tor circuit itself provides encryption.
+   * If an .onion URL with https:// shows up we still try plain http.
+   */
+  private async fetchOnionViaSocks(url: string, headers: Record<string, string>, timeoutMs: number): Promise<Response> {
+    if (!this.socks5Proxy) throw new Error('SOCKS5 proxy not configured')
+    const { SocksProxyAgent } = await import('socks-proxy-agent')
+    const http = await import('node:http')
+    const https = await import('node:https')
+    const agent = new SocksProxyAgent(`socks5h://${this.socks5Proxy.host}:${this.socks5Proxy.port}`)
+    const parsed = new URL(url)
+    const isHttps = parsed.protocol === 'https:'
+    const lib = isHttps ? https : http
+
+    return new Promise<Response>((resolve, reject) => {
+      const req = (lib as typeof http).request(
+        {
+          hostname: parsed.hostname,
+          port: parsed.port || (isHttps ? 443 : 80),
+          path: parsed.pathname + parsed.search,
+          method: 'GET',
+          headers: {
+            'User-Agent': USER_AGENT,
+            Accept: 'application/json, text/xml, application/xml, text/html, */*',
+            Host: parsed.hostname,
+            ...headers
+          },
+          agent,
+          timeout: timeoutMs,
+          // Onion HTTPS services almost always use self-signed certs because
+          // there's no public CA path for .onion hostnames. The Tor circuit
+          // itself provides confidentiality + endpoint authentication via
+          // the public-key-encoded onion address, so skipping CA validation
+          // is the right default for .onion (NOT for clearnet HTTPS).
+          rejectUnauthorized: false
+        } as Parameters<typeof http.request>[0],
+        (res) => {
+          const chunks: Buffer[] = []
+          res.on('data', (chunk) => chunks.push(chunk))
+          res.on('end', () => {
+            const status = res.statusCode || 500
+            const body = Buffer.concat(chunks).toString('utf-8')
+            const hasBody = status !== 204 && status !== 304
+            // Convert node http headers (string|string[]) to Headers-friendly shape.
+            const respHeaders: Record<string, string> = {}
+            for (const [k, v] of Object.entries(res.headers)) {
+              respHeaders[k] = Array.isArray(v) ? v.join(', ') : (v as string)
+            }
+            resolve(new Response(hasBody ? body : null, {
+              status,
+              statusText: res.statusMessage || '',
+              headers: respHeaders
+            }))
+          })
+        }
+      )
+      req.on('error', reject)
+      req.on('timeout', () => {
+        req.destroy()
+        reject(new Error(`Onion fetch timed out after ${timeoutMs}ms via SOCKS5 ${this.socks5Proxy?.host}:${this.socks5Proxy?.port}`))
+      })
+      req.end()
+    })
   }
 
   getRateLimitUsage(domain: string): { available: number; max: number } {

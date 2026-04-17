@@ -34,6 +34,10 @@ import { registerPhase5Bridge } from './phase5Bridge'
 import { registerRedactionBridge } from './redactionBridge'
 import { registerWargameBridge } from './wargameBridge'
 import { registerMcpBridge } from './mcpBridge'
+import { registerTorBridge } from './torBridge'
+import { registerDarkWebBridge } from './darkwebBridge'
+import { registerDarkWebExplorerBridge } from './darkwebExplorerBridge'
+import { registerTelegramIntelBridge } from './telegramIntelBridge'
 import log from 'electron-log'
 
 export function registerAllBridges(): void {
@@ -73,5 +77,9 @@ export function registerAllBridges(): void {
   registerRedactionBridge()
   registerWargameBridge()
   registerMcpBridge()
+  registerTorBridge()
+  registerDarkWebBridge()
+  registerDarkWebExplorerBridge()
+  registerTelegramIntelBridge()
   log.info('All IPC bridges registered')
 }

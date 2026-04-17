@@ -1920,6 +1920,252 @@ const migrations: Migration[] = [
       }
       log.info('Migration 034: performance indexes (4 composite indexes added)')
     }
+  },
+  {
+    version: '035',
+    name: 'chat_messages_thinking_trail',
+    up: (db) => {
+      // Persist the full streamed "thinking" trail (planning steps,
+      // tool calls, dark-web search progress, intermediate analyses) for
+      // each assistant chat message so the analyst can review it later
+      // via "Show thinking" on the response card. Nullable: legacy rows
+      // and rows from non-streaming code paths simply have no trail.
+      const cols = db.prepare("PRAGMA table_info(chat_messages)").all() as Array<{ name: string }>
+      if (!cols.some((c) => c.name === 'thinking_trail')) {
+        db.exec('ALTER TABLE chat_messages ADD COLUMN thinking_trail TEXT')
+        log.info('Migration 035: chat_messages.thinking_trail column added')
+      } else {
+        log.info('Migration 035: chat_messages.thinking_trail already present, skipping')
+      }
+    }
+  },
+  {
+    version: '036',
+    name: 'intel_reports_fts5',
+    up: (db) => {
+      // FTS5 full-text index over intel_reports — replaces the LIKE-AND
+      // chain in IntelRagService.searchReports with BM25-ranked search,
+      // prefix matching, phrase queries, AND/OR/NOT operators, and Porter
+      // stemming so "weapon" matches "weapons" / "weaponize" / "weaponry".
+      //
+      // Schema: external-content FTS5 table — the actual text lives in
+      // intel_reports; the FTS table just stores tokens + the rowid mapping.
+      // This halves the disk footprint vs. duplicating the content column.
+      try {
+        db.exec(`
+          CREATE VIRTUAL TABLE IF NOT EXISTS intel_reports_fts USING fts5(
+            title,
+            content,
+            summary,
+            source_name,
+            content='intel_reports',
+            content_rowid='rowid',
+            tokenize='porter unicode61 remove_diacritics 2'
+          );
+        `)
+      } catch (err) {
+        log.warn(`Migration 036: FTS5 virtual table creation failed (${err}). FTS5 may not be compiled into this SQLite build — search will fall back to LIKE.`)
+        return
+      }
+
+      // Backfill: insert every existing report. On a vault with 100K+ rows
+      // this can take 30-60s; surfaced via electron-log so the user sees it.
+      const total = (db.prepare('SELECT COUNT(*) AS c FROM intel_reports').get() as { c: number }).c
+      const ftsTotal = (db.prepare('SELECT COUNT(*) AS c FROM intel_reports_fts').get() as { c: number }).c
+      if (ftsTotal < total) {
+        log.info(`Migration 036: backfilling FTS5 index for ${total} reports (${ftsTotal} already indexed)…`)
+        const start = Date.now()
+        // INSERT INTO ... SELECT inside a single transaction is the fastest
+        // path for FTS5 backfill — better-sqlite3 wraps it in WAL.
+        db.exec(`
+          INSERT INTO intel_reports_fts(rowid, title, content, summary, source_name)
+          SELECT rowid,
+                 COALESCE(title, ''),
+                 COALESCE(content, ''),
+                 COALESCE(summary, ''),
+                 COALESCE(source_name, '')
+          FROM intel_reports
+          WHERE rowid NOT IN (SELECT rowid FROM intel_reports_fts);
+        `)
+        log.info(`Migration 036: FTS5 backfill complete in ${Date.now() - start}ms`)
+      } else {
+        log.info(`Migration 036: FTS5 already in sync (${ftsTotal} rows), no backfill needed`)
+      }
+
+      // Triggers — keep FTS in sync with intel_reports going forward.
+      // BEFORE/AFTER + DELETE-INSERT pattern handles partial updates safely.
+      db.exec(`
+        CREATE TRIGGER IF NOT EXISTS intel_reports_fts_ai
+        AFTER INSERT ON intel_reports BEGIN
+          INSERT INTO intel_reports_fts(rowid, title, content, summary, source_name)
+          VALUES (new.rowid,
+                  COALESCE(new.title, ''),
+                  COALESCE(new.content, ''),
+                  COALESCE(new.summary, ''),
+                  COALESCE(new.source_name, ''));
+        END;
+
+        CREATE TRIGGER IF NOT EXISTS intel_reports_fts_ad
+        AFTER DELETE ON intel_reports BEGIN
+          INSERT INTO intel_reports_fts(intel_reports_fts, rowid, title, content, summary, source_name)
+          VALUES ('delete', old.rowid,
+                  COALESCE(old.title, ''),
+                  COALESCE(old.content, ''),
+                  COALESCE(old.summary, ''),
+                  COALESCE(old.source_name, ''));
+        END;
+
+        CREATE TRIGGER IF NOT EXISTS intel_reports_fts_au
+        AFTER UPDATE ON intel_reports BEGIN
+          INSERT INTO intel_reports_fts(intel_reports_fts, rowid, title, content, summary, source_name)
+          VALUES ('delete', old.rowid,
+                  COALESCE(old.title, ''),
+                  COALESCE(old.content, ''),
+                  COALESCE(old.summary, ''),
+                  COALESCE(old.source_name, ''));
+          INSERT INTO intel_reports_fts(rowid, title, content, summary, source_name)
+          VALUES (new.rowid,
+                  COALESCE(new.title, ''),
+                  COALESCE(new.content, ''),
+                  COALESCE(new.summary, ''),
+                  COALESCE(new.source_name, ''));
+        END;
+      `)
+      log.info('Migration 036: FTS5 sync triggers installed')
+    }
+  },
+  {
+    version: '037',
+    name: 'intel_reports_fts5_inplace_rebuild',
+    up: (db) => {
+      // Migration 036 created an external-content FTS5 table and tried to
+      // populate it via INSERT INTO … SELECT. That pattern works for
+      // INTERNAL-content FTS5 tables but is wrong for external-content
+      // (content='intel_reports'): for external content the rowid mapping
+      // is recorded but the term inverted-index is left empty, so MATCH
+      // returns near-zero hits.
+      //
+      // The fix is to issue the FTS5 'rebuild' command. It re-reads every
+      // source row (via the content= reference) and rebuilds the inverted
+      // index in place — non-destructive, no DROP TABLE required.
+      //
+      // We avoid DROP TABLE here because on the encrypted SQLite build
+      // (sqlite-multiple-ciphers) the previous 037 attempt corrupted the
+      // database file at boot ("file is not a database"). The in-place
+      // rebuild is safer + faster.
+      try {
+        const probe = db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'intel_reports_fts'").get()
+        if (!probe) {
+          log.info('Migration 037: intel_reports_fts table missing (likely 036 failed); skipping rebuild')
+          return
+        }
+        const total = (db.prepare('SELECT COUNT(*) AS c FROM intel_reports').get() as { c: number }).c
+        log.info(`Migration 037: in-place FTS5 inverted-index rebuild for ${total} reports…`)
+        const start = Date.now()
+        db.exec(`INSERT INTO intel_reports_fts(intel_reports_fts) VALUES('rebuild');`)
+        log.info(`Migration 037: FTS5 rebuild complete in ${Date.now() - start}ms`)
+
+        // Optional: also run 'optimize' to merge index segments for faster
+        // MATCH queries. Cheap (<100ms on 60K rows), worth doing once.
+        try {
+          db.exec(`INSERT INTO intel_reports_fts(intel_reports_fts) VALUES('optimize');`)
+          log.info('Migration 037: FTS5 optimize complete')
+        } catch (err) {
+          log.debug(`Migration 037: optimize skipped (${err})`)
+        }
+      } catch (err) {
+        log.error(`Migration 037 failed (non-fatal — search will fall back to LIKE): ${err}`)
+        // Swallow rather than throw — a botched FTS rebuild shouldn't
+        // brick the whole boot. searchReports has a LIKE fallback.
+      }
+    }
+  },
+  {
+    version: '038',
+    name: 'darkweb_seeds_and_host_health',
+    up: (db) => {
+      // darkweb_seeds — curated + user-added queries that the DarkWeb
+      // Explorer page sweeps to populate intel. Each row is one search
+      // term with category, hit-count, and last-run metadata.
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS darkweb_seeds (
+          id TEXT PRIMARY KEY,
+          category TEXT NOT NULL,
+          query TEXT NOT NULL,
+          description TEXT,
+          enabled INTEGER NOT NULL DEFAULT 1,
+          is_custom INTEGER NOT NULL DEFAULT 0,
+          last_run_at INTEGER,
+          last_error TEXT,
+          hit_count INTEGER NOT NULL DEFAULT 0,
+          created_at INTEGER NOT NULL,
+          UNIQUE(category, query)
+        );
+        CREATE INDEX IF NOT EXISTS idx_darkweb_seeds_enabled ON darkweb_seeds(enabled, category);
+      `)
+
+      // darkweb_host_health — track per-onion-hostname fetch reliability.
+      // Used by the stale-onion pruner: after N consecutive failures the
+      // hostname is quarantined and excluded from refresh sweeps until
+      // the analyst manually un-quarantines or it succeeds via direct
+      // call (e.g. ahmia returns it again in a new search).
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS darkweb_host_health (
+          hostname TEXT PRIMARY KEY,
+          consecutive_failures INTEGER NOT NULL DEFAULT 0,
+          total_failures INTEGER NOT NULL DEFAULT 0,
+          total_successes INTEGER NOT NULL DEFAULT 0,
+          last_success_at INTEGER,
+          last_failure_at INTEGER,
+          last_error TEXT,
+          quarantined INTEGER NOT NULL DEFAULT 0,
+          quarantined_at INTEGER,
+          updated_at INTEGER NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_dwhh_quarantined ON darkweb_host_health(quarantined);
+      `)
+
+      log.info('Migration 038: darkweb_seeds + darkweb_host_health tables created')
+    }
+  },
+  {
+    version: '039',
+    name: 'telegram_intel_queue',
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS telegram_intel_queue (
+          id TEXT PRIMARY KEY,
+          telegram_message_id INTEGER NOT NULL,
+          telegram_chat_id INTEGER NOT NULL,
+          sender_id INTEGER,
+          sender_username TEXT,
+          sender_name TEXT,
+          message_date INTEGER NOT NULL,
+          message_type TEXT NOT NULL DEFAULT 'text',
+          text_content TEXT,
+          media_file_id TEXT,
+          media_local_path TEXT,
+          media_mime_type TEXT,
+          urls TEXT,
+          onion_urls TEXT,
+          forward_from_name TEXT,
+          forward_from_chat_title TEXT,
+          raw_json TEXT,
+          status TEXT NOT NULL DEFAULT 'pending',
+          rejection_reason TEXT,
+          analyst_notes TEXT,
+          ingested_report_ids TEXT,
+          reviewed_at INTEGER,
+          reviewed_by TEXT,
+          created_at INTEGER NOT NULL,
+          UNIQUE(telegram_chat_id, telegram_message_id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_tiq_status ON telegram_intel_queue(status, created_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_tiq_sender ON telegram_intel_queue(sender_id);
+        CREATE INDEX IF NOT EXISTS idx_tiq_date ON telegram_intel_queue(message_date DESC);
+      `)
+      log.info('Migration 039: telegram_intel_queue table created')
+    }
   }
 ]
 

@@ -82,10 +82,27 @@ async function initializeDeferred(): Promise<void> {
   }
 
   // Dark-web SOCKS5 proxy (Tor) — only enabled when the user opts in.
+  // After binding SafeFetcher, also probe + register the running Tor with
+  // TorService so its `getState()` reflects reality. Without this, the
+  // chat-time `onion_fetch` tool's pre-check would reject calls (state
+  // stays 'stopped' across restarts even though the proxy IS bound from
+  // settings) — analyst would have to manually click "Connect to Tor"
+  // every restart. Probe is non-blocking + best-effort.
   const darkWeb = settingsService.get<DarkWebConfig>('darkWeb')
   if (darkWeb?.enabled) {
     safeFetcher.setSocks5(darkWeb.socks5Host || '127.0.0.1', darkWeb.socks5Port || 9050)
     log.info(`darkweb: SOCKS5 proxy enabled at ${darkWeb.socks5Host || '127.0.0.1'}:${darkWeb.socks5Port || 9050}`)
+    // Sync TorService state so onion_fetch's pre-check sees a live Tor.
+    void (async () => {
+      try {
+        const { torService } = await import('./services/darkweb/TorService')
+        const r = await torService.connect()
+        if (r.ok) log.info(`darkweb: Tor auto-attached (${r.mode})`)
+        else log.debug(`darkweb: Tor auto-attach failed (${r.error}) — analyst must connect manually`)
+      } catch (err) {
+        log.debug(`darkweb: Tor auto-attach exception: ${err}`)
+      }
+    })()
   }
 
   // MCP servers — spawn child processes for each enabled server, register

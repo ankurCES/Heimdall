@@ -17,7 +17,72 @@ export interface WatchTerm {
 }
 
 export class WatchTermsService {
-  // Extract search terms from recommended actions and add as watch terms
+  /**
+   * Extract search terms from recommended actions and information gaps.
+   *
+   * Uses regex extraction for the initial term seed, then asks the LLM to
+   * refine each batch into well-scoped, monitor-able phrases (drops generic
+   * verbs like "increase monitoring", adds geographic/domain context).
+   *
+   * Async because the LLM refinement step is async; the legacy sync caller
+   * (`extractFromActions`) is kept as a regex-only fallback for code paths
+   * that can't await.
+   */
+  async extractFromActionsRefined(prelimReportId: string, connectionId?: string): Promise<number> {
+    const db = getDatabase()
+    const now = timestamp()
+    const { refineWatchTerms } = await import('../llm/SearchRefiner')
+
+    const actions = db.prepare(
+      'SELECT id, action, priority FROM recommended_actions WHERE preliminary_report_id = ?'
+    ).all(prelimReportId) as Array<{ id: string; action: string; priority: string }>
+
+    let added = 0
+
+    // Refine actions in one LLM call (concat into a single context string).
+    if (actions.length > 0) {
+      const rawTerms = actions.flatMap((a) => this.extractKeyTerms(a.action))
+      const ctx = actions.map((a) => `[${a.priority}] ${a.action}`).join('\n')
+      const refined = await refineWatchTerms(rawTerms, ctx, 'recommended_action', connectionId)
+      // Round-robin attribute refined terms back to actions by priority.
+      for (let i = 0; i < refined.length; i++) {
+        const term = refined[i]
+        if (this.termExists(term)) continue
+        const owner = actions[i % actions.length]
+        db.prepare(
+          'INSERT INTO watch_terms (id, term, source, source_id, category, priority, enabled, hits, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, 1, 0, ?, ?)'
+        ).run(generateId(), term, 'action', owner.id, 'recommended_action', owner.priority, now, now)
+        added++
+      }
+    }
+
+    // Same for gaps.
+    const gaps = db.prepare(
+      'SELECT id, description, severity FROM intel_gaps WHERE preliminary_report_id = ?'
+    ).all(prelimReportId) as Array<{ id: string; description: string; severity: string }>
+
+    if (gaps.length > 0) {
+      const rawTerms = gaps.flatMap((g) => this.extractKeyTerms(g.description))
+      const ctx = gaps.map((g) => `[${g.severity}] ${g.description}`).join('\n')
+      const refined = await refineWatchTerms(rawTerms, ctx, 'information_gap', connectionId)
+      for (let i = 0; i < refined.length; i++) {
+        const term = refined[i]
+        if (this.termExists(term)) continue
+        const owner = gaps[i % gaps.length]
+        db.prepare(
+          'INSERT INTO watch_terms (id, term, source, source_id, category, priority, enabled, hits, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, 1, 0, ?, ?)'
+        ).run(generateId(), term, 'gap', owner.id, 'information_gap', owner.severity, now, now)
+        added++
+      }
+    }
+
+    if (added > 0) log.info(`WatchTerms: extracted ${added} LLM-refined terms from preliminary report ${prelimReportId.slice(0, 8)}`)
+    return added
+  }
+
+  /** Legacy regex-only extractor — used only as a sync fallback when the
+   *  caller can't await (e.g. inside synchronous DB transactions). New code
+   *  should call `extractFromActionsRefined` instead. */
   extractFromActions(prelimReportId: string): number {
     const db = getDatabase()
     const now = timestamp()
@@ -54,7 +119,7 @@ export class WatchTermsService {
       }
     }
 
-    if (added > 0) log.info(`WatchTerms: extracted ${added} terms from preliminary report ${prelimReportId.slice(0, 8)}`)
+    if (added > 0) log.info(`WatchTerms: extracted ${added} terms (regex-only) from preliminary report ${prelimReportId.slice(0, 8)}`)
     return added
   }
 

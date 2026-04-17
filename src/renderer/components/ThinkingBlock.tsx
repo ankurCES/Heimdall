@@ -1,29 +1,33 @@
 import { useState } from 'react'
-import { ChevronDown, ChevronRight, Brain, Search, BarChart3, Wrench, Check, X, Loader2 } from 'lucide-react'
+import { ChevronDown, ChevronRight, Brain, Search, BarChart3, Wrench, Check, Loader2, ListChecks, Cpu } from 'lucide-react'
 import { cn } from '@renderer/lib/utils'
 import { MarkdownRenderer } from './MarkdownRenderer'
 
 interface ThinkingStep {
   label: string
   content: string
-  type: 'planning' | 'researching' | 'analyzing' | 'tool' | 'searching'
+  type: 'planning' | 'plan' | 'researching' | 'analyzing' | 'tool' | 'searching' | 'model'
   status: 'running' | 'done'
 }
 
 const STEP_ICONS = {
   planning: Brain,
+  plan: ListChecks,
   researching: Search,
   analyzing: BarChart3,
   searching: Search,
-  tool: Wrench
+  tool: Wrench,
+  model: Cpu
 }
 
 const STEP_COLORS = {
   planning: 'text-violet-400 border-violet-400/20 bg-violet-400/5',
+  plan: 'text-fuchsia-400 border-fuchsia-400/20 bg-fuchsia-400/5',
   researching: 'text-blue-400 border-blue-400/20 bg-blue-400/5',
   analyzing: 'text-green-400 border-green-400/20 bg-green-400/5',
   searching: 'text-cyan-400 border-cyan-400/20 bg-cyan-400/5',
-  tool: 'text-amber-400 border-amber-400/20 bg-amber-400/5'
+  tool: 'text-amber-400 border-amber-400/20 bg-amber-400/5',
+  model: 'text-indigo-400 border-indigo-400/20 bg-indigo-400/5'
 }
 
 // Parse thinking steps from streaming content
@@ -35,16 +39,24 @@ export function parseThinkingSteps(content: string): { steps: ThinkingStep[]; fi
   let inThinking = false
 
   for (const line of lines) {
-    // Match **[Label]** or **[Label X/Y]** patterns
-    const stepMatch = line.match(/^\*\*\[(Planning|Researching|Research|Analyzing|Searching|Tool)[^\]]*\]\*\*\s*(.*)$/i)
+    // Match **[Label]** or **[Label X/Y]** patterns. Recognised labels:
+    //   Planning, Plan, Model routing, Researching, Research X/Y, Analyzing,
+    //   Searching, Tool: <name>, Executing: <name>, No data found.
+    const stepMatch = line.match(/^\*\*\[(Planning|Plan|Model routing|Model|Researching|Research|Analyzing|Searching|Tool|Executing|No data found)[^\]]*\]\*\*\s*(.*)$/i)
 
     if (stepMatch) {
       // Save previous step
       if (currentStep) steps.push(currentStep)
 
       const label = stepMatch[0].replace(/\*\*/g, '').trim()
-      const type = stepMatch[1].toLowerCase().startsWith('research') ? 'researching' as const :
-        stepMatch[1].toLowerCase() as ThinkingStep['type']
+      const kindLower = stepMatch[1].toLowerCase()
+      const type: ThinkingStep['type'] =
+        kindLower === 'plan' ? 'plan' :
+        kindLower === 'model routing' || kindLower === 'model' ? 'model' :
+        kindLower.startsWith('research') ? 'researching' :
+        kindLower === 'executing' ? 'tool' :
+        kindLower === 'no data found' ? 'searching' :
+        (kindLower as ThinkingStep['type'])
 
       currentStep = {
         label,
@@ -83,7 +95,7 @@ export function parseThinkingSteps(content: string): { steps: ThinkingStep[]; fi
   return { steps, finalContent: finalLines.join('\n').trim() }
 }
 
-export function ThinkingBlocks({ content, isStreaming }: { content: string; isStreaming: boolean }) {
+export function ThinkingBlocks({ content, isStreaming, expanded }: { content: string; isStreaming: boolean; expanded?: boolean }) {
   const { steps, finalContent } = parseThinkingSteps(content)
 
   if (steps.length === 0) {
@@ -92,9 +104,16 @@ export function ThinkingBlocks({ content, isStreaming }: { content: string; isSt
 
   return (
     <div className="space-y-2">
-      {/* Thinking steps — collapsible */}
+      {/* Thinking steps — collapsible. In the popup (expanded=true) show
+          full content per step; in the live card cap at 500 chars to keep
+          the running progress compact. */}
       {steps.map((step, i) => (
-        <CollapsibleStep key={i} step={step} defaultOpen={isStreaming && i === steps.length - 1} />
+        <CollapsibleStep
+          key={i}
+          step={step}
+          defaultOpen={expanded || (isStreaming && i === steps.length - 1)}
+          truncate={!expanded}
+        />
       ))}
 
       {/* Final analysis content */}
@@ -107,7 +126,7 @@ export function ThinkingBlocks({ content, isStreaming }: { content: string; isSt
   )
 }
 
-function CollapsibleStep({ step, defaultOpen }: { step: ThinkingStep; defaultOpen: boolean }) {
+function CollapsibleStep({ step, defaultOpen, truncate = true }: { step: ThinkingStep; defaultOpen: boolean; truncate?: boolean }) {
   const [open, setOpen] = useState(defaultOpen)
   const Icon = STEP_ICONS[step.type] || Brain
   const colors = STEP_COLORS[step.type] || STEP_COLORS.planning
@@ -128,8 +147,8 @@ function CollapsibleStep({ step, defaultOpen }: { step: ThinkingStep; defaultOpe
         )}
       </button>
       {open && step.content && (
-        <div className="px-3 pb-2 text-[11px] opacity-80 whitespace-pre-wrap border-t border-current/10">
-          {step.content.slice(0, 500)}
+        <div className="px-3 pb-2 pt-2 text-[11px] opacity-80 whitespace-pre-wrap border-t border-current/10 font-mono leading-relaxed">
+          {truncate ? step.content.slice(0, 500) : step.content}
         </div>
       )}
     </div>

@@ -1,7 +1,7 @@
 import { NavLink } from 'react-router-dom'
 import { useState, useEffect } from 'react'
 import {
-  LayoutDashboard, FileText, Database, Bell, Map, MessageSquare,
+  LayoutDashboard, FileText, Database, Bell, Map, MessageSquare, Send,
   Settings, Activity, BookOpen, Coins, BarChart3, Radio,
   Layers, RefreshCw, Sparkles, Eye, AlertOctagon, GitCompare, TrendingUp,
   Network, Users, ShieldAlert, Shield, Bug, Moon, MapPin, Image, Share2, Brain, ChevronLeft, ChevronRight, ChevronDown
@@ -44,6 +44,7 @@ const NAV_GROUPS: NavGroup[] = [
       { to: '/entities', icon: Users, label: 'Entities' },
       { to: '/counterintel', icon: ShieldAlert, label: 'Counter-intel' },
       { to: '/cybint', icon: Shield, label: 'CYBINT' },
+      { to: '/darkweb', icon: Moon, label: 'Dark Web' },
       { to: '/overnight', icon: Moon, label: 'Overnight' },
       { to: '/anomalies', icon: Activity, label: 'Anomalies' },
       { to: '/images', icon: Image, label: 'Images' },
@@ -67,7 +68,8 @@ const NAV_GROUPS: NavGroup[] = [
       { to: '/chat', icon: MessageSquare, label: 'Chat' },
       { to: '/memory', icon: Brain, label: 'Memory' },
       { to: '/alerts', icon: Bell, label: 'Alerts' },
-      { to: '/meshtastic', icon: Radio, label: 'Meshtastic' }
+      { to: '/meshtastic', icon: Radio, label: 'Meshtastic' },
+      { to: '/telegram-intel', icon: Send, label: 'Telegram Intel' }
     ]
   },
   {
