@@ -1,5 +1,7 @@
 import { BaseCollector } from '../BaseCollector'
 import type { IntelReport, ThreatLevel } from '@common/types/intel'
+import { getDatabase } from '../../services/database'
+import { generateId } from '@common/utils/id'
 import log from 'electron-log'
 
 // Commodity & Energy Price Tracker
@@ -95,8 +97,6 @@ export class CommodityCollector extends BaseCollector {
 
       // Dual-write to market_quotes table for time-series charts
       try {
-        const { getDatabase } = require('../../services/database')
-        const { generateId } = require('@common/utils/id')
         const db = getDatabase()
         const stmt = db.prepare(
           'INSERT INTO market_quotes (id, ticker, name, category, price, change_pct, change_abs, prev_close, currency, recorded_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
@@ -117,7 +117,7 @@ export class CommodityCollector extends BaseCollector {
         tx()
         log.debug(`market_quotes: inserted ${quotes.length} quotes`)
       } catch (err) {
-        log.debug(`market_quotes write failed: ${err}`)
+        log.warn(`market_quotes write failed: ${err}`)
       }
 
       for (const quote of quotes) {
