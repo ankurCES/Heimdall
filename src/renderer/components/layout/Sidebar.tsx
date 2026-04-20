@@ -69,7 +69,8 @@ const NAV_GROUPS: NavGroup[] = [
       { to: '/memory', icon: Brain, label: 'Memory' },
       { to: '/alerts', icon: Bell, label: 'Alerts' },
       { to: '/meshtastic', icon: Radio, label: 'Meshtastic' },
-      { to: '/telegram-intel', icon: Send, label: 'Telegram Intel' }
+      { to: '/telegram-intel', icon: Send, label: 'Telegram Intel' },
+      { to: '/workflows', icon: GitCompare, label: 'Workflows' }
     ]
   },
   {

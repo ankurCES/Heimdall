@@ -34,6 +34,7 @@ import { StixPage } from './pages/stix/StixPage'
 import { MemoryPage } from './pages/memory/MemoryPage'
 import { DarkWebPage } from './pages/darkweb/DarkWebPage'
 import { TelegramIntelPage } from './pages/telegram-intel/TelegramIntelPage'
+import { WorkflowEditorPage } from './pages/workflows/WorkflowEditorPage'
 import { Phase5Page } from './pages/phase5/Phase5Page'
 import { Toaster } from 'sonner'
 import { NotificationListener } from './components/NotificationListener'
@@ -84,6 +85,7 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
           <Route path="/memory" element={<MemoryPage />} />
           <Route path="/darkweb" element={<DarkWebPage />} />
           <Route path="/telegram-intel" element={<TelegramIntelPage />} />
+          <Route path="/workflows" element={<WorkflowEditorPage />} />
           <Route path="/advanced" element={<Phase5Page />} />
           <Route path="/sync" element={<SyncPage />} />
           <Route path="/tokens" element={<TokensPage />} />

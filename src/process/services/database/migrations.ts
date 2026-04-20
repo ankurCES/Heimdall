@@ -2166,6 +2166,42 @@ const migrations: Migration[] = [
       `)
       log.info('Migration 039: telegram_intel_queue table created')
     }
+  },
+  {
+    version: '040',
+    name: 'workflows',
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS workflows (
+          id TEXT PRIMARY KEY,
+          name TEXT NOT NULL,
+          description TEXT,
+          nodes_json TEXT NOT NULL DEFAULT '[]',
+          edges_json TEXT NOT NULL DEFAULT '[]',
+          is_preset INTEGER NOT NULL DEFAULT 0,
+          is_custom_template INTEGER NOT NULL DEFAULT 0,
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_workflows_preset ON workflows(is_preset);
+
+        CREATE TABLE IF NOT EXISTS workflow_runs (
+          id TEXT PRIMARY KEY,
+          workflow_id TEXT NOT NULL,
+          status TEXT NOT NULL DEFAULT 'pending',
+          inputs_json TEXT,
+          outputs_json TEXT,
+          node_states_json TEXT,
+          started_at INTEGER,
+          finished_at INTEGER,
+          error TEXT,
+          created_at INTEGER NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_workflow_runs_wf ON workflow_runs(workflow_id, created_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_workflow_runs_status ON workflow_runs(status);
+      `)
+      log.info('Migration 040: workflows + workflow_runs tables created')
+    }
   }
 ]
 

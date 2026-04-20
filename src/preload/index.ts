@@ -115,15 +115,19 @@ const testChannels = [
   'telegram-intel:list', 'telegram-intel:get',
   'telegram-intel:approve', 'telegram-intel:reject',
   'telegram-intel:bulk_approve', 'telegram-intel:bulk_reject',
-  'telegram-intel:delete', 'telegram-intel:media_preview', 'telegram-intel:pending_count'
+  'telegram-intel:delete', 'telegram-intel:media_preview', 'telegram-intel:pending_count',
+  'workflow:node_types', 'workflow:register_custom_node',
+  'workflow:list', 'workflow:get', 'workflow:save', 'workflow:delete',
+  'workflow:execute', 'workflow:runs'
 ]
 const allowedChannels = [...Object.values(IPC_CHANNELS), ...testChannels]
 const chatEvents = ['chat:chunk', 'chat:done', 'chat:error', 'chat:planRefined']
 const darkwebEvents = ['darkweb:refresh_progress', 'darkweb:refresh_complete',
   'darkweb:seed_progress', 'darkweb:enrich_progress', 'darkweb:crawl_progress']
 const telegramIntelEvents = ['telegram-intel:status_update', 'telegram-intel:new_message']
+const workflowEvents = ['workflow:node_progress', 'workflow:run_complete']
 const syncEvents = ['sync:progress', 'enrichment:progress', 'watch:hits', 'markets:backfillProgress']
-const allowedEvents = [...Object.values(IPC_EVENTS), ...chatEvents, ...syncEvents, ...darkwebEvents, ...telegramIntelEvents]
+const allowedEvents = [...Object.values(IPC_EVENTS), ...chatEvents, ...syncEvents, ...darkwebEvents, ...telegramIntelEvents, ...workflowEvents]
 
 const api = {
   invoke: (channel: string, ...args: unknown[]): Promise<unknown> => {

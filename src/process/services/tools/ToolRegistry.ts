@@ -256,6 +256,16 @@ your query straight to FTS5.`,
         try { extractedUrls.push(new URL(href, fetchUrl).href) } catch { /* */ }
       }
 
+      // Extract image URLs from raw HTML.
+      const imgMatches = html.match(/(?:<img[^>]+src=["']([^"']+)["']|<meta[^>]+content=["'](https?:\/\/[^"']+\.(?:jpg|jpeg|png|gif|webp))[^"']*["'])/gi) || []
+      const extractedImageUrls: string[] = []
+      for (const match of imgMatches) {
+        const srcMatch = match.match(/(?:src|content)=["']([^"']+)["']/i)
+        if (srcMatch?.[1] && !srcMatch[1].startsWith('data:')) {
+          try { extractedImageUrls.push(new URL(srcMatch[1], fetchUrl).href) } catch { /* */ }
+        }
+      }
+
       // Strip to text.
       const text = html
         .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, ' ')
@@ -264,7 +274,7 @@ your query straight to FTS5.`,
         .replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&')
         .replace(/\s+/g, ' ').trim()
 
-      return { output: text.slice(0, 3000), data: { url: fetchUrl, extractedUrls } }
+      return { output: text.slice(0, 3000), data: { url: fetchUrl, extractedUrls, extractedImageUrls } }
     })
 
     // ── Onion Fetch (Tor-routed) ──
@@ -322,6 +332,16 @@ your query straight to FTS5.`,
           }
         }
 
+        // Extract image URLs from raw HTML.
+        const imgMatches = html.match(/(?:<img[^>]+src=["']([^"']+)["']|<meta[^>]+content=["'](https?:\/\/[^"']+\.(?:jpg|jpeg|png|gif|webp))[^"']*["'])/gi) || []
+        const extractedImageUrls: string[] = []
+        for (const match of imgMatches) {
+          const srcMatch = match.match(/(?:src|content)=["']([^"']+)["']/i)
+          if (srcMatch?.[1] && !srcMatch[1].startsWith('data:')) {
+            try { extractedImageUrls.push(new URL(srcMatch[1], url).href) } catch { /* */ }
+          }
+        }
+
         // Strip HTML / scripts / styles for a readable text excerpt.
         const text = html
           .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, ' ')
@@ -335,7 +355,7 @@ your query straight to FTS5.`,
           .trim()
         return {
           output: `[onion:${parsed.hostname}] (${text.length} chars text / ${html.length} chars HTML)\n${text.slice(0, maxChars)}${text.length > maxChars ? '\n…[truncated]' : ''}`,
-          data: { url, hostname: parsed.hostname, text, extractedUrls, htmlLength: html.length, textLength: text.length }
+          data: { url, hostname: parsed.hostname, text, extractedUrls, extractedImageUrls, htmlLength: html.length, textLength: text.length }
         }
       } catch (err) {
         return { output: `Onion fetch failed for ${parsed.hostname}: ${(err as Error).message}`, error: String(err) }

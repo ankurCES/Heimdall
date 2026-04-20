@@ -6,8 +6,9 @@ import { settingsService } from '../settings/SettingsService'
 import { agenticPlanStore, makeCall, type PlanPreview, type PlanStep, type ProposedToolCall } from './AgenticPlanStore'
 import { refineProposedCalls } from './SearchRefiner'
 import { detectFollowUp, buildContext, type QueryIntent } from './FollowUpDetector'
-import { ResearchCrawler, type Finding, type CrawlStats } from './ResearchCrawler'
+import { AdaptiveCrawler, type Finding, type CrawlStats, type DiscoveredImage } from './AdaptiveCrawler'
 import { FileIngester, type IngestedFile } from './FileIngester'
+import { ResearchImageIngester } from './ResearchImageIngester'
 import { generateId } from '@common/utils/id'
 import type { DarkWebConfig } from '@common/types/settings'
 import type { PlanEdits } from './AgenticChatOrchestrator'
@@ -102,6 +103,7 @@ export interface PreliminaryFindings {
   cvesResolved: number
   domainsResolved: number
   actorsDetected: string[]
+  imagesDiscovered: number
   crawlStats: CrawlStats
   downloadedFiles: IngestedFile[]
   /** Truncated text summaries of top findings for the modal. */
@@ -184,13 +186,15 @@ export class DeepResearchAgent {
     onChunk?.(`**[Plan]** ${rawSteps.length} research tasks:\n${rawSteps.map((s, i) => `  ${i + 1}. ${s.task}`).join('\n')}\n\n`)
 
     // Phase 2: Auto-research (exhaustive, no time cap).
-    const crawler = new ResearchCrawler(onChunk)
+    const crawler = new AdaptiveCrawler(onChunk)
     const fileIngester = new FileIngester(sessionId)
+    const imageIngester = new ResearchImageIngester(sessionId)
     const allFindings: string[] = []
     const findings: PreliminaryFindings = {
       internalHits: 0, webPagesCrawled: 0, darkwebPagesCrawled: 0,
       filesDownloaded: 0, filesIngested: 0, cvesResolved: 0,
-      domainsResolved: 0, actorsDetected: [], crawlStats: crawler.getStats(),
+      domainsResolved: 0, actorsDetected: [], imagesDiscovered: 0,
+      crawlStats: crawler.getStats(),
       downloadedFiles: [], topFindings: []
     }
 
@@ -198,7 +202,7 @@ export class DeepResearchAgent {
     for (let i = 0; i < rawSteps.length; i++) {
       const step = rawSteps[i]
       onChunk?.(`\n**[Research ${i + 1}/${rawSteps.length}]** ${step.task}\n`)
-      crawler.setTaskContext(step.task + ' ' + step.search_terms.join(' '))
+      crawler.setTaskContext(step.task + ' ' + step.search_terms.join(' '), connectionId)
 
       // Core searches — always run.
       const taskFindings: string[] = []
@@ -325,8 +329,19 @@ export class DeepResearchAgent {
       }
     }
 
+    // Ingest discovered images (after all tasks complete).
+    const discoveredImages = crawler.getDiscoveredImages()
+    if (discoveredImages.length > 0) {
+      onChunk?.(`\n**[Image ingestion]** ${discoveredImages.length} images discovered, ingesting…\n`)
+      imageIngester.setTaskContext(query)
+      for (const img of discoveredImages.slice(0, 20)) {
+        await imageIngester.ingest(img, onChunk)
+      }
+    }
+
     // Update stats.
     findings.crawlStats = crawler.getStats()
+    findings.imagesDiscovered = discoveredImages.length
     findings.downloadedFiles = fileIngester.getFiles()
     findings.topFindings.sort((a, b) => b.relevance - a.relevance)
     findings.topFindings = findings.topFindings.slice(0, 20)
@@ -397,7 +412,7 @@ export class DeepResearchAgent {
     onChunk?.(`**[Executing]** ${calls.length} approved tool call(s)…\n`)
 
     // Execute approved calls.
-    const crawler = new ResearchCrawler(onChunk)
+    const crawler = new AdaptiveCrawler(onChunk)
     for (const c of calls) {
       const params = this.buildParams(c)
       onChunk?.(`\n**[Tool: ${c.tool}]** ${JSON.stringify(params).slice(0, 120)}\n`)
@@ -451,7 +466,7 @@ export class DeepResearchAgent {
   /** Reactive tool discovery — scan findings for entities worth following up. */
   private async reactiveDiscovery(
     findings: string[],
-    crawler: ResearchCrawler,
+    crawler: AdaptiveCrawler,
     onChunk?: (chunk: string) => void,
     stats?: PreliminaryFindings
   ): Promise<void> {

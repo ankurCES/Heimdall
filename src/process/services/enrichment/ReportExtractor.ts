@@ -37,10 +37,12 @@ export class ReportExtractor {
     // ## Recommended Actions
     // ### 4. Recommended Actions
     // **Recommended Actions**
-    // # Recommended Actions
+    // # RECOMMENDED COLLECTION ACTIONS
+    // Escape regex specials in section name (handles "&" etc.)
+    const escaped = sectionName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
     const patterns = [
-      new RegExp(`#{1,4}\\s*(?:\\d+\\.?\\s*)?\\*?\\*?${sectionName}\\*?\\*?[\\s\\S]*?(?=#{1,4}\\s|$)`, 'i'),
-      new RegExp(`\\*\\*(?:\\d+\\.?\\s*)?${sectionName}\\*\\*[\\s\\S]*?(?=\\*\\*[A-Z\\d]|#{1,4}\\s|$)`, 'i')
+      new RegExp(`#{1,4}\\s*(?:\\d+\\.?\\s*)?\\*?\\*?${escaped}\\*?\\*?[\\s\\S]*?(?=#{1,4}\\s|$)`, 'i'),
+      new RegExp(`\\*\\*(?:\\d+\\.?\\s*)?${escaped}\\*\\*[\\s\\S]*?(?=\\*\\*[A-Z\\d]|#{1,4}\\s|$)`, 'i')
     ]
 
     for (const pattern of patterns) {
@@ -53,11 +55,17 @@ export class ReportExtractor {
   }
 
   private extractActions(content: string): Array<{ action: string; priority: 'critical' | 'high' | 'medium' | 'low' }> {
-    const items = this.extractSection(content, 'Recommended Actions')
-    if (items.length === 0) {
-      // Try alternative headings
-      const alt = this.extractSection(content, 'Actions')
-      items.push(...alt)
+    // Try all variations of the heading used across different prompt styles.
+    const headings = [
+      'Recommended Collection Actions',   // CIA-grade prompt
+      'Recommended Actions',              // standard
+      'Collection Actions',
+      'Actions'
+    ]
+    let items: string[] = []
+    for (const heading of headings) {
+      items = this.extractSection(content, heading)
+      if (items.length > 0) break
     }
 
     return items.map((item) => ({
@@ -67,10 +75,16 @@ export class ReportExtractor {
   }
 
   private extractGaps(content: string): Array<{ description: string; category: string; severity: 'critical' | 'high' | 'medium' | 'low' }> {
-    const items = this.extractSection(content, 'Information Gaps')
-    if (items.length === 0) {
-      const alt = this.extractSection(content, 'Gaps')
-      items.push(...alt)
+    const headings = [
+      'Information Gaps & Analytic Caveats',  // CIA-grade prompt
+      'Information Gaps',                      // standard
+      'Analytic Caveats',
+      'Gaps'
+    ]
+    let items: string[] = []
+    for (const heading of headings) {
+      items = this.extractSection(content, heading)
+      if (items.length > 0) break
     }
 
     return items.map((item) => ({

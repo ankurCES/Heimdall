@@ -109,7 +109,15 @@ async function initializeDeferred(): Promise<void> {
   // their tools in ToolRegistry. Lazy import to keep bootstrap light.
   try {
     const { mcpClientService } = await import('./services/mcp/McpClientService')
-    void mcpClientService.start().catch((err) => log.warn(`mcp.start failed: ${err}`))
+    void mcpClientService.start()
+      .then(async () => {
+        // After MCP tools are registered, expose them as workflow nodes.
+        try {
+          const mod = await import('./services/workflow/NodeRegistry')
+          mod.registerMcpToolNodes()
+        } catch (err) { log.debug(`registerMcpToolNodes: ${err}`) }
+      })
+      .catch((err) => log.warn(`mcp.start failed: ${err}`))
   } catch (err) {
     log.warn(`mcp service load failed: ${err}`)
   }

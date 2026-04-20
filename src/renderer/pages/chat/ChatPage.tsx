@@ -68,6 +68,9 @@ export function ChatPage() {
   const [planReworking, setPlanReworking] = useState(false)
   // Deep vs Lite agentic mode.
   const [agenticDepth, setAgenticDepth] = useState<'deep' | 'lite'>('deep')
+  // Workflow picker.
+  const [workflows, setWorkflows] = useState<Array<{ id: string; name: string; description: string | null; isPreset: boolean }>>([])
+  const [selectedWorkflowId, setSelectedWorkflowId] = useState<string | null>(null)
   // Cached user query + history for re-planning on rework without re-typing.
   const pendingQueryRef = useRef<{ text: string; enriched: string; sessionId: string; history: Array<{ role: string; content: string }> } | null>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
@@ -78,6 +81,7 @@ export function ChatPage() {
   useEffect(() => {
     loadSessions()
     loadConnections()
+    loadWorkflows()
     // Poll ingestion status
     const checkIngesting = async () => {
       try {
@@ -183,6 +187,13 @@ export function ChatPage() {
       const conns = await invoke('chat:getConnections') as LlmConn[]
       setConnections(conns || [])
       if (conns?.length > 0 && !selectedConnection) setSelectedConnection(conns[0].id)
+    } catch {}
+  }
+
+  const loadWorkflows = async () => {
+    try {
+      const wfs = await invoke('workflow:list') as Array<{ id: string; name: string; description: string | null; isPreset: boolean }>
+      setWorkflows(wfs || [])
     } catch {}
   }
 
@@ -703,11 +714,26 @@ export function ChatPage() {
           </div>
           {activeConn && <p className="text-[10px] text-muted-foreground mt-1">
             {activeConn.name} ({activeConn.model}) | {chatMode === 'agentic' ? (
-              <>Agentic ({agenticDepth === 'deep' ? (
-                <button onClick={() => setAgenticDepth('lite')} className="text-fuchsia-300 hover:text-fuchsia-200 underline" title="Switch to Lite (plan only, no auto-research)">Deep</button>
-              ) : (
-                <button onClick={() => setAgenticDepth('deep')} className="text-blue-300 hover:text-blue-200 underline" title="Switch to Deep (auto-research before plan modal)">Lite</button>
-              )})</>
+              <>
+                <select
+                  value={selectedWorkflowId || ''}
+                  onChange={(e) => {
+                    const id = e.target.value
+                    setSelectedWorkflowId(id || null)
+                    const wf = workflows.find((w) => w.id === id)
+                    setAgenticDepth(wf?.name === 'Quick RAG' ? 'lite' : 'deep')
+                  }}
+                  className="bg-transparent text-fuchsia-300 border-none outline-none text-[10px] cursor-pointer hover:text-fuchsia-200 -ml-1"
+                  title="Select research workflow"
+                >
+                  <option value="" className="bg-card text-foreground">Default (Deep Research)</option>
+                  {workflows.map((wf) => (
+                    <option key={wf.id} value={wf.id} className="bg-card text-foreground">
+                      {wf.isPreset ? '● ' : '○ '}{wf.name}
+                    </option>
+                  ))}
+                </select>
+              </>
             ) : chatMode === 'caveman' ? 'Caveman' : 'Direct + Vector'}
             {selectedFilters.length > 0 && ` | ${selectedFilters.length} filter${selectedFilters.length > 1 ? 's' : ''} active`}
           </p>}
