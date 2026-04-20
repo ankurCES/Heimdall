@@ -24,7 +24,24 @@ export interface ObsidianSearchResult {
   }
 }
 
+/**
+ * One-call result from `readFileWithStat` — content plus the Obsidian
+ * vault's stat block (mtime + size). Used as the cheap "has it changed?"
+ * signature for differential sync.
+ */
+export interface ObsidianFileWithStat {
+  path: string
+  content: string
+  mtime: number
+  size: number
+}
+
 export class ObsidianService {
+  // 5-min cache of `listFiles()` so back-to-back ingestion runs (e.g. user
+  // double-clicks "Generate Learnings") don't re-walk the whole vault, which
+  // was causing N+1 HTTP round-trips per folder.
+  private listCache: { files: string[]; expiresAt: number } | null = null
+
   private getConfig(): ObsidianConfig | null {
     const config = settingsService.get<ObsidianConfig>('obsidian')
     if (!config?.apiKey) return null
@@ -183,6 +200,65 @@ export class ObsidianService {
       headers: { Accept: 'text/markdown' }
     })
     return response.text()
+  }
+
+  /**
+   * Read a file AND its Obsidian-side stat block in one HTTP round-trip via
+   * the `application/vnd.olrapi.note+json` content-negotiation endpoint.
+   *
+   * Returns `{ content, mtime, size }`. mtime is the vault's stored
+   * modification time (ms epoch) — cheap signature for differential sync:
+   * if `(mtime, size)` is identical to last sync, the file hasn't changed
+   * and the expensive embedding step can be skipped.
+   *
+   * Falls back to plain `readFile` + `(content_length, 0)` if the note+json
+   * endpoint isn't available (older Local REST API versions).
+   */
+  async readFileWithStat(filePath: string): Promise<ObsidianFileWithStat> {
+    try {
+      const response = await this.request(`/vault/${this.encodePath(filePath)}`, {
+        headers: { Accept: 'application/vnd.olrapi.note+json' }
+      })
+      const data = await response.json() as {
+        content?: string
+        path?: string
+        stat?: { mtime?: number; size?: number; ctime?: number }
+      }
+      return {
+        path: data.path || filePath,
+        content: data.content || '',
+        mtime: Number(data.stat?.mtime ?? 0),
+        size: Number(data.stat?.size ?? (data.content?.length ?? 0))
+      }
+    } catch (err) {
+      // Fall back to plain markdown — older REST API didn't ship note+json
+      log.debug(`Obsidian readFileWithStat fallback for "${filePath}": ${err}`)
+      const content = await this.readFile(filePath)
+      return { path: filePath, content, mtime: 0, size: content.length }
+    }
+  }
+
+  /**
+   * Cached version of `listFiles()`. The vault listing is recursive over
+   * Obsidian's REST API (one HTTP call per folder), so a vault with 100s of
+   * folders is hundreds of round-trips per call. We cache the result for
+   * 5 min — the cron-driven Obsidian collector ingestion runs every 20 min
+   * so the cache is always cold on the scheduled path, but UI-driven
+   * "Generate Learnings" clicks reuse it.
+   */
+  async listFilesCached(folder?: string, ttlMs: number = 5 * 60_000): Promise<string[]> {
+    if (folder) return this.listFiles(folder) // bypass cache for sub-folder lookups
+    if (this.listCache && Date.now() < this.listCache.expiresAt) {
+      return this.listCache.files
+    }
+    const files = await this.listFiles()
+    this.listCache = { files, expiresAt: Date.now() + ttlMs }
+    return files
+  }
+
+  /** Force a reload on next call. */
+  invalidateListCache(): void {
+    this.listCache = null
   }
 
   async writeFile(filePath: string, content: string): Promise<void> {
@@ -383,10 +459,14 @@ export class ObsidianService {
             walk(fullPath, relPath)
           } else if (entry.endsWith('.md')) {
             const obsidianPath = `${folder}/${relPath}`
-            if (existingSet.has(obsidianPath)) return // Already synced
+            // BUG FIX: previously used `return` here which exits the entire
+            // walk function on the FIRST already-synced file, leaving every
+            // later file in this directory + every subdirectory un-walked.
+            // `continue` skips just this file as intended.
+            if (existingSet.has(obsidianPath)) continue
 
             const content = readFileSync(fullPath, 'utf-8')
-            if (!content.trim()) return
+            if (!content.trim()) continue
 
             this.uploadQueue.push({ path: obsidianPath, content })
           }

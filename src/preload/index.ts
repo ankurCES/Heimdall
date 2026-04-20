@@ -96,6 +96,7 @@ const testChannels = [
   'mcp:list_servers', 'mcp:list_tools', 'mcp:add_server',
   'mcp:update_server', 'mcp:remove_server', 'mcp:restart_server', 'mcp:test_server',
   'tor:status', 'tor:connect', 'tor:disconnect', 'tor:health',
+  'chat:classifyQuery', 'chat:followUp',
   'chat:planRequest', 'chat:executePlan', 'chat:cancelPlan',
   'llm:routing_matrix', 'llm:enabled_models',
   'darkweb:list', 'darkweb:get_content', 'darkweb:hosts',

@@ -143,8 +143,11 @@ export class SyncManager {
       const folder = config?.syncFolder || 'Heimdall'
       const memoryDir = join(app.getPath('home'), '.heimdall', 'memory')
 
-      // Walk local files
-      const filesToSync: Array<{ relPath: string; fullPath: string }> = []
+      // Walk local files. DIFFERENTIAL: signature is (relPath, mtime, size).
+      // Editing a local memory file bumps mtime → sig changes → file is
+      // re-pushed. Previous sig keying on relPath alone never re-pushed
+      // changed files.
+      const filesToSync: Array<{ relPath: string; fullPath: string; sig: string }> = []
       const walk = (dir: string, rel: string = ''): void => {
         let entries: string[]
         try { entries = readdirSync(dir) } catch { return }
@@ -152,31 +155,40 @@ export class SyncManager {
           const fullPath = join(dir, entry)
           const relPath = rel ? `${rel}/${entry}` : entry
           try {
-            if (statSync(fullPath).isDirectory()) { walk(fullPath, relPath); continue }
+            const stat = statSync(fullPath)
+            if (stat.isDirectory()) { walk(fullPath, relPath); continue }
             if (!entry.endsWith('.md')) continue
-            // Check sync log — skip already synced
-            if (this.isSynced('obsidian-push', relPath)) continue
-            filesToSync.push({ relPath, fullPath })
+            const sig = `${relPath}|${stat.mtimeMs}|${stat.size}`
+            if (this.isSynced('obsidian-push', sig)) continue
+            filesToSync.push({ relPath, fullPath, sig })
           } catch {}
         }
       }
       walk(memoryDir)
 
       this.updateJob('obsidian-push', { total: filesToSync.length })
-      log.info(`SyncManager: Obsidian push — ${filesToSync.length} new files to sync`)
+      log.info(`SyncManager: Obsidian push — ${filesToSync.length} new/changed files to sync`)
 
-      // Push in parallel batches of 5
-      for (let i = 0; i < filesToSync.length; i += 5) {
-        const batch = filesToSync.slice(i, i + 5)
-        await Promise.allSettled(batch.map(async ({ relPath, fullPath }) => {
+      // Push in parallel batches of 3 (was 5) with a yield between batches —
+      // Obsidian's Local REST API is single-threaded inside the plugin so
+      // higher concurrency just queues at the server side anyway and pegs
+      // the main process locally.
+      const yieldToEventLoop = () => new Promise<void>((r) => setImmediate(r))
+      for (let i = 0; i < filesToSync.length; i += 3) {
+        const batch = filesToSync.slice(i, i + 3)
+        await Promise.allSettled(batch.map(async ({ relPath, fullPath, sig }) => {
           try {
             const content = readFileSync(fullPath, 'utf-8')
-            if (content.length < 10) return
+            if (content.length < 10) {
+              this.markSynced('obsidian-push', sig)
+              return
+            }
             await obsidianService.writeFile(`${folder}/${relPath}`, content)
-            this.markSynced('obsidian-push', relPath)
+            this.markSynced('obsidian-push', sig)
             this.incrementProgress('obsidian-push')
           } catch {}
         }))
+        await yieldToEventLoop()
       }
 
       this.updateJob('obsidian-push', { status: 'completed' })

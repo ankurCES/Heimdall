@@ -41,8 +41,10 @@ export function parseThinkingSteps(content: string): { steps: ThinkingStep[]; fi
   for (const line of lines) {
     // Match **[Label]** or **[Label X/Y]** patterns. Recognised labels:
     //   Planning, Plan, Model routing, Researching, Research X/Y, Analyzing,
-    //   Searching, Tool: <name>, Executing: <name>, No data found.
-    const stepMatch = line.match(/^\*\*\[(Planning|Plan|Model routing|Model|Researching|Research|Analyzing|Searching|Tool|Executing|No data found)[^\]]*\]\*\*\s*(.*)$/i)
+    //   Searching, Tool: <name>, Executing: <name>, No data found,
+    //   Follow-up, Web crawl depth N, File download, File found depth N,
+    //   Auto-discovered, Research skip, Research complete.
+    const stepMatch = line.match(/^\*\*\[(Planning|Plan|Model routing|Model|Researching|Research|Analyzing|Searching|Tool|Executing|No data found|Follow-up|Web crawl depth|File download|File found depth|Auto-discovered|Research skip|Research complete)[^\]]*\]\*\*\s*(.*)$/i)
 
     if (stepMatch) {
       // Save previous step
@@ -54,8 +56,9 @@ export function parseThinkingSteps(content: string): { steps: ThinkingStep[]; fi
         kindLower === 'plan' ? 'plan' :
         kindLower === 'model routing' || kindLower === 'model' ? 'model' :
         kindLower.startsWith('research') ? 'researching' :
-        kindLower === 'executing' ? 'tool' :
-        kindLower === 'no data found' ? 'searching' :
+        kindLower === 'executing' || kindLower.startsWith('web crawl') || kindLower.startsWith('file') || kindLower.startsWith('auto-discover') ? 'tool' :
+        kindLower === 'follow-up' ? 'planning' :
+        kindLower === 'no data found' || kindLower === 'research skip' ? 'searching' :
         (kindLower as ThinkingStep['type'])
 
       currentStep = {
@@ -95,6 +98,10 @@ export function parseThinkingSteps(content: string): { steps: ThinkingStep[]; fi
   return { steps, finalContent: finalLines.join('\n').trim() }
 }
 
+/** Max steps visible during live streaming. Older steps fade out.
+ *  In expanded mode (Show Thinking popup) all steps are shown. */
+const MAX_VISIBLE_STREAMING = 3
+
 export function ThinkingBlocks({ content, isStreaming, expanded }: { content: string; isStreaming: boolean; expanded?: boolean }) {
   const { steps, finalContent } = parseThinkingSteps(content)
 
@@ -102,19 +109,41 @@ export function ThinkingBlocks({ content, isStreaming, expanded }: { content: st
     return <MarkdownRenderer content={content} className="text-sm" />
   }
 
+  // During streaming: only show the last MAX_VISIBLE_STREAMING steps.
+  // The oldest visible step gets a fade-out effect. In expanded mode
+  // (popup) or after streaming ends, show everything.
+  const showAll = expanded || !isStreaming
+  const visibleSteps = showAll
+    ? steps
+    : steps.slice(-MAX_VISIBLE_STREAMING)
+  const hiddenCount = showAll ? 0 : Math.max(0, steps.length - MAX_VISIBLE_STREAMING)
+
   return (
     <div className="space-y-2">
-      {/* Thinking steps — collapsible. In the popup (expanded=true) show
-          full content per step; in the live card cap at 500 chars to keep
-          the running progress compact. */}
-      {steps.map((step, i) => (
-        <CollapsibleStep
-          key={i}
-          step={step}
-          defaultOpen={expanded || (isStreaming && i === steps.length - 1)}
-          truncate={!expanded}
-        />
-      ))}
+      {/* Hidden steps counter */}
+      {hiddenCount > 0 && (
+        <div className="text-[10px] text-muted-foreground/50 text-center py-0.5">
+          {hiddenCount} earlier step{hiddenCount === 1 ? '' : 's'} completed
+        </div>
+      )}
+
+      {/* Visible thinking steps */}
+      {visibleSteps.map((step, i) => {
+        // During streaming, fade the oldest visible step.
+        const isFading = isStreaming && !showAll && i === 0 && visibleSteps.length >= MAX_VISIBLE_STREAMING
+        return (
+          <div
+            key={steps.indexOf(step)}
+            className={cn('transition-opacity duration-500', isFading ? 'opacity-40' : 'opacity-100')}
+          >
+            <CollapsibleStep
+              step={step}
+              defaultOpen={expanded || (isStreaming && steps.indexOf(step) === steps.length - 1)}
+              truncate={!expanded}
+            />
+          </div>
+        )
+      })}
 
       {/* Final analysis content */}
       {finalContent && (

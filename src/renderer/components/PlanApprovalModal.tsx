@@ -34,11 +34,29 @@ export interface PlanEdits {
   approvalComments?: string
 }
 
+/** Preliminary research findings from the auto-research phase
+ *  (deep mode only — null in lite mode). */
+export interface PreliminaryFindings {
+  internalHits: number
+  webPagesCrawled: number
+  darkwebPagesCrawled: number
+  filesDownloaded: number
+  filesIngested: number
+  cvesResolved: number
+  domainsResolved: number
+  actorsDetected: string[]
+  downloadedFiles: Array<{ filename: string; extension: string; sizeBytes: number; textLength: number; error: string | null }>
+  topFindings: Array<{ source: string; title: string; snippet: string; relevance: number }>
+}
+
 interface Props {
   preview: PlanPreview | null
+  findings?: PreliminaryFindings | null
   busy?: boolean
   /** "planning" while we're regenerating after rework. */
   reworking?: boolean
+  /** 'deep' | 'lite' — affects what sections are shown. */
+  mode?: 'deep' | 'lite'
   onApprove: (edits: PlanEdits) => void
   /** Mandatory feedback string. */
   onRework: (feedback: string) => void
@@ -65,7 +83,7 @@ const GROUP_META: Record<ProposedToolCall['group'], { label: string; icon: typeo
  *   - Rework   → mandatory comments → asks the planner for a new plan.
  *   - Cancel   → drops the plan, closes the modal.
  */
-export function PlanApprovalModal({ preview, busy = false, reworking = false, onApprove, onRework, onCancel }: Props) {
+export function PlanApprovalModal({ preview, findings, busy = false, reworking = false, mode = 'deep', onApprove, onRework, onCancel }: Props) {
   // Local edit state, reset whenever a new preview arrives.
   const [disabled, setDisabled] = useState<Set<string>>(new Set())
   const [edits, setEdits] = useState<Record<string, string>>({})
@@ -159,6 +177,63 @@ export function PlanApprovalModal({ preview, busy = false, reworking = false, on
         )}
 
         <div className="overflow-auto flex-1 -mx-6 px-6 space-y-4">
+          {/* Preliminary findings (deep mode only) */}
+          {findings && mode === 'deep' && (
+            <div className="rounded border border-emerald-500/30 bg-emerald-500/5 p-3 space-y-2">
+              <div className="text-[10px] uppercase tracking-wider text-emerald-300 font-semibold">Preliminary research (completed automatically)</div>
+              <div className="grid grid-cols-3 md:grid-cols-6 gap-2 text-center">
+                {[
+                  { label: 'Internal', value: findings.internalHits, color: 'text-blue-300' },
+                  { label: 'Web', value: findings.webPagesCrawled, color: 'text-cyan-300' },
+                  { label: 'Dark web', value: findings.darkwebPagesCrawled, color: 'text-fuchsia-300' },
+                  { label: 'Files', value: findings.filesDownloaded, color: 'text-amber-300' },
+                  { label: 'CVEs', value: findings.cvesResolved, color: 'text-red-300' },
+                  { label: 'Actors', value: findings.actorsDetected.length, color: 'text-orange-300' }
+                ].map(({ label, value, color }) => (
+                  <div key={label} className="rounded border border-border/50 p-1.5">
+                    <div className={cn('text-lg font-semibold', color)}>{value}</div>
+                    <div className="text-[9px] text-muted-foreground">{label}</div>
+                  </div>
+                ))}
+              </div>
+              {findings.actorsDetected.length > 0 && (
+                <div className="text-[10px] text-muted-foreground">
+                  Actors detected: <span className="text-orange-300">{findings.actorsDetected.join(', ')}</span>
+                </div>
+              )}
+              {findings.downloadedFiles.length > 0 && (
+                <div className="text-[10px] space-y-0.5">
+                  <div className="text-muted-foreground font-semibold">Downloaded files:</div>
+                  {findings.downloadedFiles.filter((f) => !f.error).map((f, i) => (
+                    <div key={i} className="flex items-center gap-2 text-emerald-200">
+                      <span className="font-mono">{f.filename}</span>
+                      <span className="text-muted-foreground">({(f.sizeBytes / 1024).toFixed(0)} KB, {f.textLength} chars)</span>
+                      {f.textLength > 0 && <span className="text-emerald-400">✓ ingested</span>}
+                    </div>
+                  ))}
+                </div>
+              )}
+              {findings.topFindings.length > 0 && (
+                <details className="text-[10px]">
+                  <summary className="text-muted-foreground cursor-pointer hover:text-foreground">
+                    Top {Math.min(findings.topFindings.length, 10)} findings (click to expand)
+                  </summary>
+                  <div className="mt-1 space-y-1 max-h-40 overflow-auto">
+                    {findings.topFindings.slice(0, 10).map((f, i) => (
+                      <div key={i} className="rounded bg-card/50 p-1.5 border border-border/30">
+                        <div className="flex items-center gap-1.5">
+                          <Badge variant="outline" className="text-[8px] py-0 px-1">{f.source}</Badge>
+                          <span className="font-medium truncate">{f.title}</span>
+                        </div>
+                        <div className="text-muted-foreground truncate mt-0.5">{f.snippet}</div>
+                      </div>
+                    ))}
+                  </div>
+                </details>
+              )}
+            </div>
+          )}
+
           {/* Research steps — read-only */}
           <div>
             <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1.5">Research steps</div>

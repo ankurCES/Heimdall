@@ -242,8 +242,29 @@ your query straight to FTS5.`,
       }, required: ['url'] },
       requiresApproval: false
     }, async (params) => {
-      const text = await safeFetcher.fetchText(params.url as string, { timeout: 15000 })
-      return { output: text.slice(0, 3000) }
+      const fetchUrl = params.url as string
+      const response = await safeFetcher.fetch(fetchUrl, { timeout: 15000 })
+      if (!response.ok) throw new Error(`HTTP ${response.status} for ${fetchUrl}`)
+      const html = await response.text()
+
+      // Extract href URLs from raw HTML before stripping.
+      const hrefMatches = html.match(/href=["']([^"']+)["']/gi) || []
+      const extractedUrls: string[] = []
+      for (const match of hrefMatches) {
+        const href = match.replace(/^href=["']|["']$/gi, '')
+        if (!href || href.startsWith('#') || href.startsWith('javascript:') || href.startsWith('data:')) continue
+        try { extractedUrls.push(new URL(href, fetchUrl).href) } catch { /* */ }
+      }
+
+      // Strip to text.
+      const text = html
+        .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, ' ')
+        .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, ' ')
+        .replace(/<[^>]+>/g, ' ')
+        .replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&')
+        .replace(/\s+/g, ' ').trim()
+
+      return { output: text.slice(0, 3000), data: { url: fetchUrl, extractedUrls } }
     })
 
     // ── Onion Fetch (Tor-routed) ──
@@ -282,6 +303,25 @@ your query straight to FTS5.`,
         // SafeFetcher SOCKS5 routing kicks in automatically based on the
         // .onion suffix.
         const html = await safeFetcher.fetchText(url, { timeout: 30000, skipRobots: true, maxRetries: 1 })
+
+        // Extract ALL href URLs from raw HTML BEFORE stripping tags.
+        // This catches file links (<a href="doc.pdf">) that would be
+        // lost after HTML→text conversion. URLs are resolved relative
+        // to the page's base URL.
+        const hrefMatches = html.match(/href=["']([^"']+)["']/gi) || []
+        const extractedUrls: string[] = []
+        for (const match of hrefMatches) {
+          const href = match.replace(/^href=["']|["']$/gi, '')
+          if (!href || href.startsWith('#') || href.startsWith('javascript:') || href.startsWith('data:')) continue
+          try {
+            // Resolve relative URLs against the page URL.
+            const resolved = new URL(href, url).href
+            extractedUrls.push(resolved)
+          } catch {
+            // Malformed — skip.
+          }
+        }
+
         // Strip HTML / scripts / styles for a readable text excerpt.
         const text = html
           .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, ' ')
@@ -295,7 +335,7 @@ your query straight to FTS5.`,
           .trim()
         return {
           output: `[onion:${parsed.hostname}] (${text.length} chars text / ${html.length} chars HTML)\n${text.slice(0, maxChars)}${text.length > maxChars ? '\n…[truncated]' : ''}`,
-          data: { url, hostname: parsed.hostname, text, htmlLength: html.length, textLength: text.length }
+          data: { url, hostname: parsed.hostname, text, extractedUrls, htmlLength: html.length, textLength: text.length }
         }
       } catch (err) {
         return { output: `Onion fetch failed for ${parsed.hostname}: ${(err as Error).message}`, error: String(err) }

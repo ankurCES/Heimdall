@@ -1,6 +1,7 @@
 import { ipcMain, BrowserWindow } from 'electron'
 import { llmService, type ChatMessage } from '../services/llm/LlmService'
 import { agenticChatOrchestrator, type PlanEdits } from '../services/llm/AgenticChatOrchestrator'
+import { deepResearchAgent } from '../services/llm/DeepResearchAgent'
 import { agenticPlanStore } from '../services/llm/AgenticPlanStore'
 import { memoryService } from '../services/memory/MemoryService'
 import { vectorDbService } from '../services/vectordb/VectorDbService'
@@ -73,6 +74,61 @@ export function registerChatBridge(): void {
   //   chat:executePlan → runs the approved (possibly edited) plan and
   //                      streams the result like chat:send.
 
+  // Classify query as follow-up vs new topic.
+  ipcMain.handle('chat:classifyQuery', (_event, params: {
+    query: string
+    messages: ChatMessage[]
+  }) => {
+    return deepResearchAgent.classifyQuery(params.query, params.messages)
+  })
+
+  // Handle follow-up directly (no plan modal).
+  ipcMain.handle('chat:followUp', async (_event, params: {
+    messages: ChatMessage[]
+    query: string
+    sessionId: string
+    connectionId?: string
+  }) => {
+    const { messages, query, sessionId, connectionId } = params
+    const windows = BrowserWindow.getAllWindows()
+    const safeSendLocal = (channel: string, payload: unknown) => {
+      for (const win of windows) {
+        if (win.isDestroyed()) continue
+        try { win.webContents.send(channel, payload) } catch {}
+      }
+    }
+    const trailChunks: string[] = []
+    let trailLen = 0
+    const emitChunk = (chunk: string) => {
+      if (trailLen < 100_000) {
+        trailChunks.push(chunk)
+        trailLen += chunk.length
+      }
+      safeSendLocal('chat:chunk', chunk)
+    }
+    let fullResponse = ''
+    try {
+      fullResponse = await deepResearchAgent.handleFollowUp(query, messages, connectionId, emitChunk)
+      const thinkingTrail = trailChunks.join('')
+      safeSendLocal('chat:done', { response: fullResponse, thinkingTrail })
+    } catch (err) {
+      log.error('chat:followUp error:', err)
+      safeSendLocal('chat:error', String(err))
+      throw err
+    }
+    const db = getDatabase()
+    const now = timestamp()
+    const assistantMsgId = generateId()
+    const thinkingTrail = trailChunks.join('') || null
+    const persistChat = db.transaction(() => {
+      db.prepare('INSERT INTO chat_messages (id, session_id, role, content, created_at) VALUES (?, ?, ?, ?, ?)').run(generateId(), sessionId, 'user', query, now)
+      db.prepare('INSERT INTO chat_messages (id, session_id, role, content, thinking_trail, created_at) VALUES (?, ?, ?, ?, ?, ?)').run(assistantMsgId, sessionId, 'assistant', fullResponse, thinkingTrail, now)
+      db.prepare('UPDATE chat_sessions SET updated_at = ? WHERE id = ?').run(now, sessionId)
+    })
+    persistChat()
+    return { ok: true, response: fullResponse, thinkingTrail, messageId: assistantMsgId }
+  })
+
   ipcMain.handle('chat:planRequest', async (_event, params: {
     messages: ChatMessage[]
     query: string
@@ -82,24 +138,51 @@ export function registerChatBridge(): void {
     reworkFeedback?: string
     /** The planId that was rejected — its steps inform the regenerated plan. */
     previousPlanId?: string
+    /** 'deep' = DeepResearchAgent (auto-research before modal),
+     *  'lite' = AgenticChatOrchestrator (plan only, no auto-research). */
+    mode?: 'deep' | 'lite'
   }) => {
-    const { messages, query, sessionId, connectionId, reworkFeedback, previousPlanId } = params
-    const preview = await agenticChatOrchestrator.buildPlan(
-      query, messages, sessionId, connectionId,
-      { reworkFeedback, previousPlanId }
-    )
-    if (!preview) {
-      return { ok: false, reason: 'planning_failed', message: 'The planner could not produce a structured plan for this query. Try rephrasing or use Direct mode.' }
+    const { messages, query, sessionId, connectionId, reworkFeedback, previousPlanId, mode = 'deep' } = params
+
+    // Chunk emitter for streaming auto-research progress to renderer.
+    const windows = BrowserWindow.getAllWindows()
+    const safeSendLocal = (channel: string, payload: unknown) => {
+      for (const win of windows) {
+        if (win.isDestroyed()) continue
+        try { win.webContents.send(channel, payload) } catch {}
+      }
     }
-    return { ok: true, preview }
+    const emitChunk = (chunk: string) => safeSendLocal('chat:chunk', chunk)
+
+    if (mode === 'deep') {
+      const result = await deepResearchAgent.buildPlanWithResearch(
+        query, messages, sessionId, connectionId, emitChunk,
+        { reworkFeedback, previousPlanId }
+      )
+      if (!result) {
+        return { ok: false, reason: 'planning_failed', message: 'The deep research agent could not produce a plan. Try rephrasing or switch to Lite mode.' }
+      }
+      return { ok: true, preview: result.preview, preliminaryFindings: result.findings, mode: 'deep' }
+    } else {
+      // Lite mode — original AgenticChatOrchestrator (plan only, no auto-research).
+      const preview = await agenticChatOrchestrator.buildPlan(
+        query, messages, sessionId, connectionId,
+        { reworkFeedback, previousPlanId }
+      )
+      if (!preview) {
+        return { ok: false, reason: 'planning_failed', message: 'The planner could not produce a structured plan for this query.' }
+      }
+      return { ok: true, preview, mode: 'lite' }
+    }
   })
 
   ipcMain.handle('chat:executePlan', async (_event, params: {
     planId: string
     sessionId: string
     edits: PlanEdits
+    mode?: 'deep' | 'lite'
   }) => {
-    const { planId, sessionId, edits } = params
+    const { planId, sessionId, edits, mode = 'deep' } = params
 
     // Sanity-check the plan exists before kicking off streaming.
     const stored = agenticPlanStore.get(planId)
@@ -129,7 +212,11 @@ export function registerChatBridge(): void {
 
     let fullResponse = ''
     try {
-      fullResponse = await agenticChatOrchestrator.executeApprovedPlan(planId, edits, emitChunk)
+      if (mode === 'deep') {
+        fullResponse = await deepResearchAgent.executeApproved(planId, edits, emitChunk)
+      } else {
+        fullResponse = await agenticChatOrchestrator.executeApprovedPlan(planId, edits, emitChunk)
+      }
       const thinkingTrail = trailChunks.join('')
       safeSend('chat:done', { response: fullResponse, thinkingTrail })
     } catch (err) {

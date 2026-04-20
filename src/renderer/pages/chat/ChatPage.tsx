@@ -63,8 +63,11 @@ export function ChatPage() {
   const [showExplore, setShowExplore] = useState(false)
   // Plan-approval flow state — only active in agentic mode.
   const [pendingPlan, setPendingPlan] = useState<PlanPreview | null>(null)
+  const [pendingFindings, setPendingFindings] = useState<import('@renderer/components/PlanApprovalModal').PreliminaryFindings | null>(null)
   const [planBusy, setPlanBusy] = useState(false)
   const [planReworking, setPlanReworking] = useState(false)
+  // Deep vs Lite agentic mode.
+  const [agenticDepth, setAgenticDepth] = useState<'deep' | 'lite'>('deep')
   // Cached user query + history for re-planning on rework without re-typing.
   const pendingQueryRef = useRef<{ text: string; enriched: string; sessionId: string; history: Array<{ role: string; content: string }> } | null>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
@@ -243,9 +246,39 @@ export function ChatPage() {
       .filter((m) => m.role !== 'system').slice(-20)
       .map((m) => ({ role: m.role, content: m.content }))
 
-    // ─── Agentic mode: gate through plan-approval modal ────────────
+    // ─── Agentic mode: detect follow-ups, gate new topics through plan modal ──
     if (chatMode === 'agentic') {
       pendingQueryRef.current = { text, enriched: enrichedText, sessionId, history: chatHistory }
+
+      // Follow-up detection: skip plan modal for continuations.
+      try {
+        const classification = await invoke('chat:classifyQuery', {
+          query: enrichedText, messages: chatHistory
+        }) as { intent: string; confidence: number; reason: string }
+
+        if (classification.intent === 'follow_up' || classification.intent === 'clarification') {
+          // Direct response — no plan modal.
+          setStreaming(true)
+          setStreamingContent('')
+          try {
+            const result = await invoke('chat:followUp', {
+              messages: chatHistory, query: enrichedText, sessionId,
+              connectionId: selectedConnection || undefined
+            }) as { ok: boolean; response: string; thinkingTrail?: string | null; messageId?: string }
+            const thinkingTrail = result.thinkingTrail || streamChunksRef.current.join('') || null
+            const assistantId = result.messageId || crypto.randomUUID()
+            setMessages((prev) => [...prev, {
+              id: assistantId, role: 'assistant', content: result.response, createdAt: Date.now(), thinkingTrail
+            }])
+            loadSessions()
+          } finally {
+            setStreaming(false); setStreamingContent(''); streamChunksRef.current = []
+            pendingQueryRef.current = null
+          }
+          return
+        }
+      } catch { /* classification failed — fall through to plan modal */ }
+
       await requestPlan({ reworkFeedback: undefined, previousPlanId: undefined })
       return
     }
@@ -289,6 +322,13 @@ export function ChatPage() {
     if (!cached) return
     setPlanBusy(true)
     setPlanReworking(!!opts.reworkFeedback)
+    // In deep mode, enable streaming so auto-research progress shows
+    // in the chat progress card (live tool calls, crawl depth, etc.).
+    if (agenticDepth === 'deep') {
+      setStreaming(true)
+      setStreamingContent('')
+      streamChunksRef.current = []
+    }
     try {
       const r = await invoke('chat:planRequest', {
         messages: cached.history,
@@ -296,8 +336,9 @@ export function ChatPage() {
         sessionId: cached.sessionId,
         connectionId: selectedConnection || undefined,
         reworkFeedback: opts.reworkFeedback,
-        previousPlanId: opts.previousPlanId
-      }) as { ok: boolean; preview?: PlanPreview; reason?: string; message?: string }
+        previousPlanId: opts.previousPlanId,
+        mode: agenticDepth
+      }) as { ok: boolean; preview?: PlanPreview; preliminaryFindings?: any; reason?: string; message?: string; mode?: string }
 
       if (!r.ok || !r.preview) {
         toast.error('Planning failed', { description: r.message || 'Falling back to direct hybrid RAG' })
@@ -307,6 +348,7 @@ export function ChatPage() {
         pendingQueryRef.current = null
       } else {
         setPendingPlan(r.preview)
+        setPendingFindings(r.preliminaryFindings || null)
       }
     } catch (err) {
       toast.error('Planning error', { description: String(err) })
@@ -314,6 +356,10 @@ export function ChatPage() {
     } finally {
       setPlanBusy(false)
       setPlanReworking(false)
+      // Stop the research-phase streaming — the modal is now open.
+      setStreaming(false)
+      setStreamingContent('')
+      streamChunksRef.current = []
     }
   }
 
@@ -352,7 +398,7 @@ export function ChatPage() {
     setStreamingContent('')
     try {
       const result = await invoke('chat:executePlan', {
-        planId, sessionId: cached.sessionId, edits
+        planId, sessionId: cached.sessionId, edits, mode: agenticDepth
       }) as { ok: boolean; response?: string; thinkingTrail?: string | null; messageId?: string; reason?: string; message?: string }
 
       if (!result.ok) {
@@ -388,6 +434,7 @@ export function ChatPage() {
       try { await invoke('chat:cancelPlan', { planId: pendingPlan.planId }) } catch {}
     }
     setPendingPlan(null)
+    setPendingFindings(null)
     pendingQueryRef.current = null
     // Remove the user message we optimistically rendered, since the analyst chose not to proceed.
     setMessages((prev) => prev.slice(0, -1))
@@ -625,20 +672,14 @@ export function ChatPage() {
             </div>
           )}
 
-          {/* Planning indicator — shown while the planner LLM is producing
-              a plan in agentic mode (the modal opens once it returns). On
-              local Ollama models this can take 60-120s so the user needs
-              feedback that something is happening. */}
-          {planBusy && !pendingPlan && !streaming && (
+          {/* Planning indicator — only for lite mode (deep mode uses the
+              streaming card above which shows live research progress). */}
+          {planBusy && !pendingPlan && !streaming && agenticDepth === 'lite' && (
             <div className="flex justify-start">
               <div className="max-w-[80%] rounded-lg px-4 py-3 text-sm bg-card border border-fuchsia-400/30 bg-fuchsia-400/5">
                 <div className="flex items-center gap-2 text-fuchsia-300">
                   <Loader2 className="h-4 w-4 animate-spin" />
-                  <span className="font-semibold">{planReworking ? 'Reworking plan based on your feedback…' : 'Planner LLM is building a research plan…'}</span>
-                </div>
-                <div className="text-[11px] text-muted-foreground mt-1">
-                  This can take 60-120 seconds on local models. The plan-approval modal will open as soon as the planner returns.
-                  Refined per-tool queries will continue arriving in the background after the modal opens.
+                  <span className="font-semibold">{planReworking ? 'Reworking plan…' : 'Building research plan…'}</span>
                 </div>
               </div>
             </div>
@@ -661,7 +702,13 @@ export function ChatPage() {
             </Button>
           </div>
           {activeConn && <p className="text-[10px] text-muted-foreground mt-1">
-            {activeConn.name} ({activeConn.model}) | {chatMode === 'agentic' ? 'Agentic (plan-approved)' : chatMode === 'caveman' ? 'Caveman' : 'Direct + Vector'}
+            {activeConn.name} ({activeConn.model}) | {chatMode === 'agentic' ? (
+              <>Agentic ({agenticDepth === 'deep' ? (
+                <button onClick={() => setAgenticDepth('lite')} className="text-fuchsia-300 hover:text-fuchsia-200 underline" title="Switch to Lite (plan only, no auto-research)">Deep</button>
+              ) : (
+                <button onClick={() => setAgenticDepth('deep')} className="text-blue-300 hover:text-blue-200 underline" title="Switch to Deep (auto-research before plan modal)">Lite</button>
+              )})</>
+            ) : chatMode === 'caveman' ? 'Caveman' : 'Direct + Vector'}
             {selectedFilters.length > 0 && ` | ${selectedFilters.length} filter${selectedFilters.length > 1 ? 's' : ''} active`}
           </p>}
         </div>
@@ -670,8 +717,10 @@ export function ChatPage() {
       {/* Plan-approval modal — only mounted when there's a pending plan in agentic mode */}
       <PlanApprovalModal
         preview={pendingPlan}
+        findings={pendingFindings}
         busy={planBusy}
         reworking={planReworking}
+        mode={agenticDepth}
         onApprove={handlePlanApprove}
         onRework={handlePlanRework}
         onCancel={handlePlanCancel}
