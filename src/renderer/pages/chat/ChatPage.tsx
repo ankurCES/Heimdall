@@ -68,6 +68,12 @@ export function ChatPage() {
   const [planReworking, setPlanReworking] = useState(false)
   // Deep vs Lite agentic mode.
   const [agenticDepth, setAgenticDepth] = useState<'deep' | 'lite'>('deep')
+  // Output report format (NIE / PDB / IIR / Assessment / Auto).
+  const [outputFormat, setOutputFormat] = useState<'auto' | 'nie' | 'pdb' | 'iir' | 'assessment'>('auto')
+  // Structured Analytic Techniques to run after synthesis.
+  const [satOptions, setSatOptions] = useState<{ ach: boolean; assumptions: boolean; redTeam: boolean; indicators: boolean }>(
+    { ach: false, assumptions: false, redTeam: false, indicators: false }
+  )
   // Workflow picker.
   const [workflows, setWorkflows] = useState<Array<{ id: string; name: string; description: string | null; isPreset: boolean }>>([])
   const [selectedWorkflowId, setSelectedWorkflowId] = useState<string | null>(null)
@@ -409,7 +415,7 @@ export function ChatPage() {
     setStreamingContent('')
     try {
       const result = await invoke('chat:executePlan', {
-        planId, sessionId: cached.sessionId, edits, mode: agenticDepth
+        planId, sessionId: cached.sessionId, edits, mode: agenticDepth, outputFormat, sats: satOptions
       }) as { ok: boolean; response?: string; thinkingTrail?: string | null; messageId?: string; reason?: string; message?: string }
 
       if (!result.ok) {
@@ -733,6 +739,41 @@ export function ChatPage() {
                     </option>
                   ))}
                 </select>
+                <span className="mx-1 text-foreground/30">·</span>
+                <select
+                  value={outputFormat}
+                  onChange={(e) => setOutputFormat(e.target.value as typeof outputFormat)}
+                  className="bg-transparent text-amber-300 border-none outline-none text-[10px] cursor-pointer hover:text-amber-200"
+                  title="Output report format (ICD 203 compliant)"
+                >
+                  <option value="auto" className="bg-card text-foreground">Auto-format</option>
+                  <option value="nie" className="bg-card text-foreground">NIE (National Estimate)</option>
+                  <option value="pdb" className="bg-card text-foreground">PDB Item (Brief)</option>
+                  <option value="iir" className="bg-card text-foreground">IIR (Tactical)</option>
+                  <option value="assessment" className="bg-card text-foreground">Full Assessment</option>
+                </select>
+                <span className="mx-1 text-foreground/30">·</span>
+                <span className="text-[10px] text-cyan-300/80">SAT:</span>
+                {(['ach', 'assumptions', 'redTeam', 'indicators'] as const).map((key) => (
+                  <label
+                    key={key}
+                    className="flex items-center gap-0.5 text-[10px] cursor-pointer hover:text-cyan-300"
+                    title={
+                      key === 'ach' ? 'Analysis of Competing Hypotheses (Heuer matrix)'
+                      : key === 'assumptions' ? 'Key Assumptions Check (surface + challenge implicit premises)'
+                      : key === 'redTeam' ? 'Devil\'s Advocacy + Red Hat (adversary perspective)'
+                      : 'Indicators & Warnings framework'
+                    }
+                  >
+                    <input
+                      type="checkbox"
+                      checked={satOptions[key]}
+                      onChange={(e) => setSatOptions((s) => ({ ...s, [key]: e.target.checked }))}
+                      className="w-2.5 h-2.5 cursor-pointer accent-cyan-500"
+                    />
+                    {key === 'ach' ? 'ACH' : key === 'assumptions' ? 'KAC' : key === 'redTeam' ? 'RedT' : 'I&W'}
+                  </label>
+                ))}
               </>
             ) : chatMode === 'caveman' ? 'Caveman' : 'Direct + Vector'}
             {selectedFilters.length > 0 && ` | ${selectedFilters.length} filter${selectedFilters.length > 1 ? 's' : ''} active`}

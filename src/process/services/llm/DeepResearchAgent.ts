@@ -12,6 +12,20 @@ import { ResearchImageIngester } from './ResearchImageIngester'
 import { generateId } from '@common/utils/id'
 import type { DarkWebConfig } from '@common/types/settings'
 import type { PlanEdits } from './AgenticChatOrchestrator'
+import {
+  buildPromptForFormat,
+  autoSelectFormat,
+  isCountryOrEventQuery,
+  type ReportFormat
+} from '../report/ReportFormatter'
+import { validateReport, buildDeficiencyPrompt } from '../report/ICD203Validator'
+import { threatFeedMatcher } from '../training/ThreatFeedMatcher'
+import { exemplarSelector } from '../training/ExemplarSelector'
+import {
+  runStructuredAnalyticTechniques,
+  type SatRunOptions
+} from '../analysis/StructuredAnalyticTechniques'
+import { getDatabase } from '../database'
 import log from 'electron-log'
 
 /**
@@ -389,7 +403,9 @@ export class DeepResearchAgent {
   async executeApproved(
     planId: string,
     edits: PlanEdits,
-    onChunk?: (chunk: string) => void
+    onChunk?: (chunk: string) => void,
+    outputFormat: ReportFormat = 'auto',
+    satOptions?: SatRunOptions
   ): Promise<string> {
     const plan = agenticPlanStore.get(planId)
     if (!plan) throw new Error(`Plan ${planId} not found or expired`)
@@ -450,9 +466,42 @@ export class DeepResearchAgent {
       return 'No findings produced from the research. Try a different query or add more tool calls.'
     }
 
-    // Synthesize.
-    onChunk?.(`\n**[Analyzing]** Synthesizing ${allFindings.length} finding group(s)…\n\n---\n\n`)
-    const result = await this.analyze(plan.query, allFindings, plan.history, plan.connectionId, onChunk, edits.approvalComments)
+    // Resolve auto-format using the preliminary findings shape.
+    const resolvedFormat: Exclude<ReportFormat, 'auto'> = outputFormat === 'auto'
+      ? autoSelectFormat({
+          query: plan.query,
+          hasMultipleDisciplines: (storedFindings?.findings?.actorsDetected.length ?? 0) > 0
+            || (storedFindings?.findings?.darkwebPagesCrawled ?? 0) > 0,
+          isFollowUp: false,
+          preliminaryFindingsCount: allFindings.length,
+          hasIocs: (storedFindings?.findings?.cvesResolved ?? 0) > 0
+            || (storedFindings?.findings?.domainsResolved ?? 0) > 0,
+          isAboutCountryOrEvent: isCountryOrEventQuery(plan.query)
+        })
+      : outputFormat
+
+    onChunk?.(`\n**[Analyzing]** Synthesizing ${allFindings.length} finding group(s) as ${resolvedFormat.toUpperCase()}…\n\n---\n\n`)
+    let result = await this.analyze(plan.query, allFindings, plan.history, plan.connectionId, onChunk, edits.approvalComments, resolvedFormat)
+
+    // SAT post-processing — runs all enabled techniques in parallel and
+    // appends the resulting annexes to the report. The `satOptions` flag
+    // determines which techniques run; default = none (Phase 5 opt-in).
+    const satFlags = satOptions || { ach: false, assumptions: false, redTeam: false, indicators: false }
+    if (satFlags.ach || satFlags.assumptions || satFlags.redTeam || satFlags.indicators) {
+      const enabled = Object.entries(satFlags).filter(([, v]) => v).map(([k]) => k).join(', ')
+      onChunk?.(`\n**[SAT]** Running structured analytic techniques: ${enabled}…\n`)
+      try {
+        const satResult = await runStructuredAnalyticTechniques(
+          plan.query, allFindings, result, satFlags, plan.connectionId
+        )
+        if (satResult.markdown) {
+          result += satResult.markdown
+          onChunk?.(`**[SAT]** Appended ${enabled} annexes to report\n`)
+        }
+      } catch (err) {
+        log.warn(`SAT execution failed: ${err}`)
+      }
+    }
 
     // Cleanup.
     agenticPlanStore.remove(planId)
@@ -595,7 +644,8 @@ export class DeepResearchAgent {
     history: ChatMessage[],
     connectionId?: string,
     onChunk?: (chunk: string) => void,
-    approvalComments?: string
+    approvalComments?: string,
+    format: Exclude<ReportFormat, 'auto'> = 'assessment'
   ): Promise<string> {
     const summary = intelRagService.getRecentSummary(24)
     // Cap findings to fit within LLM context. Each finding is truncated
@@ -605,19 +655,119 @@ export class DeepResearchAgent {
       .slice(0, 15)
       .map((f) => f.slice(0, 600))
       .join('\n\n---\n\n')
+
+    // Cross-reference all findings against threat_feeds (MITRE ATT&CK + MISP).
+    // Annotations are appended to the system prompt so the analyst can cite
+    // them directly using the [THREAT FEED: ...] tag pattern.
+    let threatAnnotations = ''
+    try {
+      const matches = threatFeedMatcher.scanText(findings.join('\n'))
+      if (matches.length > 0) {
+        threatAnnotations = threatFeedMatcher.formatAnnotations(matches)
+        log.info(`DeepResearchAgent: ${matches.length} threat-feed matches found in findings`)
+        onChunk?.(`\n**[Threat-feed cross-reference]** ${matches.length} known-bad indicator(s) matched\n`)
+      }
+    } catch (err) {
+      log.debug(`threat-feed cross-reference failed: ${err}`)
+    }
+
+    // Use the format-specific prompt instead of the legacy ANALYST_PROMPT.
+    let formatPrompt = buildPromptForFormat(format, query)
+
+    // Few-shot exemplar injection — append 1-2 real declassified IC product
+    // excerpts matched to the query topic + format. No-op when training_corpus
+    // is empty (Phase 3 ingesters not yet run).
+    try {
+      const exemplars = exemplarSelector.select(format, query)
+      if (exemplars.length > 0) {
+        formatPrompt += exemplarSelector.buildPromptFragment(exemplars)
+        log.info(`DeepResearchAgent: injected ${exemplars.length} exemplar(s) — refs: ${exemplars.map((e) => e.reference).join(', ')}`)
+      }
+    } catch (err) {
+      log.debug(`exemplar selection failed: ${err}`)
+    }
+
     const messages: ChatMessage[] = [
-      { role: 'system', content: ANALYST_PROMPT },
+      { role: 'system', content: formatPrompt },
       { role: 'system', content: `Current intelligence summary: ${summary}` },
-      { role: 'system', content: `Research findings (${Math.min(findings.length, 15)} of ${findings.length} groups shown):\n\n${truncatedFindings}` },
+      { role: 'system', content: `Research findings (${Math.min(findings.length, 15)} of ${findings.length} groups shown):\n\n${truncatedFindings}${threatAnnotations}` },
     ]
     if (approvalComments) {
       messages.push({ role: 'system', content: `Analyst guidance: "${approvalComments}". Incorporate this.` })
     }
     messages.push(...history.slice(-6))
-    messages.push({ role: 'user', content: `Based on all research findings, provide a definitive intelligence briefing for: ${query}` })
+    messages.push({ role: 'user', content: `Based on all research findings, produce the ${format.toUpperCase()}-format intelligence product for: ${query}` })
 
-    const { response, model, connectionName } = await llmService.chatForTask('analysis', messages, onChunk, connectionId)
-    log.info(`DeepResearchAgent analysis: synthesised by ${connectionName}/${model}`)
+    let { response, model, connectionName } = await llmService.chatForTask('analysis', messages, onChunk, connectionId)
+    log.info(`DeepResearchAgent analysis: synthesised by ${connectionName}/${model} as ${format}`)
+
+    // Post-generation ICD 203 tradecraft validation + auto-regen.
+    // First-pass score is computed; if below threshold (70) we re-prompt the
+    // LLM with deficiency notes and regenerate ONCE. The second pass is
+    // marked regenerated=1 in report_quality_scores for tracking.
+    let firstScore: ReturnType<typeof validateReport> | null = null
+    let secondScore: ReturnType<typeof validateReport> | null = null
+    try {
+      firstScore = validateReport(response)
+      log.info(`ICD203 tradecraft score: ${firstScore.total}/100 (passed=${firstScore.passed})`)
+      if (firstScore.deficiencies.length > 0) {
+        log.debug(`ICD203 deficiencies: ${firstScore.deficiencies.join(' | ')}`)
+      }
+
+      try {
+        getDatabase().prepare(`
+          INSERT INTO report_quality_scores (id, session_id, report_format, tradecraft_score, deficiencies_json, regenerated, created_at)
+          VALUES (?, ?, ?, ?, ?, 0, ?)
+        `).run(
+          generateId(), null, format, firstScore.total,
+          JSON.stringify(firstScore.deficiencies), Date.now()
+        )
+      } catch (dbErr) { log.debug(`report_quality_scores insert failed: ${dbErr}`) }
+
+      // Auto-regenerate if below threshold AND there are actionable deficiencies.
+      // Cap to one retry to bound LLM cost.
+      if (!firstScore.passed && firstScore.deficiencies.length > 0) {
+        onChunk?.(`\n**[Tradecraft]** Score ${firstScore.total}/100 below threshold — regenerating with deficiency notes…\n`)
+        const deficiencyPrompt = buildDeficiencyPrompt(firstScore)
+        const regenMessages: ChatMessage[] = [
+          ...messages,
+          { role: 'assistant', content: response },
+          { role: 'system', content: deficiencyPrompt },
+          { role: 'user', content: 'Regenerate the assessment fixing all the listed tradecraft deficiencies. Keep the same structure and citations; only fix what was flagged.' }
+        ]
+        try {
+          const regen = await llmService.chatForTask('analysis', regenMessages, onChunk, connectionId)
+          const newResponse = regen.response
+          secondScore = validateReport(newResponse)
+          log.info(`ICD203 regen score: ${secondScore.total}/100 (was ${firstScore.total}/100)`)
+          // Only accept regen if it actually improved the score.
+          if (secondScore.total > firstScore.total) {
+            response = newResponse
+            try {
+              getDatabase().prepare(`
+                INSERT INTO report_quality_scores (id, session_id, report_format, tradecraft_score, deficiencies_json, regenerated, created_at)
+                VALUES (?, ?, ?, ?, ?, 1, ?)
+              `).run(
+                generateId(), null, format, secondScore.total,
+                JSON.stringify(secondScore.deficiencies), Date.now()
+              )
+            } catch (dbErr) { log.debug(`regen score insert failed: ${dbErr}`) }
+          } else {
+            log.info(`ICD203 regen did not improve score (kept original)`)
+            secondScore = null
+          }
+        } catch (err) {
+          log.warn(`ICD203 regen failed: ${err}`)
+        }
+      }
+
+      const finalScore = secondScore ?? firstScore
+      const regenNote = secondScore ? ` (regenerated from ${firstScore.total})` : ''
+      const scoreBadge = `\n\n---\n\n*Tradecraft compliance (ICD 203): ${finalScore.total}/100 — ${finalScore.passed ? 'PASSED' : 'BELOW THRESHOLD'}${regenNote}*${finalScore.deficiencies.length > 0 ? '\n*Outstanding deficiencies: ' + finalScore.deficiencies.length + '*' : ''}`
+      return response + scoreBadge
+    } catch (err) {
+      log.warn(`ICD203 validation failed: ${err}`)
+    }
     return response
   }
 }

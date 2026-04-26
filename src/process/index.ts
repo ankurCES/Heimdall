@@ -180,6 +180,45 @@ async function initializeDeferred(): Promise<void> {
     catch (err) { log.error(`insider.scan failed: ${err}`) }
   })
 
+  // MITRE ATT&CK refresh — Mondays 05:00 local, weekly. The bundle changes
+  // roughly twice a year so weekly is overkill but cheap (~3MB). Lazy import
+  // to keep boot light.
+  cronService.schedule('training.mitre', '0 5 * * 1', 'MITRE ATT&CK weekly refresh', async () => {
+    try {
+      const { mitreIngester } = await import('./services/training/MitreIngester')
+      const stats = await mitreIngester.run()
+      log.info(`training.mitre: ${stats.inserted} indicators in ${stats.durationMs}ms`)
+    } catch (err) { log.error(`training.mitre failed: ${err}`) }
+  })
+
+  // MISP public feeds — 04:45 local, daily. Free + no-auth feeds (CIRCL,
+  // botvrij, optionally ThreatFox). Pull most-recent N events per feed.
+  cronService.schedule('training.misp', '45 4 * * *', 'MISP public feeds daily refresh', async () => {
+    try {
+      const { mispFeedIngester } = await import('./services/training/MispFeedIngester')
+      const results = await mispFeedIngester.runAll()
+      const total = results.reduce((s, r) => s + r.inserted, 0)
+      log.info(`training.misp: ${total} indicators across ${results.length} feeds`)
+    } catch (err) { log.error(`training.misp failed: ${err}`) }
+  })
+
+  // Bootstrap MITRE on first run — fire 30s after boot if threat_feeds is
+  // empty, so a fresh install gets useful threat data without waiting for
+  // Monday 5am. Wrapped in a slight delay to let Phase 2 init settle.
+  setTimeout(async () => {
+    try {
+      const { threatFeedMatcher } = await import('./services/training/ThreatFeedMatcher')
+      const stats = threatFeedMatcher.getStats()
+      if (stats.total === 0) {
+        log.info('training: threat_feeds empty — bootstrapping MITRE ATT&CK')
+        const { mitreIngester } = await import('./services/training/MitreIngester')
+        await mitreIngester.run()
+      } else {
+        log.info(`training: threat_feeds already populated (${stats.total} indicators)`)
+      }
+    } catch (err) { log.warn(`training bootstrap failed: ${err}`) }
+  }, 30_000)
+
   // TAXII server — honour the settings.enabled flag. Silent if disabled.
   try { await taxiiServer.ensureRunning() }
   catch (err) { log.warn(`taxii ensureRunning: ${(err as Error).message}`) }

@@ -118,7 +118,10 @@ const testChannels = [
   'telegram-intel:delete', 'telegram-intel:media_preview', 'telegram-intel:pending_count',
   'workflow:node_types', 'workflow:register_custom_node',
   'workflow:list', 'workflow:get', 'workflow:save', 'workflow:delete',
-  'workflow:execute', 'workflow:runs'
+  'workflow:execute', 'workflow:runs',
+  'training:status', 'training:mitre_sync', 'training:misp_sync_all',
+  'training:misp_sync_one', 'training:feeds_list', 'training:scan_text',
+  'training:crest_ingest', 'training:exemplar_preview', 'training:tradecraft_history'
 ]
 const allowedChannels = [...Object.values(IPC_CHANNELS), ...testChannels]
 const chatEvents = ['chat:chunk', 'chat:done', 'chat:error', 'chat:planRefined']

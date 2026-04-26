@@ -181,8 +181,10 @@ export function registerChatBridge(): void {
     sessionId: string
     edits: PlanEdits
     mode?: 'deep' | 'lite'
+    outputFormat?: 'auto' | 'nie' | 'pdb' | 'iir' | 'assessment'
+    sats?: { ach?: boolean; assumptions?: boolean; redTeam?: boolean; indicators?: boolean }
   }) => {
-    const { planId, sessionId, edits, mode = 'deep' } = params
+    const { planId, sessionId, edits, mode = 'deep', outputFormat = 'auto', sats } = params
 
     // Sanity-check the plan exists before kicking off streaming.
     const stored = agenticPlanStore.get(planId)
@@ -213,7 +215,7 @@ export function registerChatBridge(): void {
     let fullResponse = ''
     try {
       if (mode === 'deep') {
-        fullResponse = await deepResearchAgent.executeApproved(planId, edits, emitChunk)
+        fullResponse = await deepResearchAgent.executeApproved(planId, edits, emitChunk, outputFormat, sats)
       } else {
         fullResponse = await agenticChatOrchestrator.executeApprovedPlan(planId, edits, emitChunk)
       }

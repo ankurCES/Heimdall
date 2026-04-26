@@ -2202,6 +2202,73 @@ const migrations: Migration[] = [
       `)
       log.info('Migration 040: workflows + workflow_runs tables created')
     }
+  },
+  {
+    version: '041',
+    name: 'training_corpus_and_threat_feeds',
+    up: (db) => {
+      // Training corpus — declassified IC docs (CREST, PDB, NIE, CIB) for
+      // few-shot exemplars and entity-extraction training. The structure_json
+      // column holds the parsed section map (heading → text) used by
+      // ExemplarSelector to pull format-matched references into the prompt.
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS training_corpus (
+          id TEXT PRIMARY KEY,
+          source TEXT NOT NULL,
+          doc_reference TEXT,
+          title TEXT,
+          date_original TEXT,
+          era TEXT,
+          doc_type TEXT,
+          topic_tags TEXT,
+          region_tags TEXT,
+          content_text TEXT,
+          structure_json TEXT,
+          entities_json TEXT,
+          quality_score REAL DEFAULT 0,
+          ingested_at INTEGER NOT NULL,
+          used_for_training INTEGER NOT NULL DEFAULT 0
+        );
+        CREATE INDEX IF NOT EXISTS idx_tc_source ON training_corpus(source);
+        CREATE INDEX IF NOT EXISTS idx_tc_doc_type ON training_corpus(doc_type);
+        CREATE INDEX IF NOT EXISTS idx_tc_era ON training_corpus(era);
+        CREATE INDEX IF NOT EXISTS idx_tc_quality ON training_corpus(quality_score DESC);
+
+        CREATE TABLE IF NOT EXISTS threat_feeds (
+          id TEXT PRIMARY KEY,
+          feed_source TEXT NOT NULL,
+          indicator_type TEXT NOT NULL,
+          indicator_value TEXT NOT NULL,
+          context TEXT,
+          severity TEXT,
+          first_seen INTEGER,
+          last_seen INTEGER,
+          tags TEXT,
+          stix_id TEXT,
+          misp_event_id TEXT,
+          created_at INTEGER NOT NULL,
+          UNIQUE(feed_source, indicator_type, indicator_value)
+        );
+        CREATE INDEX IF NOT EXISTS idx_tf_indicator ON threat_feeds(indicator_type, indicator_value);
+        CREATE INDEX IF NOT EXISTS idx_tf_source ON threat_feeds(feed_source);
+        CREATE INDEX IF NOT EXISTS idx_tf_severity ON threat_feeds(severity);
+
+        -- Stores the ICD-203 tradecraft compliance score per generated report
+        -- so we can track quality drift over time and surface in the UI.
+        CREATE TABLE IF NOT EXISTS report_quality_scores (
+          id TEXT PRIMARY KEY,
+          session_id TEXT,
+          report_format TEXT NOT NULL,
+          tradecraft_score INTEGER NOT NULL,
+          deficiencies_json TEXT,
+          regenerated INTEGER NOT NULL DEFAULT 0,
+          created_at INTEGER NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_rqs_session ON report_quality_scores(session_id);
+        CREATE INDEX IF NOT EXISTS idx_rqs_score ON report_quality_scores(tradecraft_score);
+      `)
+      log.info('Migration 041: training_corpus + threat_feeds + report_quality_scores tables created')
+    }
   }
 ]
 

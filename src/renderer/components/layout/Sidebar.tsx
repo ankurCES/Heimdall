@@ -4,7 +4,8 @@ import {
   LayoutDashboard, FileText, Database, Bell, Map, MessageSquare, Send,
   Settings, Activity, BookOpen, Coins, BarChart3, Radio,
   Layers, RefreshCw, Sparkles, Eye, AlertOctagon, GitCompare, TrendingUp,
-  Network, Users, ShieldAlert, Shield, Bug, Moon, MapPin, Image, Share2, Brain, ChevronLeft, ChevronRight, ChevronDown
+  Network, Users, ShieldAlert, Shield, Bug, Moon, MapPin, Image, Share2, Brain, ChevronLeft, ChevronRight, ChevronDown,
+  Workflow
 } from 'lucide-react'
 import { cn } from '@renderer/lib/utils'
 import heimdallLogo from '@renderer/assets/heimdall-logo.png'
@@ -66,11 +67,11 @@ const NAV_GROUPS: NavGroup[] = [
     label: 'AI & Comms',
     items: [
       { to: '/chat', icon: MessageSquare, label: 'Chat' },
+      { to: '/workflows', icon: Workflow, label: 'Workflows' },
       { to: '/memory', icon: Brain, label: 'Memory' },
       { to: '/alerts', icon: Bell, label: 'Alerts' },
       { to: '/meshtastic', icon: Radio, label: 'Meshtastic' },
-      { to: '/telegram-intel', icon: Send, label: 'Telegram Intel' },
-      { to: '/workflows', icon: GitCompare, label: 'Workflows' }
+      { to: '/telegram-intel', icon: Send, label: 'Telegram Intel' }
     ]
   },
   {

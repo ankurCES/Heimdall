@@ -225,6 +225,29 @@ class DarkWebEnrichmentServiceImpl {
       newSeverity = 'high'
     }
 
+    // Threat-feed cross-reference: if any extracted IOC matches a known-bad
+    // entry from MITRE/MISP feeds, escalate severity. The threat_feed match
+    // is a stronger signal than the deterministic heuristics above because
+    // it represents a curated indicator (not a regex hit on raw text).
+    try {
+      const { threatFeedMatcher } = await import('../training/ThreatFeedMatcher')
+      const indicators = result.iocs.map((i) => ({
+        type: i.type as Parameters<typeof threatFeedMatcher.match>[0],
+        value: i.value
+      }))
+      const feedMatches = threatFeedMatcher.matchBatch(indicators)
+      if (feedMatches.length > 0) {
+        const hasCritical = feedMatches.some((m) => m.severity === 'critical')
+        const hasHigh = feedMatches.some((m) => m.severity === 'high')
+        if (hasCritical) newSeverity = 'critical'
+        else if (hasHigh && newSeverity !== 'critical') newSeverity = 'high'
+        else if (!newSeverity) newSeverity = 'medium'
+        log.debug(`DarkWebEnrich ${reportId}: ${feedMatches.length} threat-feed matches → severity ${newSeverity}`)
+      }
+    } catch (err) {
+      log.debug(`threat-feed cross-ref failed for ${reportId}: ${err}`)
+    }
+
     if (newSeverity) {
       try {
         // Only bump UP — don't downgrade a manually-set severity.

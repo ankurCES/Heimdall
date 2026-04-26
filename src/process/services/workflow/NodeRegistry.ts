@@ -582,6 +582,174 @@ nodeRegistry.register({
   return { trueOutput: matches ? value : '', falseOutput: matches ? '' : value }
 })
 
+// ── Phase 6 — IC-tradecraft analysis nodes ──────────────────────────
+// These wrap the structured-analytic-techniques + ICD 203 + threat-feed
+// services so analysts can drop them into custom workflows alongside
+// the search/fetch/synthesis nodes.
+
+// Format Selector — wraps a synthesized text into one of the 4 IC formats
+nodeRegistry.register({
+  type: 'FormatSelector', label: 'Format Selector',
+  description: 'Cast a synthesized assessment into NIE / PDB / IIR / Full Assessment format',
+  category: 'output', icon: 'FileText', color: 'border-amber-400',
+  inputs: [
+    { name: 'query', type: 'text', description: 'Original analytic question' },
+    { name: 'findings', type: 'text', description: 'Concatenated findings text' }
+  ],
+  outputs: [{ name: 'prompt', type: 'text', description: 'Format-specific prompt for the analyst LLM' }],
+  configSchema: [{
+    name: 'format', type: 'select', label: 'Format',
+    default: 'assessment',
+    options: [
+      { label: 'Auto-select', value: 'auto' },
+      { label: 'NIE', value: 'nie' },
+      { label: 'PDB Item', value: 'pdb' },
+      { label: 'IIR', value: 'iir' },
+      { label: 'Full Assessment', value: 'assessment' }
+    ]
+  }]
+}, async (ctx) => {
+  const { buildPromptForFormat, autoSelectFormat, isCountryOrEventQuery } = await import('../report/ReportFormatter')
+  const query = String(ctx.inputs.query || '')
+  const fmt = ctx.config.format as 'auto' | 'nie' | 'pdb' | 'iir' | 'assessment'
+  const resolved = fmt === 'auto'
+    ? autoSelectFormat({
+        query, hasMultipleDisciplines: false, isFollowUp: false,
+        preliminaryFindingsCount: 0, hasIocs: false,
+        isAboutCountryOrEvent: isCountryOrEventQuery(query)
+      })
+    : fmt
+  return { prompt: buildPromptForFormat(resolved, query) }
+})
+
+// ACH Matrix — runs Heuer's hypothesis-testing
+nodeRegistry.register({
+  type: 'ACHMatrix', label: 'ACH Matrix',
+  description: 'Analysis of Competing Hypotheses (Heuer matrix)',
+  category: 'analysis', icon: 'Grid3x3', color: 'border-cyan-400',
+  inputs: [
+    { name: 'query', type: 'text' },
+    { name: 'findings', type: 'text', description: 'Findings text (will be split on ---)' }
+  ],
+  outputs: [{ name: 'achMarkdown', type: 'text', description: 'Formatted ACH annex' }],
+  configSchema: []
+}, async (ctx) => {
+  const { runAchMatrix, formatAchAsMarkdown } = await import('../analysis/StructuredAnalyticTechniques')
+  const findings = String(ctx.inputs.findings || '').split(/\n---\n/).filter(Boolean)
+  const result = await runAchMatrix(String(ctx.inputs.query || ''), findings, ctx.connectionId)
+  return { achMarkdown: result ? formatAchAsMarkdown(result) : '' }
+})
+
+// Key Assumptions Check
+nodeRegistry.register({
+  type: 'KeyAssumptions', label: 'Key Assumptions Check',
+  description: 'Surface and challenge implicit assumptions in an assessment',
+  category: 'analysis', icon: 'AlertTriangle', color: 'border-amber-400',
+  inputs: [{ name: 'assessment', type: 'text' }],
+  outputs: [{ name: 'kacMarkdown', type: 'text' }],
+  configSchema: []
+}, async (ctx) => {
+  const { runKeyAssumptionsCheck, formatAssumptionsAsMarkdown } = await import('../analysis/StructuredAnalyticTechniques')
+  const items = await runKeyAssumptionsCheck(String(ctx.inputs.assessment || ''), ctx.connectionId)
+  return { kacMarkdown: items ? formatAssumptionsAsMarkdown(items) : '' }
+})
+
+// Red Team — Devil's Advocacy + Red Hat
+nodeRegistry.register({
+  type: 'RedTeam', label: 'Red Team',
+  description: 'Devil\'s Advocacy + Red Hat (adversary perspective)',
+  category: 'analysis', icon: 'Swords', color: 'border-red-400',
+  inputs: [{ name: 'assessment', type: 'text' }],
+  outputs: [{ name: 'redTeamMarkdown', type: 'text' }],
+  configSchema: []
+}, async (ctx) => {
+  const { runRedTeamAnalysis, formatRedTeamAsMarkdown } = await import('../analysis/StructuredAnalyticTechniques')
+  const result = await runRedTeamAnalysis(String(ctx.inputs.assessment || ''), ctx.connectionId)
+  return { redTeamMarkdown: result ? formatRedTeamAsMarkdown(result) : '' }
+})
+
+// Indicators & Warnings
+nodeRegistry.register({
+  type: 'Indicators', label: 'Indicators & Warnings',
+  description: 'Generate confirming/refuting indicators per key judgment',
+  category: 'analysis', icon: 'Target', color: 'border-cyan-400',
+  inputs: [{ name: 'assessment', type: 'text' }],
+  outputs: [{ name: 'indicatorsMarkdown', type: 'text' }],
+  configSchema: []
+}, async (ctx) => {
+  const { runIndicatorsFramework, formatIndicatorsAsMarkdown } = await import('../analysis/StructuredAnalyticTechniques')
+  const items = await runIndicatorsFramework(String(ctx.inputs.assessment || ''), ctx.connectionId)
+  return { indicatorsMarkdown: items ? formatIndicatorsAsMarkdown(items) : '' }
+})
+
+// Threat-feed cross-reference
+nodeRegistry.register({
+  type: 'ThreatFeedCheck', label: 'Threat-Feed Cross-Reference',
+  description: 'Scan text for IOCs and match against MITRE ATT&CK + MISP feeds',
+  category: 'analysis', icon: 'ShieldAlert', color: 'border-orange-400',
+  inputs: [{ name: 'text', type: 'text' }],
+  outputs: [
+    { name: 'matches', type: 'text', description: 'Formatted match annotations' },
+    { name: 'matchCount', type: 'text', description: 'Number of matches as string' }
+  ],
+  configSchema: []
+}, async (ctx) => {
+  const { threatFeedMatcher } = await import('../training/ThreatFeedMatcher')
+  const matches = threatFeedMatcher.scanText(String(ctx.inputs.text || ''))
+  return {
+    matches: threatFeedMatcher.formatAnnotations(matches),
+    matchCount: String(matches.length)
+  }
+})
+
+// Tradecraft scorer
+nodeRegistry.register({
+  type: 'TradecraftScore', label: 'Tradecraft Scorer (ICD 203)',
+  description: 'Score a report against the 9 ICD 203 analytic tradecraft standards',
+  category: 'analysis', icon: 'GraduationCap', color: 'border-purple-400',
+  inputs: [{ name: 'report', type: 'text' }],
+  outputs: [
+    { name: 'scoreText', type: 'text', description: 'XX/100 — PASSED/BELOW' },
+    { name: 'deficiencies', type: 'text', description: 'Bullet list of deficiencies' }
+  ],
+  configSchema: [{ name: 'threshold', type: 'number', label: 'Pass threshold (0-100)', default: 70 }]
+}, async (ctx) => {
+  const { validateReport } = await import('../report/ICD203Validator')
+  const threshold = Number(ctx.config.threshold) || 70
+  const score = validateReport(String(ctx.inputs.report || ''), threshold)
+  const deficiencies = score.deficiencies.length > 0
+    ? score.deficiencies.map((d, i) => `${i + 1}. ${d}`).join('\n')
+    : '_None — all standards met_'
+  return {
+    scoreText: `${score.total}/100 — ${score.passed ? 'PASSED' : 'BELOW THRESHOLD'}`,
+    deficiencies
+  }
+})
+
+// Exemplar injector
+nodeRegistry.register({
+  type: 'ExemplarInject', label: 'Exemplar Injector',
+  description: 'Pull 1-2 declassified IC documents matching the topic + format',
+  category: 'transform', icon: 'Library', color: 'border-amber-400',
+  inputs: [{ name: 'query', type: 'text' }],
+  outputs: [{ name: 'exemplarsMarkdown', type: 'text' }],
+  configSchema: [{
+    name: 'format', type: 'select', label: 'Format',
+    default: 'assessment',
+    options: [
+      { label: 'NIE', value: 'nie' },
+      { label: 'PDB Item', value: 'pdb' },
+      { label: 'IIR', value: 'iir' },
+      { label: 'Full Assessment', value: 'assessment' }
+    ]
+  }]
+}, async (ctx) => {
+  const { exemplarSelector } = await import('../training/ExemplarSelector')
+  const fmt = ctx.config.format as 'nie' | 'pdb' | 'iir' | 'assessment'
+  const exemplars = exemplarSelector.select(fmt, String(ctx.inputs.query || ''))
+  return { exemplarsMarkdown: exemplarSelector.buildPromptFragment(exemplars) }
+})
+
 // ── Auto-register MCP tools as workflow nodes ──────────────────────
 // This runs lazily when the node registry is first queried — by then
 // the MCP servers have started and their tools are in ToolRegistry.
