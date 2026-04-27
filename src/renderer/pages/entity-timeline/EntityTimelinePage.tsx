@@ -18,8 +18,9 @@ import { useEffect, useMemo, useState } from 'react'
 import { useParams, useNavigate, Link } from 'react-router-dom'
 import {
   Clock, FileText, Mic, Users, FileScan, ScrollText, Image as ImageIcon,
-  ArrowLeft, Loader2, AlertCircle, GitMerge, Network, MapPin, List
+  ArrowLeft, Loader2, AlertCircle, GitMerge, Network, MapPin, List, Combine
 } from 'lucide-react'
+import { toast } from 'sonner'
 import { MapContainer, TileLayer, CircleMarker, Popup } from 'react-leaflet'
 import 'leaflet/dist/leaflet.css'
 import { Button } from '@renderer/components/ui/button'
@@ -219,6 +220,36 @@ export function EntityTimelinePage() {
     })
   }
 
+  // v1.7.3 — fold this canonical entity into another. The analyst
+  // pastes the target id (copyable from /entities or from the
+  // Co-mentions sidebar's button-id). Confirm dialog spells out the
+  // irreversible-by-default-but-audit-logged consequence.
+  const mergeIntoTarget = async () => {
+    if (!id || !timeline) return
+    const targetId = prompt(
+      `Fold "${timeline.summary.canonical_value}" into another canonical entity.\n\n` +
+      `Paste the target canonical id (UUID). Every intel_entities row pointing here will be repointed at the target. ` +
+      `This canonical entity will then be deleted.\n\n` +
+      `Audit-logged. Reversible only by re-running the resolver and re-clustering from scratch.`
+    )
+    if (!targetId) return
+    try {
+      const r = await window.heimdall.invoke('entity:merge', {
+        sourceIds: [id],
+        targetId: targetId.trim()
+      }) as { ok: boolean; target_canonical_id: string; reassigned_intel_entities: number }
+      toast.success('Merge applied', {
+        description: `${r.reassigned_intel_entities} mention${r.reassigned_intel_entities !== 1 ? 's' : ''} reassigned. Navigating to target…`,
+        duration: 4000
+      })
+      // Navigate to the target (this canonical was deleted).
+      navigate(`/entity/${encodeURIComponent(r.target_canonical_id)}`)
+    } catch (err) {
+      const msg = String(err).replace(/^Error:\s*/, '')
+      toast.error('Merge failed', { description: msg, duration: 8000 })
+    }
+  }
+
   if (!id) return <div className="p-6 text-sm text-muted-foreground">Missing entity id in URL.</div>
 
   return (
@@ -233,6 +264,25 @@ export function EntityTimelinePage() {
           <Badge variant="outline" className="text-[10px] ml-2">v1.7.0</Badge>
           {timeline?.summary.entity_type && (
             <Badge className="text-[10px] uppercase">{timeline.summary.entity_type}</Badge>
+          )}
+          {timeline && (
+            <div className="ml-auto flex items-center gap-1">
+              <Button
+                size="sm" variant="ghost"
+                onClick={mergeIntoTarget}
+                className="h-8 text-amber-600 dark:text-amber-400 hover:bg-amber-500/10"
+                title="Fold this canonical into another (audit-logged)"
+              >
+                <Combine className="h-3.5 w-3.5 mr-1" /> Merge into…
+              </Button>
+              <button
+                onClick={() => { navigator.clipboard?.writeText(id ?? ''); toast.message('Canonical id copied') }}
+                className="text-[10px] text-muted-foreground hover:text-foreground font-mono px-2 py-1 rounded border border-border"
+                title="Copy this canonical id (use as merge target on another entity)"
+              >
+                copy id
+              </button>
+            </div>
           )}
         </div>
         {timeline && (

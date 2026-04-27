@@ -5,6 +5,7 @@ import { patternOfLifeService } from '../services/entity/PatternOfLifeService'
 import { entityTimelineService } from '../services/entity/EntityTimelineService'
 import { entityCoMentionService } from '../services/entity/EntityCoMentionService'
 import { entityGeoService } from '../services/entity/EntityGeoService'
+import { entityMergeService } from '../services/entity/EntityMergeService'
 
 /**
  * Theme 4.6 — entity resolution IPC.
@@ -58,6 +59,14 @@ export function registerEntityBridge(): void {
   // (FTS5 MATCH on aliases) where lat/long are non-null.
   ipcMain.handle('entity:geo_pins', (_evt, args: { id: string; limitPerCorpus?: number }) => {
     return entityGeoService.getPins(args.id, args.limitPerCorpus ?? 200)
+  })
+
+  // v1.7.3 — analyst-driven canonical correction.
+  ipcMain.handle('entity:merge', (_evt, args: { sourceIds: string[]; targetId: string }) => {
+    return entityMergeService.merge(args.sourceIds, args.targetId)
+  })
+  ipcMain.handle('entity:split', (_evt, args: { sourceCanonicalId: string; splitValues: string[]; newCanonicalValue: string }) => {
+    return entityMergeService.split(args)
   })
 
   log.info('entity bridge registered')

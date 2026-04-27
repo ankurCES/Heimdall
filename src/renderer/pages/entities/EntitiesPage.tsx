@@ -64,6 +64,10 @@ export function EntitiesPage() {
   const [top, setTop] = useState<CanonicalEntity[]>([])
   const [selected, setSelected] = useState<CanonicalEntity | null>(null)
   const [aliases, setAliases] = useState<AliasRow[]>([])
+  // v1.7.3 — analyst-driven split. Track selected alias values; the
+  // Split button submits them with a chosen new canonical name.
+  const [splitSelection, setSplitSelection] = useState<Set<string>>(new Set())
+  const [splitting, setSplitting] = useState(false)
   const [reports, setReports] = useState<ReportRow[]>([])
   const [pol, setPol] = useState<PolGrid | null>(null)
   const [resolving, setResolving] = useState(false)
@@ -119,6 +123,7 @@ export function EntitiesPage() {
   const selectEntity = async (e: CanonicalEntity) => {
     setSelected(e)
     setAliases([]); setReports([]); setPol(null)
+    setSplitSelection(new Set())
     try {
       const [a, r, p] = await Promise.all([
         window.heimdall.invoke('entity:aliases', e.id),
@@ -300,14 +305,84 @@ export function EntitiesPage() {
                     {aliases.length === 0 ? (
                       <p className="text-xs text-muted-foreground">Loading…</p>
                     ) : (
-                      <ul className="space-y-1">
-                        {aliases.map((a) => (
-                          <li key={a.entity_value} className="flex items-center gap-2 text-xs py-1 border-b border-border/30 last:border-0">
-                            <span className="flex-1 truncate">{a.entity_value}</span>
-                            <span className="font-mono text-muted-foreground">{a.mention_count}</span>
-                          </li>
-                        ))}
-                      </ul>
+                      <>
+                        <ul className="space-y-1">
+                          {aliases.map((a) => {
+                            const checked = splitSelection.has(a.entity_value)
+                            return (
+                              <li key={a.entity_value} className="flex items-center gap-2 text-xs py-1 border-b border-border/30 last:border-0">
+                                <input
+                                  type="checkbox"
+                                  checked={checked}
+                                  onChange={(e) => {
+                                    setSplitSelection((cur) => {
+                                      const next = new Set(cur)
+                                      if (e.target.checked) next.add(a.entity_value)
+                                      else next.delete(a.entity_value)
+                                      return next
+                                    })
+                                  }}
+                                  className="shrink-0 cursor-pointer"
+                                  title="Select to split off into a new canonical entity"
+                                />
+                                <span className="flex-1 truncate">{a.entity_value}</span>
+                                <span className="font-mono text-muted-foreground">{a.mention_count}</span>
+                              </li>
+                            )
+                          })}
+                        </ul>
+                        {/* v1.7.3 — split action. Disabled when none
+                            selected or all selected (splitting all
+                            would empty the canonical and is a delete
+                            in disguise — refuse). */}
+                        {splitSelection.size > 0 && (
+                          <div className="mt-3 pt-3 border-t border-border space-y-2">
+                            <div className="text-[11px] text-muted-foreground">
+                              <strong className="text-foreground">{splitSelection.size}</strong> alias{splitSelection.size !== 1 ? 'es' : ''} selected to split off
+                            </div>
+                            <Button
+                              size="sm" variant="outline"
+                              disabled={splitting || splitSelection.size === aliases.length}
+                              onClick={async () => {
+                                if (!selected) return
+                                const newName = prompt(
+                                  `Create a new canonical entity from the selected ${splitSelection.size} alias${splitSelection.size !== 1 ? 'es' : ''}.\n\n` +
+                                  `Display name for the new canonical:`,
+                                  Array.from(splitSelection)[0]
+                                )
+                                if (!newName) return
+                                setSplitting(true)
+                                try {
+                                  const r = await window.heimdall.invoke('entity:split', {
+                                    sourceCanonicalId: selected.id,
+                                    splitValues: Array.from(splitSelection),
+                                    newCanonicalValue: newName.trim()
+                                  }) as { ok: boolean; new_canonical_id: string; reassigned_intel_entities: number }
+                                  alert(`Split done — ${r.reassigned_intel_entities} mention${r.reassigned_intel_entities !== 1 ? 's' : ''} reseated under new canonical "${newName}".`)
+                                  // Reload aliases for the source.
+                                  await selectEntity(selected)
+                                  setSplitSelection(new Set())
+                                } catch (err) {
+                                  alert(`Split failed: ${String(err).replace(/^Error:\s*/, '')}`)
+                                } finally { setSplitting(false) }
+                              }}
+                              className="h-8 w-full"
+                            >
+                              {splitting ? (
+                                <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />
+                              ) : (
+                                <Tag className="h-3.5 w-3.5 mr-1" />
+                              )}
+                              Split off into new canonical…
+                            </Button>
+                            {splitSelection.size === aliases.length && (
+                              <p className="text-[11px] text-amber-600 dark:text-amber-400">
+                                Cannot split off every alias — that would empty this canonical. Deselect at least one.
+                              </p>
+                            )}
+                          </div>
+                        )}
+                      </>
                     )}
                   </CardContent>
                 </Card>
