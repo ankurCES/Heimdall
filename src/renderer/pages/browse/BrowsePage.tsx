@@ -48,7 +48,19 @@ export function BrowsePage() {
   const [total, setTotal] = useState(0)
   const [loading, setLoading] = useState(false)
   const [activeCategory, setActiveCategory] = useState('all')
-  const [searchQuery, setSearchQuery] = useState('')
+  // v1.5.4 — Cmd-K spotlight can hand off a query to this page via
+  // sessionStorage. Initial state honours the hint, then clears it
+  // so reloading the page doesn't re-seed an old query.
+  const [searchQuery, setSearchQuery] = useState(() => {
+    if (typeof sessionStorage !== 'undefined') {
+      const hint = sessionStorage.getItem('browse:query')
+      if (hint) {
+        sessionStorage.removeItem('browse:query')
+        return hint
+      }
+    }
+    return ''
+  })
   const [selectedReport, setSelectedReport] = useState<IntelReport | null>(null)
   const [categoryCounts, setCategoryCounts] = useState<Record<string, number>>({})
 

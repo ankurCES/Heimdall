@@ -84,7 +84,17 @@ const SOURCE_TYPE_LABELS: Record<string, string> = {
 
 export function FeedPage() {
   const { reports, total, loading, filters, fetchReports, setFilters, markReviewed } = useIntelStore()
-  const [searchInput, setSearchInput] = useState('')
+  // v1.5.4 — honour Cmd-K spotlight handoff via sessionStorage.
+  const [searchInput, setSearchInput] = useState(() => {
+    if (typeof sessionStorage !== 'undefined') {
+      const hint = sessionStorage.getItem('feed:query')
+      if (hint) {
+        sessionStorage.removeItem('feed:query')
+        return hint
+      }
+    }
+    return ''
+  })
   const [selectedReport, setSelectedReport] = useState<IntelReport | null>(null)
   const [sourceTypes, setSourceTypes] = useState<Array<{ type: string; count: number }>>([])
 
@@ -94,6 +104,17 @@ export function FeedPage() {
       setSourceTypes(rows as Array<{ type: string; count: number }>)
     })
   }, [fetchReports])
+
+  // v1.5.4 — when handed a seeded query from Cmd-K, push it to filters
+  // so the list refreshes with the search applied automatically.
+  // Runs once on mount; the searchInput-vs-filters.search guard
+  // prevents this from looping.
+  useEffect(() => {
+    if (searchInput && filters.search !== searchInput) {
+      setFilters({ ...filters, search: searchInput })
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   const handleSearch = () => {
     setFilters({ ...filters, search: searchInput || undefined })

@@ -357,6 +357,34 @@ export function UniversalSearchOverlay() {
               <div className="font-mono">↑↓ navigate · Enter open · Esc close · ⌘K toggle · ★ save</div>
             </div>
           )}
+          {/* v1.5.4 — handoff buttons. When the analyst wants to keep
+              browsing rather than open a single hit, these seed the
+              query into Browse / Feed via sessionStorage. */}
+          {!showSaved && hits.length > 0 && (
+            <div className="px-3 py-1.5 flex items-center gap-2 text-[11px] border-b border-border bg-muted/10">
+              <span className="text-muted-foreground">Show all in:</span>
+              <button
+                onClick={() => {
+                  sessionStorage.setItem('browse:query', query)
+                  setOpen(false)
+                  navigate('/browse')
+                }}
+                className="px-2 py-0.5 rounded border border-border text-muted-foreground hover:bg-accent hover:text-foreground"
+              >
+                Browse
+              </button>
+              <button
+                onClick={() => {
+                  sessionStorage.setItem('feed:query', query)
+                  setOpen(false)
+                  navigate('/feed')
+                }}
+                className="px-2 py-0.5 rounded border border-border text-muted-foreground hover:bg-accent hover:text-foreground"
+              >
+                Feed
+              </button>
+            </div>
+          )}
           {hits.map((hit, i) => (
             <button
               key={`${hit.kind}-${hit.id}`}
