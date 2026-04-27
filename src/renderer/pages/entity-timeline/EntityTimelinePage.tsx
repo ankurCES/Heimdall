@@ -18,8 +18,10 @@ import { useEffect, useMemo, useState } from 'react'
 import { useParams, useNavigate, Link } from 'react-router-dom'
 import {
   Clock, FileText, Mic, Users, FileScan, ScrollText, Image as ImageIcon,
-  ArrowLeft, Loader2, AlertCircle, GitMerge, Network
+  ArrowLeft, Loader2, AlertCircle, GitMerge, Network, MapPin, List
 } from 'lucide-react'
+import { MapContainer, TileLayer, CircleMarker, Popup } from 'react-leaflet'
+import 'leaflet/dist/leaflet.css'
 import { Button } from '@renderer/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@renderer/components/ui/card'
 import { Badge } from '@renderer/components/ui/badge'
@@ -78,6 +80,31 @@ interface CoMentionGraph {
   edges: CoMention[]
 }
 
+// v1.7.2 — geo pins for the map overlay.
+type GeoPinKind = 'intel' | 'image'
+interface GeoPin {
+  kind: GeoPinKind
+  id: string
+  title: string
+  ts: number
+  lat: number
+  lng: number
+  meta: {
+    discipline?: string
+    severity?: string
+    sourceName?: string
+    cameraMake?: string | null
+    cameraModel?: string | null
+  }
+}
+interface EntityGeoPayload {
+  source_canonical_id: string
+  source_canonical_value: string
+  pins: GeoPin[]
+  bounds: { sw: [number, number]; ne: [number, number] } | null
+  by_kind: Record<GeoPinKind, number>
+}
+
 const KIND_META: Record<Kind, { label: string; icon: typeof FileText; color: string }> = {
   intel:      { label: 'Intel',       icon: FileText,    color: 'text-blue-600 dark:text-blue-400' },
   transcript: { label: 'Transcript',  icon: Mic,         color: 'text-emerald-600 dark:text-emerald-400' },
@@ -125,9 +152,12 @@ export function EntityTimelinePage() {
   const navigate = useNavigate()
   const [timeline, setTimeline] = useState<Timeline | null>(null)
   const [coMentions, setCoMentions] = useState<CoMentionGraph | null>(null)
+  const [geo, setGeo] = useState<EntityGeoPayload | null>(null)
   const [loading, setLoading] = useState(true)
   const [coMentionsLoading, setCoMentionsLoading] = useState(false)
+  const [geoLoading, setGeoLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [view, setView] = useState<'timeline' | 'map'>('timeline')
   const [activeKinds, setActiveKinds] = useState<Set<Kind>>(new Set(['intel', 'transcript', 'humint', 'document', 'briefing', 'image']))
 
   useEffect(() => {
@@ -152,6 +182,15 @@ export function EntityTimelinePage() {
         setCoMentions(r ?? null)
       } catch { setCoMentions(null) }
       finally { setCoMentionsLoading(false) }
+    })()
+    setGeoLoading(true)
+    setGeo(null)
+    void (async () => {
+      try {
+        const r = await window.heimdall.invoke('entity:geo_pins', { id, limitPerCorpus: 200 }) as EntityGeoPayload | null
+        setGeo(r ?? null)
+      } catch { setGeo(null) }
+      finally { setGeoLoading(false) }
     })()
   }, [id])
 
@@ -233,6 +272,34 @@ export function EntityTimelinePage() {
             </span>
             <span>· {timeline.summary.alias_count} alias{timeline.summary.alias_count !== 1 ? 'es' : ''}</span>
             <span>· {visibleEvents.length} of {timeline.events.length} mention{timeline.events.length !== 1 ? 's' : ''} shown</span>
+            {/* v1.7.2 — view toggle. Map button disabled when no
+                geo-tagged pins exist for this entity. */}
+            <div className="ml-auto flex items-center gap-1 border border-border rounded-md p-0.5">
+              <button
+                onClick={() => setView('timeline')}
+                className={cn(
+                  'text-[11px] px-2 py-0.5 rounded flex items-center gap-1',
+                  view === 'timeline' ? 'bg-primary/15 text-primary font-medium' : 'text-muted-foreground hover:text-foreground'
+                )}
+              >
+                <List className="h-3 w-3" /> Timeline
+              </button>
+              <button
+                onClick={() => setView('map')}
+                disabled={!geo || geo.pins.length === 0}
+                className={cn(
+                  'text-[11px] px-2 py-0.5 rounded flex items-center gap-1',
+                  view === 'map' ? 'bg-primary/15 text-primary font-medium' : 'text-muted-foreground hover:text-foreground',
+                  (!geo || geo.pins.length === 0) && 'opacity-50 cursor-not-allowed'
+                )}
+                title={!geo || geo.pins.length === 0 ? 'No geo-tagged mentions for this entity' : 'Show pins on a map'}
+              >
+                <MapPin className="h-3 w-3" /> Map
+                {geo && geo.pins.length > 0 && (
+                  <span className="ml-0.5 text-[10px] font-mono">{geo.pins.length}</span>
+                )}
+              </button>
+            </div>
           </div>
         )}
       </div>
@@ -249,12 +316,82 @@ export function EntityTimelinePage() {
             <AlertCircle className="h-4 w-4" /> {error}
           </div>
         )}
-        {!loading && !error && timeline && visibleEvents.length === 0 && (
+
+        {/* v1.7.2 — map view. Renders only when toggled on AND we
+            have pins; the toggle button is disabled otherwise. */}
+        {view === 'map' && geo && geo.pins.length > 0 && (
+          <div className="space-y-2">
+            <div className="text-xs text-muted-foreground flex items-center gap-3 flex-wrap">
+              <span className="flex items-center gap-1 text-blue-600 dark:text-blue-400">
+                <FileText className="h-3 w-3" /> {geo.by_kind.intel} intel
+              </span>
+              <span className="flex items-center gap-1 text-pink-600 dark:text-pink-400">
+                <ImageIcon className="h-3 w-3" /> {geo.by_kind.image} images
+              </span>
+              <span>· {geo.pins.length} geo-tagged mention{geo.pins.length !== 1 ? 's' : ''}</span>
+            </div>
+            <div className="h-[60vh] rounded-md overflow-hidden border border-border">
+              <MapContainer
+                bounds={geo.bounds ? [geo.bounds.sw, geo.bounds.ne] : undefined}
+                center={geo.bounds ? undefined : [geo.pins[0].lat, geo.pins[0].lng]}
+                zoom={geo.bounds ? undefined : 4}
+                boundsOptions={{ padding: [40, 40] }}
+                scrollWheelZoom={true}
+                style={{ height: '100%', width: '100%', background: '#0a0a0a' }}
+                attributionControl={true}
+              >
+                <TileLayer
+                  attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a>'
+                  url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
+                  subdomains="abcd"
+                />
+                {geo.pins.map((p, i) => (
+                  <CircleMarker
+                    key={`${p.kind}-${p.id}-${i}`}
+                    center={[p.lat, p.lng]}
+                    radius={p.kind === 'intel' ? 7 : 5}
+                    pathOptions={{
+                      color: p.kind === 'intel' ? '#3b82f6' : '#ec4899',
+                      fillColor: p.kind === 'intel' ? '#3b82f6' : '#ec4899',
+                      fillOpacity: 0.7,
+                      weight: 2
+                    }}
+                    eventHandlers={{
+                      click: () => {
+                        if (p.kind === 'intel') navigate(`/library?report=${encodeURIComponent(p.id)}`)
+                        else { sessionStorage.setItem('images:focusId', p.id); navigate('/images') }
+                      }
+                    }}
+                  >
+                    <Popup>
+                      <div className="text-xs space-y-1">
+                        <div className="font-medium">{p.title}</div>
+                        <div className="text-muted-foreground">{fmtAbsolute(p.ts)}</div>
+                        {p.meta.severity && <div>Severity: {p.meta.severity}</div>}
+                        {p.meta.discipline && <div>Discipline: {p.meta.discipline}</div>}
+                        {p.meta.cameraMake && <div>{p.meta.cameraMake} {p.meta.cameraModel ?? ''}</div>}
+                        <div className="font-mono text-[10px]">{p.lat.toFixed(4)}, {p.lng.toFixed(4)}</div>
+                      </div>
+                    </Popup>
+                  </CircleMarker>
+                ))}
+              </MapContainer>
+            </div>
+          </div>
+        )}
+
+        {view === 'map' && (geoLoading || !geo || geo.pins.length === 0) && (
+          <div className="text-sm text-muted-foreground py-8 text-center">
+            {geoLoading ? 'Computing geo pins…' : 'No geo-tagged mentions for this entity yet.'}
+          </div>
+        )}
+
+        {view === 'timeline' && !loading && !error && timeline && visibleEvents.length === 0 && (
           <div className="text-sm text-muted-foreground py-8 text-center">
             No mentions match the selected corpus filters.
           </div>
         )}
-        {!loading && !error && grouped.length > 0 && (
+        {view === 'timeline' && !loading && !error && grouped.length > 0 && (
           <div className="relative">
             {/* Vertical rail */}
             <div className="absolute left-[6px] top-0 bottom-0 w-0.5 bg-border" />

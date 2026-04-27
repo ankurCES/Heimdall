@@ -4,6 +4,7 @@ import { entityResolutionService } from '../services/entity/EntityResolutionServ
 import { patternOfLifeService } from '../services/entity/PatternOfLifeService'
 import { entityTimelineService } from '../services/entity/EntityTimelineService'
 import { entityCoMentionService } from '../services/entity/EntityCoMentionService'
+import { entityGeoService } from '../services/entity/EntityGeoService'
 
 /**
  * Theme 4.6 — entity resolution IPC.
@@ -50,6 +51,13 @@ export function registerEntityBridge(): void {
   // source entity, ranked by shared-report count.
   ipcMain.handle('entity:co_mentions', (_evt, args: { id: string; limit?: number }) => {
     return entityCoMentionService.getCoMentions(args.id, args.limit ?? 25)
+  })
+
+  // v1.7.2 — geo pins for the map view on the entity timeline. Pulls
+  // intel reports (exact join via canonical_id) + image evidence
+  // (FTS5 MATCH on aliases) where lat/long are non-null.
+  ipcMain.handle('entity:geo_pins', (_evt, args: { id: string; limitPerCorpus?: number }) => {
+    return entityGeoService.getPins(args.id, args.limitPerCorpus ?? 200)
   })
 
   log.info('entity bridge registered')
