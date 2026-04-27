@@ -83,19 +83,60 @@ export class SafeFetcher {
   private isPrivateHost(hostname: string): boolean {
     const h = hostname.toLowerCase()
     // Loopback
-    if (h === 'localhost' || h === '127.0.0.1' || h === '::1') return true
+    if (h === 'localhost' || h === '127.0.0.1' || h === '::1' || h === '[::1]') return true
+    // Any 127.x.x.x — not just 127.0.0.1 (loopback range is /8)
+    if (/^127\./.test(h)) return true
     // Link-local, metadata
     if (h.startsWith('169.254.') || h === '169.254.169.254') return true
     // Cloud metadata endpoints
-    if (h === 'metadata.google.internal') return true
-    // Private RFC 1918 ranges (rough hostname check — doesn't resolve DNS,
-    // but blocks the obvious cases)
+    if (h === 'metadata.google.internal' || h === 'metadata.azure.com') return true
+    // Private RFC 1918
     if (/^10\./.test(h) || /^172\.(1[6-9]|2\d|3[01])\./.test(h) || /^192\.168\./.test(h)) return true
-    // IPv6 mapped
+    // CGNAT (RFC 6598) — 100.64.0.0/10
+    if (/^100\.(6[4-9]|[7-9]\d|1[0-1]\d|12[0-7])\./.test(h)) return true
+    // IPv4 hex / octal literal smuggling (e.g. 0x7f000001 = 127.0.0.1)
+    if (/^0x[0-9a-f]+$/.test(h) || /^0\d+$/.test(h)) return true
+    // IPv6 ULA + loopback variants
     if (h.startsWith('::ffff:127.') || h.startsWith('::ffff:10.') || h.startsWith('::ffff:192.168.')) return true
+    if (/^fc[0-9a-f]{2}:/i.test(h) || /^fd[0-9a-f]{2}:/i.test(h)) return true   // ULA fc00::/7
+    if (/^fe[89ab][0-9a-f]:/i.test(h)) return true                              // link-local fe80::/10
+    // Multicast 224.0.0.0/4
+    if (/^(22[4-9]|23\d)\./.test(h)) return true
+    // 0.0.0.0/8 + bogon
+    if (/^0\./.test(h)) return true
     // file:// protocol guard (shouldn't reach here but defence in depth)
     if (h === '' || h === '0.0.0.0') return true
     return false
+  }
+
+  /**
+   * SECURITY (v1.3.2 — finding B2): SSRF defence-in-depth. Resolves the
+   * hostname via DNS and refuses if ANY returned address is private.
+   * Defends against DNS rebinding attacks where attacker.example
+   * resolves to 127.0.0.1.
+   *
+   * Returns null if all addresses are safe; otherwise the first private
+   * address as a reason string.
+   */
+  private async resolveAndCheckPrivate(hostname: string): Promise<string | null> {
+    if (this.isPrivateHost(hostname)) return hostname
+    try {
+      // Lazy import to avoid pulling dns at module init
+      const dns = await import('dns')
+      const addresses = await new Promise<Array<{ address: string }>>((resolve) => {
+        dns.lookup(hostname, { all: true }, (err, addrs) => {
+          if (err || !addrs) resolve([])
+          else resolve(addrs)
+        })
+      })
+      for (const addr of addresses) {
+        if (this.isPrivateHost(addr.address)) return addr.address
+      }
+    } catch {
+      // If lookup fails, fall through and let the actual fetch attempt
+      // surface the error (e.g. ENOTFOUND).
+    }
+    return null
   }
 
   private airGapAllows(hostname: string): boolean {
@@ -115,6 +156,14 @@ export class SafeFetcher {
     if (this.isPrivateHost(domain)) {
       auditService.log('fetch.ssrf_blocked', { url, domain })
       throw new Error(`Blocked: ${domain} resolves to a private/internal address`)
+    }
+    // SECURITY (v1.3.2 — finding B2): defence-in-depth DNS resolve to
+    // catch DNS-rebinding (attacker.example A 127.0.0.1) and other
+    // hostname-string bypasses.
+    const resolvedPrivate = await this.resolveAndCheckPrivate(domain)
+    if (resolvedPrivate) {
+      auditService.log('fetch.ssrf_resolved_private', { url, domain, resolved: resolvedPrivate })
+      throw new Error(`Blocked: ${domain} resolves to private address ${resolvedPrivate}`)
     }
 
     // v1.3.1 — OPSEC gate. When OpSec is in paranoid mode (or air-gap
@@ -173,7 +222,13 @@ export class SafeFetcher {
     let lastError: Error | null = null
     for (let attempt = 0; attempt < maxRetries; attempt++) {
       try {
-        auditService.log('fetch.start', { url, domain, attempt })
+        // PERF (v1.3.2 — finding D3): dropped per-fetch.start audit row.
+        // Halves audit_log churn (~10-25k rows/day under typical load).
+        // The .success / .blocked / .csam / .robots / .opsec / .airgap
+        // entries still capture every meaningful event.
+        if (process.env.HEIMDALL_AUDIT_DEBUG === '1') {
+          auditService.log('fetch.start', { url, domain, attempt })
+        }
 
         let response: Response
 

@@ -204,7 +204,18 @@ export function HealthDashboardPage() {
     setLoading(false)
   }, [])
 
-  useEffect(() => { load(); const t = setInterval(load, 5000); return () => clearInterval(t) }, [load])
+  // PERF v1.3.2 D8: 5s → 15s + visibility-aware. The dashboard hits ~8
+  // IPC handlers per tick; at 5s with the page open we were burning
+  // measurable main-process CPU for no benefit when the user isn't
+  // looking. Pause when the document is hidden.
+  useEffect(() => {
+    load()
+    const t = setInterval(() => {
+      if (document.hidden) return
+      load()
+    }, 15_000)
+    return () => clearInterval(t)
+  }, [load])
 
   const pollNow = async () => {
     setPolling(true)

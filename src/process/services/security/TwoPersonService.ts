@@ -69,6 +69,24 @@ export class TwoPersonService {
   disable(): void {
     settingsService.set('twoPersonIntegrity.enabled', false)
     log.info('two-person: disabled')
+    try {
+      auditChainService.append('twoperson.disabled', {
+        entityType: 'two_person', entityId: 'self', payload: {}
+      })
+    } catch { /* noop */ }
+  }
+
+  /**
+   * Verify the second-person passphrase WITHOUT consuming an approval
+   * request. Used by the gated `twoperson:disable` IPC handler.
+   * Constant-time bcrypt compare.
+   */
+  verifyPassphrase(passphrase: string): boolean {
+    if (!passphrase) return false
+    const hash = settingsService.get<string>('twoPersonIntegrity.passphraseHash')
+    if (!hash) return false
+    try { return bcrypt.compareSync(passphrase, hash) }
+    catch { return false }
   }
 
   /** Create a pending approval request. Returns the request for the renderer to display. */
@@ -133,6 +151,23 @@ export class TwoPersonService {
     db.prepare(`
       UPDATE approval_requests SET status = 'rejected', rejection_reason = ?, resolved_at = ? WHERE id = ?
     `).run(reason, Date.now(), requestId)
+  }
+
+  /**
+   * Check that a request id is in 'approved' state for the expected
+   * action and within an acceptable freshness window. Used by privileged
+   * IPC handlers (panic_wipe, mcp:add_server, etc.) to enforce
+   * two-person integrity at the call site.
+   */
+  checkApproved(requestId: string, expectedAction: string, maxAgeMs: number = 5 * 60 * 1000): { ok: boolean; reason?: string } {
+    const req = this.get(requestId)
+    if (!req) return { ok: false, reason: 'approval request not found' }
+    if (req.status !== 'approved') return { ok: false, reason: `approval status is ${req.status}` }
+    if (req.action !== expectedAction) return { ok: false, reason: `approval is for "${req.action}", not "${expectedAction}"` }
+    if (req.resolved_at && Date.now() - req.resolved_at > maxAgeMs) {
+      return { ok: false, reason: 'approval has expired (>5 min old)' }
+    }
+    return { ok: true }
   }
 
   get(id: string): ApprovalRequest | null {

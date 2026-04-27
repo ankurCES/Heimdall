@@ -41,6 +41,12 @@ export class EnrichmentOrchestrator {
     log.info(`EnrichmentOrchestrator: stopped (enriched: ${this.stats.enriched}, vectorized: ${this.stats.vectorized})`)
   }
 
+  /** v1.3.2 — exposes the actual running state for Sentinel health checks. */
+  isRunning(): boolean { return this.running }
+  getStats(): { queued: number; enriched: number; failed: number; vectorized: number } {
+    return { ...this.stats }
+  }
+
   private async poll(): Promise<void> {
     if (!this.running || this.activeCount >= MAX_CONCURRENT) return
 

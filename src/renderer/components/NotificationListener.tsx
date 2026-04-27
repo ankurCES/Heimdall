@@ -31,7 +31,23 @@ export function NotificationListener() {
       }
     })
 
-    return () => { unsub(); unsubCollector() }
+    // FUNCTIONAL FIX (v1.3.2 — finding E2): subscribe to operational
+    // alerts dispatched via the AlertEscalationService 'desktop' channel.
+    // Previously this event had no listener and notifications were
+    // silently dropped.
+    const unsubAlert = window.heimdall.on('alert:incoming', (data: unknown) => {
+      const { severity, title, body } = data as { severity: string; title: string; body: string }
+      const subject = title || 'Heimdall alert'
+      const desc = (body || '').slice(0, 200)
+      switch (severity) {
+        case 'critical': toast.error(`🔴 ${subject}`, { description: desc, duration: 15_000 }); break
+        case 'high':     toast.warning(`🟠 ${subject}`, { description: desc, duration: 10_000 }); break
+        case 'medium':   toast.warning(subject, { description: desc }); break
+        default:         toast.info(subject, { description: desc })
+      }
+    })
+
+    return () => { unsub(); unsubCollector(); unsubAlert() }
   }, [])
 
   return null

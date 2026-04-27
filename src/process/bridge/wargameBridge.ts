@@ -20,7 +20,20 @@ export function registerWargameBridge(): void {
   ipcMain.handle('twoperson:set_passphrase', (_e, passphrase: string) => {
     twoPersonService.setPassphrase(passphrase); return { ok: true }
   })
-  ipcMain.handle('twoperson:disable', () => { twoPersonService.disable(); return { ok: true } })
+  // SECURITY (v1.3.2): require the passphrase to disable. A renderer
+  // compromise could otherwise call this directly and silently remove
+  // the second-person gate. Falls back to permissive when no passphrase
+  // is set (i.e. two-person was never properly enabled).
+  ipcMain.handle('twoperson:disable', (_e, args: { passphrase?: string } = {}) => {
+    if (twoPersonService.isEnabled() && twoPersonService.hasPassphrase()) {
+      const passphrase = args?.passphrase || ''
+      if (!passphrase) return { ok: false, error: 'passphrase required' }
+      const ok = twoPersonService.verifyPassphrase(passphrase)
+      if (!ok) return { ok: false, error: 'invalid passphrase' }
+    }
+    twoPersonService.disable()
+    return { ok: true }
+  })
   ipcMain.handle('twoperson:require', (_e, args: { action: string; artifact_type?: string; artifact_id?: string; classification: string }) =>
     twoPersonService.requireApproval(args)
   )

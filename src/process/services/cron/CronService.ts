@@ -56,6 +56,10 @@ export class CronService {
     }
   }
 
+  /** v1.3.2 — used by service health checks to confirm a cron is live. */
+  isScheduled(id: string): boolean { return this.jobs.has(id) }
+  jobCount(): number { return this.jobs.size }
+
   async runNow(id: string): Promise<void> {
     const job = this.jobs.get(id)
     if (!job) {

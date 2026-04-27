@@ -45,6 +45,12 @@ export class IntelPipeline {
     return this.processing
   }
 
+  /** v1.3.2 — Sentinel health check uses this. Pipeline is "running"
+   *  iff the cron job is registered. */
+  isRunning(): boolean {
+    return cronService.isScheduled?.('pipeline:ingest') ?? true
+  }
+
   private notify(title: string, body: string, severity: string): void {
     emitToAll(IPC_EVENTS.APP_NOTIFICATION, { title, body, severity })
   }

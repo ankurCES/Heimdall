@@ -15,9 +15,9 @@
 // @noble/ed25519 is ESM-only — main-process bundle is CJS so we lazy-load.
 // On first use we wire SHA-512 via Node's native crypto (no extra dep).
 import { randomBytes, createHash } from 'crypto'
-import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'fs'
+import { existsSync, readFileSync, writeFileSync, mkdirSync, statSync } from 'fs'
 import { join, dirname } from 'path'
-import { app } from 'electron'
+import { app, safeStorage } from 'electron'
 import log from 'electron-log'
 
 interface Ed25519Module {
@@ -59,6 +59,18 @@ function keyPath(): string {
   return join(userData, KEY_FILENAME)
 }
 
+/**
+ * SECURITY (v1.3.2 — finding B9): wrap the on-disk private key with
+ * Electron's safeStorage (OS keyring on macOS, libsecret on Linux,
+ * DPAPI on Windows). Mode 0600 alone isn't sufficient — anyone with
+ * Heimdall-process equivalent can read it; safeStorage adds an OS-level
+ * derived-key cipher.
+ *
+ * Backwards-compatible: if a legacy plaintext key file exists (32 bytes
+ * raw), we load it, re-encrypt it, and overwrite. Future loads decrypt.
+ */
+const KEY_MAGIC = 'HEIMSAFE\x01\x00'   // 10-byte marker for the encrypted format
+
 /** Load or generate the per-instance signing key pair. */
 async function getOrCreateKeyPair(): Promise<KeyPair> {
   if (cachedKeyPair) return cachedKeyPair
@@ -67,11 +79,28 @@ async function getOrCreateKeyPair(): Promise<KeyPair> {
   if (existsSync(path)) {
     try {
       const buf = readFileSync(path)
-      // Stored format: 32 bytes private key. Public derived on load.
-      const privateKey = new Uint8Array(buf.slice(0, 32))
+      let privateKey: Uint8Array
+
+      if (buf.length > KEY_MAGIC.length && buf.slice(0, KEY_MAGIC.length).toString('binary') === KEY_MAGIC) {
+        // Encrypted-format key — decrypt via safeStorage
+        if (!safeStorage.isEncryptionAvailable()) {
+          throw new Error('safeStorage not available; cannot decrypt signing key')
+        }
+        const cipher = buf.slice(KEY_MAGIC.length)
+        privateKey = new Uint8Array(safeStorage.decryptString(cipher).split(',').map(Number))
+      } else if (buf.length === 32) {
+        // Legacy plaintext key — migrate now
+        privateKey = new Uint8Array(buf)
+        log.warn('SignatureService: legacy plaintext key found; migrating to encrypted format')
+        try { await persistEncryptedKey(privateKey, path) }
+        catch (mErr) { log.warn(`SignatureService: migration failed: ${mErr}`) }
+      } else {
+        throw new Error(`unrecognized key file format (${buf.length} bytes)`)
+      }
+
       const publicKey = await (await loadEd25519()).getPublicKeyAsync(privateKey)
       cachedKeyPair = { privateKey, publicKey }
-      log.info(`SignatureService: loaded existing signing key (fingerprint: ${publicKeyFingerprint(publicKey)})`)
+      log.info(`SignatureService: loaded signing key (fingerprint: ${publicKeyFingerprint(publicKey)}, mode 0${(statSync(path).mode & 0o777).toString(8)})`)
       return cachedKeyPair
     } catch (err) {
       log.warn(`SignatureService: failed to load existing key (${err}), regenerating`)
@@ -83,7 +112,7 @@ async function getOrCreateKeyPair(): Promise<KeyPair> {
   const publicKey = await (await loadEd25519()).getPublicKeyAsync(privateKey)
   try {
     mkdirSync(dirname(path), { recursive: true })
-    writeFileSync(path, Buffer.from(privateKey), { mode: 0o600 })
+    await persistEncryptedKey(privateKey, path)
     log.info(`SignatureService: generated new signing key (fingerprint: ${publicKeyFingerprint(publicKey)})`)
   } catch (err) {
     log.warn(`SignatureService: failed to persist private key (${err}) — signatures will not survive restart`)
@@ -91,6 +120,21 @@ async function getOrCreateKeyPair(): Promise<KeyPair> {
 
   cachedKeyPair = { privateKey, publicKey }
   return cachedKeyPair
+}
+
+async function persistEncryptedKey(privateKey: Uint8Array, path: string): Promise<void> {
+  if (safeStorage.isEncryptionAvailable()) {
+    // We store the bytes as a comma-joined string because safeStorage
+    // accepts strings. Round-trip is byte-exact for 0-255 values.
+    const cipher = safeStorage.encryptString(Array.from(privateKey).join(','))
+    const blob = Buffer.concat([Buffer.from(KEY_MAGIC, 'binary'), cipher])
+    writeFileSync(path, blob, { mode: 0o600 })
+  } else {
+    // Fall back to plaintext mode 0600 if safeStorage isn't available
+    // (very rare on Electron — Linux without libsecret etc.)
+    log.warn('SignatureService: safeStorage unavailable; persisting key in plaintext (mode 0600)')
+    writeFileSync(path, Buffer.from(privateKey), { mode: 0o600 })
+  }
 }
 
 /** Short human-readable fingerprint of the public key (first 16 hex chars). */

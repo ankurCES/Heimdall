@@ -19,9 +19,14 @@ export function registerTelegramIntelBridge(): void {
   telegramReceiverService.onMessage((queueId) => safeBroadcast('telegram-intel:new_message', { queueId }))
 
   // ── Config ───────────────────────────────────────────────────────────
+  // SECURITY (v1.3.2 — finding B11): never return the raw bot token to
+  // the renderer. The settings UI only needs to know whether one is set
+  // and (for display) the last 4 chars. Set is via `:set_config`.
   ipcMain.handle('telegram-intel:get_config', () => {
+    const token = settingsService.get<string>('telegramIntel.botToken') || ''
     return {
-      botToken: settingsService.get<string>('telegramIntel.botToken') || '',
+      botTokenSet: token.length > 0,
+      botTokenPreview: token.length >= 8 ? `••••${token.slice(-4)}` : '',
       pollInterval: settingsService.get<number>('telegramIntel.pollInterval') || 5000,
       autoStart: settingsService.get<boolean>('telegramIntel.autoStart') ?? true
     }

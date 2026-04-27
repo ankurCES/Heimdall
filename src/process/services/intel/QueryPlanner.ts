@@ -68,6 +68,21 @@ export class QueryPlanner {
   /** 10-min cache for LLM-refined queries to avoid re-paying the LLM cost. */
   private llmCache = new Map<string, { plan: PlannedQuery; expiresAt: number }>()
   private readonly LLM_CACHE_TTL_MS = 10 * 60_000
+  // PERF v1.3.2 D2: hard cap; otherwise unique queries accumulate forever.
+  private readonly MAX_CACHE_ENTRIES = 200
+
+  /** v1.3.2 — exposed for ResourceManager nightly cleanup. */
+  _CACHE_PRUNE(): void {
+    const now = Date.now()
+    for (const [k, v] of this.llmCache) {
+      if (v.expiresAt < now) this.llmCache.delete(k)
+    }
+    if (this.llmCache.size > this.MAX_CACHE_ENTRIES) {
+      const sorted = Array.from(this.llmCache.entries()).sort((a, b) => a[1].expiresAt - b[1].expiresAt)
+      const dropCount = this.llmCache.size - this.MAX_CACHE_ENTRIES
+      for (let i = 0; i < dropCount; i++) this.llmCache.delete(sorted[i][0])
+    }
+  }
 
   /**
    * Plan a query — deterministic only. Use planAdaptive if you can await

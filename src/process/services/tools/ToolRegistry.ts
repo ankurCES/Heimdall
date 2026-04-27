@@ -469,18 +469,31 @@ your query straight to FTS5.`,
     }, async (params) => {
       const cmd = params.command as string
       const allowed = ['curl', 'dig', 'nslookup', 'whois', 'traceroute', 'ping', 'ls', 'cat', 'head', 'grep', 'wc', 'sort', 'uniq']
-      const firstWord = cmd.trim().split(/\s+/)[0]
+      // SECURITY (v1.3.2 — finding B8): tighter parsing + execFile
+      // instead of exec(shell). Previously the regex missed \n / \r,
+      // which exec() interprets as command separators — an LLM-emitted
+      // payload like "curl ok.com\nrm -rf ~/.heimdall" passed the
+      // firstWord check and ran two commands.
+      const trimmed = cmd.trim()
+      // Reject any whitespace-extending characters that exec/sh would
+      // treat as command separators or quoting artifacts.
+      if (/[;&|><`$()\n\r\\*?{}~]/.test(trimmed)) {
+        return { output: 'Forbidden characters detected (shell metachars / newlines / globs)', error: 'FORBIDDEN' }
+      }
+      const argv = trimmed.split(/\s+/)
+      const firstWord = argv[0]
       if (!allowed.includes(firstWord)) {
         return { output: `Command "${firstWord}" not in allowlist: ${allowed.join(', ')}`, error: 'FORBIDDEN' }
       }
-      // Block shell operators
-      if (/[;&|><`$()]/.test(cmd)) {
-        return { output: 'Shell operators (;, &, |, >, <, `, $) are not allowed', error: 'FORBIDDEN' }
+      const args = argv.slice(1)
+      // Per-arg length cap — very long single args are usually injection.
+      if (args.some((a) => a.length > 1000)) {
+        return { output: 'Argument too long (>1000 chars)', error: 'FORBIDDEN' }
       }
 
-      const { exec } = await import('child_process')
+      const { execFile } = await import('child_process')
       return new Promise((resolve) => {
-        exec(cmd, { timeout: 30000, maxBuffer: 10240 }, (err, stdout, stderr) => {
+        execFile(firstWord, args, { timeout: 30000, maxBuffer: 10240 }, (err, stdout, stderr) => {
           if (err) resolve({ output: `Error: ${err.message}\n${stderr}`, error: err.message })
           else resolve({ output: stdout.slice(0, 5000) || stderr.slice(0, 5000) })
         })

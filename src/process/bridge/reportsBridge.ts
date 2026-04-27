@@ -116,8 +116,20 @@ export function registerReportsBridge(): void {
         } catch (err) { log.warn(`post-publish ethics screen failed: ${err}`) }
         try {
           const { indicatorExtractor } = await import('../services/calibration/IndicatorExtractor')
-          const n = await indicatorExtractor.extractAndPersist(r)
-          if (n > 0) log.info(`Extracted ${n} indicators from report ${r.id}`)
+          // FUNCTIONAL FIX (v1.3.2 — finding C2): if a SAT bundle was
+          // produced during synthesis, use it directly instead of paying
+          // for another LLM call to re-derive what we already have.
+          const { consumeCachedSatBundle } = await import('../services/llm/DeepResearchAgent')
+          const cachedBundle = consumeCachedSatBundle(r.query || r.title)
+          let n = 0
+          if (cachedBundle) {
+            const items = indicatorExtractor.fromSatFramework(cachedBundle.indicators)
+            n = indicatorExtractor.persist(r.id, items)
+            log.info(`Persisted ${n} indicators from cached SAT bundle for ${r.id} (no LLM call)`)
+          } else {
+            n = await indicatorExtractor.extractAndPersist(r)
+            if (n > 0) log.info(`Extracted ${n} indicators from report ${r.id} (LLM)`)
+          }
         } catch (err) { log.warn(`post-publish indicator extract failed: ${err}`) }
         // v1.3 — extract forecast claims for accountability tracking
         try {

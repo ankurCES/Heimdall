@@ -37,7 +37,13 @@ interface IntelRow {
 
 const SCAN_LOOKBACK_MS = 24 * 60 * 60 * 1000
 const MAX_INTEL_PER_RUN = 200
-const MIN_KEYWORD_OVERLAP = 0.30  // pre-filter threshold before LLM check
+// SECURITY/COST (v1.3.2 — finding C1): tighter pre-filter + hard LLM cap
+// per cron tick. Previously two unrelated security reports easily hit 30%
+// overlap, allowing the cron to fire up to 200×200×~5 judgments = 200k LLM
+// calls every 30 min. Combined with cloud_llm enabled by default this was
+// a runaway cost vector.
+const MIN_KEYWORD_OVERLAP = 0.50
+const MAX_LLM_CALLS_PER_RUN = 50
 const LLM_CHECK_PROMPT = `You are checking if a piece of new intelligence CONTRADICTS, SUPPORTS, or is UNRELATED to a previously-published analytic key judgment.
 
 KEY JUDGMENT:
@@ -51,6 +57,16 @@ Respond with EXACTLY ONE WORD: CONTRADICTS, SUPPORTS, or UNRELATED.`
 export class AutoRevisionService {
   private timer: NodeJS.Timeout | null = null
   private running = false
+  /**
+   * In-memory LRU memoization of (judgmentHash + intelHash) → verdict.
+   * Bounded at 1000 entries (oldest evicted). Prevents re-asking the LLM
+   * about the same (judgment, intel) pair across multiple cron ticks.
+   */
+  private verdictCache = new Map<string, 'CONTRADICTS' | 'SUPPORTS' | 'UNRELATED'>()
+  private readonly VERDICT_CACHE_MAX = 1000
+
+  /** Public for testing — exposes the runtime status. */
+  isRunning(): boolean { return this.running }
 
   start(intervalMs: number = 30 * 60 * 1000): void {
     if (this.timer) return
@@ -97,9 +113,15 @@ export class AutoRevisionService {
       `).all(since, MAX_INTEL_PER_RUN) as IntelRow[]
 
       let pendingCreated = 0
+      let llmCallsThisRun = 0
 
-      for (const report of reports) {
+      outer: for (const report of reports) {
         for (const intelItem of intel) {
+          if (llmCallsThisRun >= MAX_LLM_CALLS_PER_RUN) {
+            log.info(`AutoRevision: hit ${MAX_LLM_CALLS_PER_RUN} LLM-call cap; deferring rest to next tick`)
+            break outer
+          }
+
           // Skip if we already have a revision for this (report, intel) pair
           const existing = db.prepare(`
             SELECT id FROM report_revisions
@@ -112,8 +134,10 @@ export class AutoRevisionService {
             const overlap = this.keywordOverlap(judgment, intelItem.content)
             if (overlap < MIN_KEYWORD_OVERLAP) continue
 
-            // LLM contradiction check
-            const verdict = await this.checkContradiction(judgment, intelItem.content)
+            // LLM contradiction check (memoized)
+            const verdict = await this.checkContradictionMemoized(judgment, intelItem.content)
+            if (verdict === '__cache_hit__') continue   // already-checked, skip
+            llmCallsThisRun++
             if (verdict !== 'CONTRADICTS') continue
 
             // Create pending revision
@@ -160,6 +184,31 @@ export class AutoRevisionService {
     let overlap = 0
     for (const tok of j) if (i.has(tok)) overlap++
     return overlap / j.size
+  }
+
+  /**
+   * Memoized variant: returns '__cache_hit__' (sentinel) if we've
+   * already evaluated this (judgment, intel) pair so the caller can
+   * skip without burning an LLM call.
+   */
+  private async checkContradictionMemoized(judgment: string, intel: string):
+    Promise<'CONTRADICTS' | 'SUPPORTS' | 'UNRELATED' | '__cache_hit__'> {
+    const key = `${this.cheapHash(judgment)}::${this.cheapHash(intel.slice(0, 1500))}`
+    if (this.verdictCache.has(key)) return '__cache_hit__'
+    const verdict = await this.checkContradiction(judgment, intel)
+    // LRU eviction: drop oldest when over budget
+    if (this.verdictCache.size >= this.VERDICT_CACHE_MAX) {
+      const oldest = this.verdictCache.keys().next().value
+      if (oldest !== undefined) this.verdictCache.delete(oldest)
+    }
+    this.verdictCache.set(key, verdict)
+    return verdict
+  }
+
+  private cheapHash(s: string): string {
+    let h = 0
+    for (let i = 0; i < s.length; i++) h = ((h << 5) - h + s.charCodeAt(i)) | 0
+    return h.toString(36)
   }
 
   private async checkContradiction(judgment: string, intel: string): Promise<'CONTRADICTS' | 'SUPPORTS' | 'UNRELATED'> {

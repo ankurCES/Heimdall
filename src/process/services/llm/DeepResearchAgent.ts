@@ -108,6 +108,34 @@ interface RawPlanStep {
 }
 
 /** Research findings collected during auto-research phase. */
+/**
+ * v1.3.2 functional fix C2 — process-wide cache of SAT-derived
+ * indicator bundles keyed by query. Lets the post-publish hook in
+ * reportsBridge use the structured indicators directly instead of
+ * re-extracting via LLM. Entries auto-expire after 30 min.
+ */
+interface CachedSatBundle {
+  indicators: Array<{
+    hypothesis: string
+    confirmingIndicators: string[]
+    refutingIndicators: string[]
+    collectionPriority: 'high' | 'medium' | 'low'
+  }>
+  cachedAt: number
+}
+export const satBundleCache = new Map<string, CachedSatBundle>()
+
+/** Look up + consume a cached SAT bundle by query (best-effort match). */
+export function consumeCachedSatBundle(query: string): CachedSatBundle | null {
+  const key = query.slice(0, 200)
+  const hit = satBundleCache.get(key)
+  if (hit) {
+    satBundleCache.delete(key)
+    return hit
+  }
+  return null
+}
+
 export interface PreliminaryFindings {
   internalHits: number
   webPagesCrawled: number
@@ -497,6 +525,22 @@ export class DeepResearchAgent {
         if (satResult.markdown) {
           result += satResult.markdown
           onChunk?.(`**[SAT]** Appended ${enabled} annexes to report\n`)
+        }
+        // FUNCTIONAL FIX (v1.3.2 — finding C2): persist the structured
+        // SAT bundle so post-publish hooks (IndicatorExtractor) can use
+        // it directly instead of re-deriving via LLM. Stashed on the
+        // plan store keyed by query — the publish flow doesn't have the
+        // report id yet, so we use a process-wide cache keyed by the
+        // bundle's source plan id.
+        if (satResult.bundle.indicators) {
+          satBundleCache.set(plan.query.slice(0, 200), {
+            indicators: satResult.bundle.indicators,
+            cachedAt: Date.now()
+          })
+          // GC entries older than 30 min
+          for (const [k, v] of satBundleCache) {
+            if (Date.now() - v.cachedAt > 30 * 60 * 1000) satBundleCache.delete(k)
+          }
         }
       } catch (err) {
         log.warn(`SAT execution failed: ${err}`)

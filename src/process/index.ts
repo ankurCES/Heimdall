@@ -28,6 +28,36 @@ import { taxiiServer } from './services/taxii/TaxiiServer'
 log.transports.file.level = 'info'
 log.transports.console.level = 'debug'
 
+// SECURITY (v1.3.2 — finding B3): wire the OPSEC scrubber as an
+// electron-log hook. When OpSec mode has scrubLlmLogs on (default in
+// paranoid/strict/standard), every log line is run through the scrubber
+// before being written. Masks IPs, emails, classification markings,
+// SSNs, BTC/CC numbers, hashes. Lazy-loaded to avoid pulling
+// OpSecService at very-early boot.
+let _opSecScrubber: ((s: string) => string) | null = null
+function getScrubber(): ((s: string) => string) | null {
+  if (_opSecScrubber !== null) return _opSecScrubber
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const opsec = require('./services/opsec/OpSecService') as typeof import('./services/opsec/OpSecService')
+    _opSecScrubber = (s: string): string => {
+      try {
+        if (!opsec.opSecService.config().scrubLlmLogs) return s
+        return opsec.opSecService.scrubForLogging(s)
+      } catch { return s }
+    }
+    return _opSecScrubber
+  } catch { return null }
+}
+log.hooks.push((message) => {
+  const scrub = getScrubber()
+  if (!scrub) return message
+  try {
+    message.data = (message.data as unknown[]).map((d) => typeof d === 'string' ? scrub(d) : d)
+  } catch { /* */ }
+  return message
+})
+
 // Global crash handlers — prevent silent process death
 process.on('uncaughtException', (err) => {
   log.error(`UNCAUGHT EXCEPTION: ${err.message}\n${err.stack}`)
@@ -261,6 +291,30 @@ async function initializeDeferred(): Promise<void> {
     }
   }, 3000)
 
+  // FUNCTIONAL FIX (v1.3.2 — finding C3): subscribe SafeFetcher + Tor
+  // re-binding to settings changes so the analyst doesn't need to
+  // restart the app after editing safety / darkWeb config.
+  settingsService.on('change:section:safety', () => {
+    try {
+      const next = settingsService.get<SafetyConfig>('safety')
+      if (next) {
+        safeFetcher.setRate(next.rateLimitPerDomain || 30)
+        safeFetcher.setRobotsEnabled(next.respectRobotsTxt ?? true)
+        safeFetcher.setAirGap(next.airGapMode ?? false, next.airGapAllowlist ?? [])
+        log.info('SafeFetcher: rebound from settings change')
+      }
+    } catch (err) { log.warn(`safety re-bind failed: ${err}`) }
+  })
+  settingsService.on('change:section:darkWeb', () => {
+    try {
+      const dw = settingsService.get<DarkWebConfig>('darkWeb')
+      if (dw?.enabled) {
+        safeFetcher.setSocks5(dw.socks5Host || '127.0.0.1', dw.socks5Port || 9050)
+        log.info(`SafeFetcher: SOCKS5 rebound to ${dw.socks5Host}:${dw.socks5Port}`)
+      }
+    } catch (err) { log.warn(`darkWeb re-bind failed: ${err}`) }
+  })
+
   // v1.1 calibration loops — Indicator Tracker + Auto-Revision both run
   // on their own internal timers. Source Reliability recompute runs
   // nightly via cron.
@@ -315,8 +369,11 @@ async function initializeDeferred(): Promise<void> {
       category: 'enrichment',
       autoRestart: true,
       healthCheck: () => {
-        const isRunning = (enrichmentOrchestrator as { isRunning?: () => boolean }).isRunning?.() ?? true
-        return isRunning ? { state: 'running' as const } : { state: 'stopped' as const }
+        const isRunning = enrichmentOrchestrator.isRunning()
+        const stats = enrichmentOrchestrator.getStats()
+        return isRunning
+          ? { state: 'running' as const, metadata: stats }
+          : { state: 'stopped' as const, metadata: stats }
       },
       restart: async () => { enrichmentOrchestrator.start() }
     })
@@ -326,7 +383,10 @@ async function initializeDeferred(): Promise<void> {
       displayName: 'Vector Pipeline',
       category: 'enrichment',
       autoRestart: true,
-      healthCheck: () => ({ state: 'running' as const }),
+      healthCheck: () => {
+        const isRunning = (intelPipeline as { isRunning?: () => boolean }).isRunning?.() ?? true
+        return isRunning ? { state: 'running' as const } : { state: 'stopped' as const }
+      },
       restart: async () => { await intelPipeline.start() }
     })
 
@@ -335,7 +395,10 @@ async function initializeDeferred(): Promise<void> {
       displayName: 'Agent Orchestrator',
       category: 'enrichment',
       autoRestart: true,
-      healthCheck: () => ({ state: 'running' as const }),
+      healthCheck: () => {
+        const isRunning = (agentOrchestrator as { isRunning?: () => boolean }).isRunning?.() ?? true
+        return isRunning ? { state: 'running' as const } : { state: 'stopped' as const }
+      },
       restart: async () => { agentOrchestrator.start() }
     })
 
@@ -483,9 +546,46 @@ function createWindow(): void {
     mainWindow?.show()
   })
 
+  // SECURITY (v1.3.2 — finding B1/E1.1): only allow http/https/mailto
+  // schemes through to shell.openExternal. Untrusted RSS / dark-web
+  // crawl content can include file://, javascript:, vscode:, smb://,
+  // ms-msdt: etc. — all of which become one-click RCE vectors when
+  // handed to shell.openExternal.
+  const SAFE_URL_PROTOCOLS = new Set(['http:', 'https:', 'mailto:'])
   mainWindow.webContents.setWindowOpenHandler((details) => {
-    shell.openExternal(details.url)
+    try {
+      const u = new URL(details.url)
+      if (SAFE_URL_PROTOCOLS.has(u.protocol)) {
+        void shell.openExternal(details.url)
+      } else {
+        log.warn(`Blocked external open of unsafe protocol: ${u.protocol} (url=${details.url.slice(0, 100)})`)
+      }
+    } catch {
+      // malformed URL — silently ignore
+    }
     return { action: 'deny' }
+  })
+
+  // SECURITY (v1.3.2 — finding B10): block top-level navigation to any
+  // origin other than the bundled renderer. Prevents an XSS or rogue
+  // third-party widget from navigating away and exposing the
+  // window.heimdall API to a remote attacker-controlled origin.
+  mainWindow.webContents.on('will-navigate', (event, url) => {
+    try {
+      const allowed = is.dev && process.env['ELECTRON_RENDERER_URL']
+        ? new URL(process.env['ELECTRON_RENDERER_URL']!).origin
+        : 'file://'
+      if (!url.startsWith(allowed)) {
+        event.preventDefault()
+        log.warn(`Blocked top-level navigation to ${url.slice(0, 100)}`)
+        const u = new URL(url)
+        if (SAFE_URL_PROTOCOLS.has(u.protocol)) {
+          void shell.openExternal(url)
+        }
+      }
+    } catch {
+      event.preventDefault()
+    }
   })
 
   if (is.dev && process.env['ELECTRON_RENDERER_URL']) {
@@ -516,6 +616,14 @@ if (!gotTheLock) {
 
     app.on('browser-window-created', (_, window) => {
       optimizer.watchWindowShortcuts(window)
+    })
+
+    // SECURITY (v1.3.2 — defense-in-depth): every webContents created
+    // anywhere in the app rejects window.open by default. The main
+    // window's setWindowOpenHandler already enforces this, but this
+    // catches any new BrowserView / popup the app might create later.
+    app.on('web-contents-created', (_event, contents) => {
+      contents.setWindowOpenHandler(() => ({ action: 'deny' }))
     })
 
     await initializeEssentials()
@@ -565,6 +673,32 @@ if (!gotTheLock) {
       const mcp = require('./services/mcp/McpClientService') as typeof import('./services/mcp/McpClientService')
       void mcp.mcpClientService.stop()
     } catch (err) { log.debug(`mcpClientService.stop: ${err}`) }
+
+    // FUNCTIONAL FIX (v1.3.2 — finding E1): stop the v1.x background
+    // services that previously leaked their setInterval references on
+    // shutdown. Process exit makes these benign, but they break any
+    // re-init code path (encrypted boot → unlock → second init).
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const m = require('./services/calibration/IndicatorTrackerService') as typeof import('./services/calibration/IndicatorTrackerService')
+      m.indicatorTrackerService.stop()
+    } catch (err) { log.debug(`indicatorTrackerService.stop: ${err}`) }
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const m = require('./services/calibration/AutoRevisionService') as typeof import('./services/calibration/AutoRevisionService')
+      m.autoRevisionService.stop()
+    } catch (err) { log.debug(`autoRevisionService.stop: ${err}`) }
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const m = require('./services/alerts/escalation/AlertEscalationService') as typeof import('./services/alerts/escalation/AlertEscalationService')
+      m.alertEscalationService.stop()
+    } catch (err) { log.debug(`alertEscalationService.stop: ${err}`) }
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const m = require('./services/audit/AuditChainAnchorService') as typeof import('./services/audit/AuditChainAnchorService')
+      m.auditChainAnchorService.stop()
+    } catch (err) { log.debug(`auditChainAnchorService.stop: ${err}`) }
+
     try { closeDatabase() } catch (err) { log.debug(`closeDatabase: ${err}`) }
   }
 

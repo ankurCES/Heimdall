@@ -50,7 +50,29 @@ function truncate(s: string, n: number): string {
   return oneLine.length > n ? `${oneLine.slice(0, n - 1)}…` : oneLine
 }
 
+// PERF v1.3.2 D2: hard cap on cache entries — without this, unique
+// queries pile up indefinitely (potentially thousands over a long
+// session). Eviction sweeps oldest first.
+const MAX_CACHE_ENTRIES = 200
+
+function pruneCache(): void {
+  if (CACHE.size <= MAX_CACHE_ENTRIES) return
+  // Drop entries older than TTL first, then oldest by ts if still over budget.
+  const now = Date.now()
+  for (const [k, v] of CACHE) {
+    if (now - v.ts >= CACHE_TTL_MS) CACHE.delete(k)
+  }
+  if (CACHE.size > MAX_CACHE_ENTRIES) {
+    const sorted = Array.from(CACHE.entries()).sort((a, b) => a[1].ts - b[1].ts)
+    const dropCount = CACHE.size - MAX_CACHE_ENTRIES
+    for (let i = 0; i < dropCount; i++) CACHE.delete(sorted[i][0])
+  }
+}
+
 class KnowledgeGraphContextService {
+  /** v1.3.2 — exposed for ResourceManager nightly cleanup. */
+  _CACHE_PRUNE(): void { pruneCache() }
+
   /**
    * Returns a plain-text block describing the top relevant HUMINT + preliminary
    * reports for this query. Safe to prepend as a system message. Always
@@ -119,6 +141,7 @@ class KnowledgeGraphContextService {
     if (matched === 0) {
       const content = '=== No prior analyst knowledge found for this query. ===\nUse vector_search or intel_search for fresh investigation.'
       CACHE.set(cacheKey, { content, ts: Date.now() })
+      pruneCache()
       return content
     }
 

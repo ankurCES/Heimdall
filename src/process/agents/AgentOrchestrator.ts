@@ -42,6 +42,9 @@ export class AgentOrchestrator {
     log.info('Agent orchestrator stopped')
   }
 
+  /** v1.3.2 — exposes the actual running state for Sentinel health checks. */
+  isRunning(): boolean { return this.running }
+
   // ── Lead Agent ─────────────────────────────────────────────────────
   // Triages new reports: enriches with tags/entities, flags important ones
   private async runLeadAgent(): Promise<void> {

@@ -238,6 +238,18 @@ export class EthicsGuardrailsService {
   private persistFlags(flags: EthicsFlag[]): void {
     if (flags.length === 0) return
     const db = getDatabase()
+    // FUNCTIONAL FIX (v1.3.2 — finding C4): on re-screen, drop existing
+    // unresolved flags for this subject before inserting new ones, so
+    // re-publish doesn't pile up duplicates. Resolved flags (analyst
+    // already overrode/dismissed) are preserved as historical record.
+    const subjectsTouched = new Map<string, Set<string>>()  // type → set of ids
+    for (const f of flags) {
+      if (!subjectsTouched.has(f.subjectType)) subjectsTouched.set(f.subjectType, new Set())
+      subjectsTouched.get(f.subjectType)!.add(f.subjectId)
+    }
+    const dropStmt = db.prepare(
+      `DELETE FROM ethics_flags WHERE subject_type = ? AND subject_id = ? AND resolution IS NULL`
+    )
     const stmt = db.prepare(`
       INSERT INTO ethics_flags
         (id, subject_type, subject_id, flag_type, severity, evidence,
@@ -245,6 +257,9 @@ export class EthicsGuardrailsService {
       VALUES (?, ?, ?, ?, ?, ?, NULL, NULL, NULL, ?, NULL)
     `)
     const tx = db.transaction(() => {
+      for (const [stype, ids] of subjectsTouched) {
+        for (const id of ids) dropStmt.run(stype, id)
+      }
       for (const f of flags) {
         try {
           stmt.run(f.id, f.subjectType, f.subjectId, f.flagType, f.severity, f.evidence, f.createdAt)

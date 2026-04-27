@@ -42,10 +42,17 @@ export class ResourceManager {
       // 4. Prune old sync_log entries (> 30 days)
       this.pruneSyncLog()
 
-      // 5. Force GC if available
-      if (global.gc) {
-        global.gc()
-      }
+      // 5. PERF (v1.3.2 — finding D1): retention for audit_log + tool_call_logs.
+      // Both tables grow ~10-50k rows/day under normal collector activity
+      // and have no other prune. The chained variant audit_log_chained is
+      // intentionally untouched (tamper-evident).
+      this.pruneAuditLog()
+      this.pruneToolCallLogs()
+      this.pruneInMemoryCaches()
+
+      // PERF (v1.3.2 — finding D6): removed dead `global.gc()` call.
+      // Electron doesn't expose --expose-gc by default, so this was a no-op
+      // in production and a 50-200ms pause-the-world in dev when it did fire.
     } catch (err) {
       log.debug(`ResourceManager cleanup error: ${err}`)
     }
@@ -100,6 +107,48 @@ export class ResourceManager {
         log.info(`ResourceManager: pruned ${result.changes} old sync_log entries`)
       }
     } catch {}
+  }
+
+  /** PERF v1.3.2 D1: drop audit rows >30d. The chained variant is preserved. */
+  private pruneAuditLog(): void {
+    try {
+      const { getDatabase } = require('../database')
+      const db = getDatabase()
+      const cutoff = Date.now() - 30 * 24 * 60 * 60 * 1000
+      const r = db.prepare('DELETE FROM audit_log WHERE created_at < ?').run(cutoff)
+      if (r.changes > 0) log.info(`ResourceManager: pruned ${r.changes} audit_log rows`)
+    } catch { /* table may not exist on fresh installs */ }
+  }
+
+  /** PERF v1.3.2 D1: drop tool_call_logs >30d. */
+  private pruneToolCallLogs(): void {
+    try {
+      const { getDatabase } = require('../database')
+      const db = getDatabase()
+      const cutoff = Date.now() - 30 * 24 * 60 * 60 * 1000
+      const r = db.prepare('DELETE FROM tool_call_logs WHERE created_at < ?').run(cutoff)
+      if (r.changes > 0) log.info(`ResourceManager: pruned ${r.changes} tool_call_logs rows`)
+    } catch { /* */ }
+  }
+
+  /**
+   * PERF v1.3.2 D2: trim long-running in-memory caches that don't have
+   * their own eviction. KnowledgeGraphContext + QueryPlanner LLM caches
+   * accumulate per-query entries forever otherwise.
+   */
+  private pruneInMemoryCaches(): void {
+    try {
+      const m = require('../llm/KnowledgeGraphContext') as {
+        knowledgeGraphContext?: { _CACHE_PRUNE?: () => void }
+      }
+      m.knowledgeGraphContext?._CACHE_PRUNE?.()
+    } catch { /* */ }
+    try {
+      const m = require('../intel/QueryPlanner') as {
+        queryPlanner?: { _CACHE_PRUNE?: () => void }
+      }
+      m.queryPlanner?._CACHE_PRUNE?.()
+    } catch { /* */ }
   }
 }
 

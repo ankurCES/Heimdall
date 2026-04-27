@@ -270,7 +270,12 @@ class TelegramReceiverServiceImpl {
       mediaFileId = msg.document.file_id
       mediaMimeType = msg.document.mime_type || 'application/octet-stream'
       if (!msg.document.file_size || msg.document.file_size < MAX_FILE_SIZE) {
-        const ext = msg.document.file_name?.split('.').pop() || 'bin'
+        // SECURITY (v1.3.2 — finding B6): sanitize the extension. A
+        // Telegram document with file_name = "x.txt/../../../etc/foo"
+        // would otherwise produce ext = "../../../etc/foo" and let the
+        // sender write outside the userData download directory.
+        const rawExt = msg.document.file_name?.split('.').pop() || 'bin'
+        const ext = rawExt.replace(/[^a-zA-Z0-9]/g, '').slice(0, 10) || 'bin'
         mediaLocalPath = await this.downloadFile(msg.document.file_id, ext)
       }
     }

@@ -352,8 +352,49 @@ export class ReportLibraryService {
   }
 
   delete(id: string): boolean {
-    const r = getDatabase().prepare(`DELETE FROM report_products WHERE id = ?`).run(id)
-    return r.changes > 0
+    // FUNCTIONAL FIX (v1.3.2 — finding E3): manual cascade. Heimdall's
+    // schema doesn't carry FK ON DELETE CASCADE on these references, so
+    // a bare DELETE leaves orphans in 6 tables that downstream services
+    // continue scanning forever. Run the deletes in one transaction.
+    const db = getDatabase()
+    const tx = db.transaction(() => {
+      // First find indicator ids belonging to this report (so we can
+      // cascade to indicator_observations).
+      const indicatorIds = db.prepare(
+        `SELECT id FROM report_indicators WHERE report_id = ?`
+      ).all(id) as Array<{ id: string }>
+      for (const ind of indicatorIds) {
+        db.prepare(`DELETE FROM indicator_observations WHERE indicator_id = ?`).run(ind.id)
+      }
+      db.prepare(`DELETE FROM report_indicators WHERE report_id = ?`).run(id)
+
+      // Forecast claims + outcomes
+      const claimIds = db.prepare(
+        `SELECT id FROM forecast_claims WHERE report_id = ?`
+      ).all(id) as Array<{ id: string }>
+      for (const c of claimIds) {
+        db.prepare(`DELETE FROM forecast_outcomes WHERE claim_id = ?`).run(c.id)
+      }
+      db.prepare(`DELETE FROM forecast_claims WHERE report_id = ?`).run(id)
+
+      // Revisions, distributions, ethics flags, case-file refs, scores
+      db.prepare(`DELETE FROM report_revisions WHERE report_id = ?`).run(id)
+      db.prepare(`DELETE FROM report_distributions WHERE report_id = ?`).run(id)
+      db.prepare(`DELETE FROM ethics_flags WHERE subject_type = 'report' AND subject_id = ?`).run(id)
+      db.prepare(`DELETE FROM case_file_items WHERE item_type = 'report' AND item_id = ?`).run(id)
+      try { db.prepare(`DELETE FROM report_quality_scores WHERE session_id = ?`).run(id) } catch { /* */ }
+
+      // Finally the report itself
+      db.prepare(`DELETE FROM report_products WHERE id = ?`).run(id)
+    })
+
+    try {
+      tx()
+      return true
+    } catch (err) {
+      log.warn(`ReportLibraryService.delete cascade failed: ${err}`)
+      return false
+    }
   }
 
   /** Mark as published; idempotent. */

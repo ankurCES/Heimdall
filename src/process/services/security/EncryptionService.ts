@@ -70,15 +70,41 @@ export class EncryptionService {
   /**
    * Unlock the DB with the supplied passphrase. On success, initDatabase() has
    * run and the service is live. On failure, throws.
+   *
+   * SECURITY (v1.3.2 — finding B5): tracks failed attempts in-memory and
+   * imposes exponential backoff after the first 3 failures within a 5-min
+   * window. Forces analyst to wait before retrying — defends against a
+   * compromised renderer rapid-firing unlock attempts at the IPC layer.
+   *
+   * State is in-memory only (resets on app restart). For persistent
+   * lockout we'd need an unencrypted state file; deferred since each
+   * Heimdall launch costs ~250ms of PBKDF2 anyway.
    */
-  unlock(passphrase: string): void {
+  private unlockFailures: number[] = []   // timestamps of failed attempts
+  private readonly UNLOCK_WINDOW_MS = 5 * 60 * 1000
+  private readonly UNLOCK_FAILURE_THRESHOLD = 3   // before backoff kicks in
+  async unlock(passphrase: string): Promise<void> {
     if (!this.isEnabled()) throw new Error('Encryption is not enabled')
+
+    // Drop expired entries
+    const now = Date.now()
+    this.unlockFailures = this.unlockFailures.filter((t) => now - t < this.UNLOCK_WINDOW_MS)
+
+    if (this.unlockFailures.length >= this.UNLOCK_FAILURE_THRESHOLD) {
+      // Exponential backoff: 1s, 2s, 4s, 8s, capped at 30s
+      const overage = this.unlockFailures.length - this.UNLOCK_FAILURE_THRESHOLD
+      const waitMs = Math.min(30_000, 1000 * Math.pow(2, overage))
+      log.warn(`encryption: unlock backoff — waiting ${waitMs}ms (${this.unlockFailures.length} failures in window)`)
+      await new Promise((resolve) => setTimeout(resolve, waitMs))
+    }
+
     try {
       initDatabase(passphrase)
+      // Success — clear the failure window
+      this.unlockFailures = []
     } catch (err) {
-      // Log failed attempt to audit chain if possible — but the DB isn't open,
-      // so we just log to the file log. Repeated failures surface via the UI.
-      log.warn(`encryption: failed unlock attempt: ${(err as Error).message}`)
+      this.unlockFailures.push(Date.now())
+      log.warn(`encryption: failed unlock attempt #${this.unlockFailures.length}: ${(err as Error).message}`)
       throw err
     }
   }
@@ -166,16 +192,45 @@ export class EncryptionService {
    */
   changePassphrase(oldPassphrase: string, newPassphrase: string): void {
     if (!this.isEnabled()) throw new Error('Encryption is not enabled')
-    if (getActivePassphrase() !== oldPassphrase) {
+    // SECURITY (v1.3.2 — finding B4): constant-time compare avoids a
+    // timing-oracle attack on the in-memory active passphrase.
+    const active = getActivePassphrase() || ''
+    const safeEquals = (a: string, b: string): boolean => {
+      const aBuf = Buffer.from(a, 'utf8')
+      const bBuf = Buffer.from(b, 'utf8')
+      if (aBuf.length !== bBuf.length) return false
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        const cryptoLib = require('crypto') as typeof import('crypto')
+        return cryptoLib.timingSafeEqual(aBuf, bBuf)
+      } catch { return a === b }
+    }
+    if (!safeEquals(active, oldPassphrase)) {
       throw new Error('Current passphrase is incorrect')
     }
     if (!newPassphrase || newPassphrase.length < 8) {
       throw new Error('New passphrase must be at least 8 characters')
     }
+    // SECURITY (v1.3.2 — finding B4): reject control chars and surrogate
+    // half-pairs that can produce broken pragma strings under SQLCipher.
+    if (/[\x00-\x1f\x7f]/.test(newPassphrase)) {
+      throw new Error('Passphrase cannot contain control characters')
+    }
     const db = getDatabase()
     db.pragma(`rekey = '${newPassphrase.replace(/'/g, "''")}'`)
     // Verify by re-reading.
-    db.prepare('SELECT count(*) FROM sqlite_master').get()
+    try {
+      db.prepare('SELECT count(*) FROM sqlite_master').get()
+    } catch (err) {
+      // Rekey failed verification — restore old passphrase to leave the
+      // DB in a known state rather than silently locking the user out.
+      log.error(`changePassphrase: rekey verification failed (${err}); attempting rollback`)
+      try { db.pragma(`rekey = '${oldPassphrase.replace(/'/g, "''")}'`) }
+      catch (rollbackErr) {
+        log.error(`changePassphrase rollback also failed: ${rollbackErr}`)
+      }
+      throw new Error('Rekey verification failed; old passphrase restored')
+    }
 
     // Reload so the in-memory passphrase reflects the new one.
     closeDatabase()

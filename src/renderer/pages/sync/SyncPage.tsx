@@ -54,11 +54,10 @@ export function SyncPage() {
     setLoading(false)
   }
 
-  useEffect(() => {
-    loadJobs()
-    const interval = setInterval(loadJobs, 3000) // Poll every 3s
-    return () => clearInterval(interval)
-  }, [])
+  // PERF v1.3.2 D7: dropped the 3s polling loop. The sync:progress push
+  // subscription below already streams fresh state on every change.
+  // We only need a one-shot initial load.
+  useEffect(() => { loadJobs() }, [])
 
   // Subscribe to real-time progress
   useEffect(() => {
