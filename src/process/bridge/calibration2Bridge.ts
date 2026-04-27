@@ -3,12 +3,15 @@
 // calibration bridge that handles indicators / source reliability /
 // auto-revision / ethics.)
 
-import { ipcMain } from 'electron'
+import { ipcMain, dialog, BrowserWindow } from 'electron'
+import { writeFileSync } from 'fs'
 import log from 'electron-log'
 import { forecastAccountabilityService, type OutcomeKind } from '../services/forecast/ForecastAccountabilityService'
 import { auditChainAnchorService } from '../services/audit/AuditChainAnchorService'
 import { opSecService, type OpSecConfig } from '../services/opsec/OpSecService'
 import { reportLibraryService } from '../services/report/ReportLibraryService'
+import { analyticMemoryGraphService } from '../services/memory-graph/AnalyticMemoryGraphService'
+import { briefingBuilderService } from '../services/report/BriefingBuilderService'
 
 export function registerCalibration2Bridge(): void {
   // Forecast Accountability
@@ -88,5 +91,48 @@ export function registerCalibration2Bridge(): void {
     catch (err) { return { ok: false, error: String(err) } }
   })
 
-  log.info('calibration2 + audit + opsec bridge registered')
+  // Memory Graph (v1.3.1)
+  ipcMain.handle('memgraph:snapshot', async (_e, opts: { rebuild?: boolean } = {}) => {
+    try { return { ok: true, snapshot: analyticMemoryGraphService.build(opts.rebuild) } }
+    catch (err) { return { ok: false, error: String(err) } }
+  })
+
+  ipcMain.handle('memgraph:neighborhood', async (_e, params: { nodeId: string; hops?: number }) => {
+    try { return { ok: true, snapshot: analyticMemoryGraphService.neighborhood(params.nodeId, params.hops ?? 1) } }
+    catch (err) { return { ok: false, error: String(err) } }
+  })
+
+  ipcMain.handle('memgraph:top_central', async (_e, n: number = 20) => {
+    try { return { ok: true, nodes: analyticMemoryGraphService.topCentral(n) } }
+    catch (err) { return { ok: false, error: String(err) } }
+  })
+
+  // Briefing Builder (v1.3.1)
+  ipcMain.handle('briefing:build', async (_e, input: {
+    title: string; reportIds: string[]; recipient?: string;
+    classificationOverride?: string; introNote?: string
+  }) => {
+    try {
+      const result = await briefingBuilderService.render(input)
+      const safeTitle = input.title.replace(/[^a-z0-9_-]+/gi, '_').slice(0, 60)
+      const win = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0]
+      const dlg = await dialog.showSaveDialog(win!, {
+        title: 'Export briefing as PDF',
+        defaultPath: `BRIEFING-${safeTitle}.pdf`,
+        filters: [{ name: 'PDF', extensions: ['pdf'] }]
+      })
+      if (dlg.canceled || !dlg.filePath) return { ok: false, error: 'cancelled' }
+      writeFileSync(dlg.filePath, Buffer.from(result.bytes))
+      return {
+        ok: true, path: dlg.filePath,
+        pageCount: result.pageCount, reportCount: result.reportCount,
+        sha256: result.signature?.sha256, fingerprint: result.signature?.fingerprint
+      }
+    } catch (err) {
+      log.error(`briefing:build failed: ${err}`)
+      return { ok: false, error: String(err) }
+    }
+  })
+
+  log.info('calibration2 + audit + opsec + memgraph + briefing bridge registered')
 }

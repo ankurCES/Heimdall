@@ -117,8 +117,30 @@ export class SafeFetcher {
       throw new Error(`Blocked: ${domain} resolves to a private/internal address`)
     }
 
-    // Air-gap gate. Hard block BEFORE robots / rate limit / retry — nothing
-    // leaves the host unless explicitly allowlisted.
+    // v1.3.1 — OPSEC gate. When OpSec is in paranoid mode (or air-gap
+    // explicitly enforced), only allow-listed hostnames are reachable.
+    // We lazy-import to avoid a circular dep at boot time.
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const opsec = require('../services/opsec/OpSecService') as typeof import('../services/opsec/OpSecService')
+      if (opsec.opSecService.shouldBlockOutbound(domain)) {
+        auditService.log('fetch.opsec_blocked', { url, domain })
+        throw new Error(`Blocked by OPSEC air-gap mode: ${domain} not on allow-list`)
+      }
+      // Optional warning hook — non-blocking, just notes external calls
+      const cfg = opsec.opSecService.config()
+      if (cfg.warnOnExternalCalls && !opsec.opSecService.isLocalAddress(domain)) {
+        auditService.log('fetch.external_call_warn', { url, domain, mode: cfg.mode })
+      }
+    } catch (err) {
+      // OpSecService not yet loaded (very-early boot); fall through to
+      // the legacy air-gap gate below.
+      if ((err as Error).message?.includes('OPSEC')) throw err
+    }
+
+    // Air-gap gate (legacy / settings-driven). Hard block BEFORE robots
+    // / rate limit / retry — nothing leaves the host unless explicitly
+    // allowlisted.
     if (!this.airGapAllows(domain)) {
       auditService.log('fetch.airgap_blocked', { url, domain })
       throw new Error(`Blocked by air-gap mode: ${url}`)

@@ -1,11 +1,12 @@
 import { useEffect, useState, useMemo, useCallback } from 'react'
-import { Search, FileText, Filter, Loader2, X, Download, Send, Archive, ChevronRight } from 'lucide-react'
+import { Search, FileText, Filter, Loader2, X, Download, Send, Archive, ChevronRight, FilePlus2 } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@renderer/components/ui/card'
 import { Input } from '@renderer/components/ui/input'
 import { Badge } from '@renderer/components/ui/badge'
 import { Button } from '@renderer/components/ui/button'
 import { MarkdownRenderer } from '@renderer/components/MarkdownRenderer'
 import { AddToCaseDialog } from '@renderer/components/AddToCaseDialog'
+import { BriefingBuilderDialog } from '@renderer/components/BriefingBuilderDialog'
 import { toast } from 'sonner'
 
 /**
@@ -95,6 +96,7 @@ export function ReportsLibraryPage() {
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [versionChain, setVersionChain] = useState<ReportProduct[]>([])
   const [addToCaseOpen, setAddToCaseOpen] = useState(false)
+  const [briefingOpen, setBriefingOpen] = useState(false)
 
   const loadStats = useCallback(async () => {
     try {
@@ -210,14 +212,19 @@ export function ReportsLibraryPage() {
       <div className={`${selectedId ? 'w-1/2' : 'w-full'} flex flex-col border-r border-border transition-all`}>
         {/* Header */}
         <div className="border-b border-border px-6 py-4">
-          <div className="flex items-center gap-3 mb-3">
-            <FileText className="w-6 h-6 text-cyan-400" />
-            <div>
-              <h1 className="text-xl font-semibold">Reports Library</h1>
-              <p className="text-xs text-muted-foreground">
-                Every analyst product Heimdall has produced — searchable, filterable, versioned.
-              </p>
+          <div className="flex items-center justify-between gap-3 mb-3">
+            <div className="flex items-center gap-3">
+              <FileText className="w-6 h-6 text-cyan-400" />
+              <div>
+                <h1 className="text-xl font-semibold">Reports Library</h1>
+                <p className="text-xs text-muted-foreground">
+                  Every analyst product Heimdall has produced — searchable, filterable, versioned.
+                </p>
+              </div>
             </div>
+            <Button onClick={() => setBriefingOpen(true)} size="sm" variant="outline">
+              <FilePlus2 className="w-4 h-4 mr-1" /> Build briefing
+            </Button>
           </div>
 
           {/* Stat tiles */}
@@ -472,6 +479,9 @@ export function ReportsLibraryPage() {
           itemTitle={selected.title}
         />
       )}
+
+      {/* Briefing builder dialog */}
+      <BriefingBuilderDialog open={briefingOpen} onClose={() => setBriefingOpen(false)} />
     </div>
   )
 }

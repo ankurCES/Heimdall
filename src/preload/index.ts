@@ -151,7 +151,9 @@ const testChannels = [
   'forecast:extract', 'forecast:auto_record',
   'audit:anchor_now', 'audit:anchors', 'audit:chain_stats',
   'audit:verify_anchor', 'audit:export_anchors',
-  'opsec:config', 'opsec:update', 'opsec:posture'
+  'opsec:config', 'opsec:update', 'opsec:posture',
+  'memgraph:snapshot', 'memgraph:neighborhood', 'memgraph:top_central',
+  'briefing:build'
 ]
 const allowedChannels = [...Object.values(IPC_CHANNELS), ...testChannels]
 const chatEvents = ['chat:chunk', 'chat:done', 'chat:error', 'chat:planRefined']
