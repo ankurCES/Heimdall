@@ -171,6 +171,17 @@ export function registerTranscriptionBridge(): void {
     return await transcriptionService.permanentlyRedact(id)
   })
 
+  // v1.5.0 — engine health metrics + retention purge for the
+  // Settings → Transcription UI.
+  ipcMain.handle('transcription:engine_stats', (_evt, args?: { daysBack?: number }) =>
+    transcriptionService.engineStats(args?.daysBack ?? 7)
+  )
+
+  ipcMain.handle('transcription:purge_now', async () => {
+    const { transcriptionRetention } = await import('../services/transcription/TranscriptionRetentionService')
+    return await transcriptionRetention.runPurge()
+  })
+
   // v1.4.9 — export a transcript as SRT / VTT / JSON / plain text.
   // The renderer asks for `view: 'original' | 'translation'` and a
   // format; the exporter produces both the body and a suggested

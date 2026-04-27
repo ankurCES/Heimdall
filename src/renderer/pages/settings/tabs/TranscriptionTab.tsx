@@ -17,9 +17,11 @@
 // hot-reload into TranscriptionService.getConfig() without restart.
 
 import { useEffect, useState, useCallback } from 'react'
+// (also used for the v1.5.0 engine stats + retention panels)
 import {
   Mic, Cpu, Server, Volume2, Languages, Cloud, RefreshCw,
-  CheckCircle2, AlertCircle, Save, Loader2, Folder, HardDrive, Scissors, Shield
+  CheckCircle2, AlertCircle, Save, Loader2, Folder, HardDrive, Scissors, Shield,
+  Clock as ClockIcon, Activity, Trash2
 } from 'lucide-react'
 import { Button } from '@renderer/components/ui/button'
 import { Input } from '@renderer/components/ui/input'
@@ -149,6 +151,52 @@ export function TranscriptionTab() {
   const { value: chunkingMode, save: saveChunkingMode } = useSetting<string>('transcription.chunking', 'auto')
   const { value: chunkLengthMin, save: saveChunkLengthMin } = useSetting<number>('transcription.chunkLengthMin', 10)
   const { value: maskByDefault, save: saveMaskByDefault } = useSetting<boolean>('transcription.maskByDefault', false)
+  const { value: retentionDays, save: saveRetentionDays } = useSetting<number>('transcription.retentionDays', 0)
+  const [engineStats, setEngineStats] = useState<Array<{
+    engine: string; runs: number; totalSec: number; avgSec: number; chunkedRuns: number; lastUsedAt: number
+  }> | null>(null)
+  const [purging, setPurging] = useState(false)
+  const [purgeResult, setPurgeResult] = useState<string | null>(null)
+
+  const refreshStats = useCallback(async () => {
+    try {
+      const r = await window.heimdall.invoke('transcription:engine_stats') as Array<{
+        engine: string; runs: number; totalSec: number; avgSec: number; chunkedRuns: number; lastUsedAt: number
+      }>
+      setEngineStats(r)
+    } catch { /* */ }
+  }, [])
+
+  useEffect(() => { void refreshStats() }, [refreshStats])
+
+  const purgeNow = async () => {
+    if (!confirm(
+      `Purge transcripts older than ${retentionDays ?? 0} day(s)?\n\n` +
+      `This deletes the DB rows and any recording files in <userData>/recordings/.`
+    )) return
+    setPurging(true); setPurgeResult(null)
+    try {
+      const r = await window.heimdall.invoke('transcription:purge_now') as { ok: boolean; deleted: number; freedFiles: number; reason?: string }
+      setPurgeResult(r.reason ?? `Deleted ${r.deleted} row(s); freed ${r.freedFiles} file(s).`)
+      await refreshStats()
+    } catch (err) {
+      setPurgeResult(String(err))
+    } finally { setPurging(false) }
+  }
+
+  const fmtRelative = (ts: number) => {
+    if (!ts) return '—'
+    const diff = Date.now() - ts
+    if (diff < 60_000) return 'just now'
+    if (diff < 3_600_000) return `${Math.floor(diff / 60_000)}m ago`
+    if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)}h ago`
+    return `${Math.floor(diff / 86_400_000)}d ago`
+  }
+  const fmtDuration = (sec: number) => {
+    if (sec < 60) return `${sec}s`
+    if (sec < 3600) return `${Math.floor(sec / 60)}m ${sec % 60}s`
+    return `${Math.floor(sec / 3600)}h ${Math.floor((sec % 3600) / 60)}m`
+  }
 
   const checkEngine = useCallback(async () => {
     setBusy(true)
@@ -416,6 +464,103 @@ export function TranscriptionTab() {
             placeholder="sk-…"
             settingKey="transcription.cloudApiKey"
           />
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-base flex items-center gap-2">
+            <Activity className="h-4 w-4" /> Engine health
+          </CardTitle>
+          <CardDescription>
+            Last 7 days of transcription activity, grouped by engine. Useful for spotting a
+            silently-degrading whisper-cli (zero recent runs) or a chunked failure pattern.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-2">
+          <div className="flex justify-end -mt-1">
+            <Button size="sm" variant="ghost" onClick={refreshStats} className="h-7">
+              <RefreshCw className="h-3.5 w-3.5 mr-1" /> Refresh
+            </Button>
+          </div>
+          {engineStats === null ? (
+            <div className="text-xs text-muted-foreground">Loading…</div>
+          ) : engineStats.length === 0 ? (
+            <div className="text-xs text-muted-foreground py-2 text-center">
+              No transcripts in the last 7 days. Drop a file or hit Record to populate.
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {engineStats.map((e) => (
+                <div key={e.engine} className="border border-border rounded-md p-2.5">
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <Cpu className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                      <span className="font-mono text-xs truncate">{e.engine}</span>
+                      {e.chunkedRuns > 0 && (
+                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-500/15 text-blue-600 dark:text-blue-400">
+                          {e.chunkedRuns} chunked
+                        </span>
+                      )}
+                    </div>
+                    <span className="text-[11px] text-muted-foreground shrink-0">last {fmtRelative(e.lastUsedAt)}</span>
+                  </div>
+                  <div className="grid grid-cols-3 gap-2 mt-2 text-[11px] text-muted-foreground">
+                    <div><span className="font-medium text-foreground">{e.runs}</span> runs</div>
+                    <div><span className="font-medium text-foreground">{fmtDuration(e.totalSec)}</span> total</div>
+                    <div>~<span className="font-medium text-foreground">{fmtDuration(e.avgSec)}</span> avg</div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-base flex items-center gap-2">
+            <ClockIcon className="h-4 w-4" /> Retention
+          </CardTitle>
+          <CardDescription>
+            Auto-purge transcripts older than the configured age. Originally-recorded files
+            inside <code className="text-[11px]">{'<userData>/recordings/'}</code> are deleted with them;
+            analyst-supplied paths (Choose file… / drag-drop) are left alone. Off by default —
+            set days &gt; 0 to enable. Audit-logged.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="space-y-1">
+            <Label htmlFor="transcription-retention" className="text-sm">Retention period (days)</Label>
+            <Input
+              id="transcription-retention"
+              type="number"
+              min={0}
+              max={3650}
+              step={1}
+              value={retentionDays ?? 0}
+              onChange={(e) => {
+                const n = Number(e.target.value)
+                if (Number.isFinite(n) && n >= 0 && n <= 3650) void saveRetentionDays(n)
+              }}
+              className="font-mono text-sm w-32"
+            />
+            <p className="text-xs text-muted-foreground">
+              0 = keep forever (default). The daily cron runs at 02:30 server time when this is &gt; 0.
+            </p>
+          </div>
+          <div className="flex items-center gap-2 pt-2 border-t border-border">
+            <Button
+              size="sm" variant="outline"
+              onClick={purgeNow}
+              disabled={purging || !retentionDays || retentionDays <= 0}
+              className="h-8"
+            >
+              {purging ? <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" /> : <Trash2 className="h-3.5 w-3.5 mr-1" />}
+              Run purge now
+            </Button>
+            {purgeResult && <span className="text-xs text-muted-foreground">{purgeResult}</span>}
+          </div>
         </CardContent>
       </Card>
 

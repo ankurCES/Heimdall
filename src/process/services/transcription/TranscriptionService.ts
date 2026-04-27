@@ -753,6 +753,51 @@ export class TranscriptionService extends EventEmitter {
     return this.get(id)
   }
 
+  /**
+   * v1.5.0 — engine health metrics. Aggregates over the last N days
+   * of transcripts to give the operator a quick "is whisper-cli still
+   * working?" answer. Counts only successful rows; the engine column
+   * carries a (chunked X, Y failed) suffix on degraded chunked passes
+   * which we strip before grouping.
+   */
+  engineStats(daysBack = 7): Array<{
+    engine: string
+    runs: number
+    totalSec: number
+    avgSec: number
+    chunkedRuns: number
+    lastUsedAt: number
+  }> {
+    const db = getDatabase()
+    const since = Date.now() - daysBack * 24 * 60 * 60 * 1000
+    const rows = db.prepare(`
+      SELECT engine, duration_ms, ingested_at
+      FROM transcripts
+      WHERE ingested_at >= ? AND engine IS NOT NULL AND engine != ''
+    `).all(since) as Array<{ engine: string; duration_ms: number | null; ingested_at: number }>
+
+    // Group by base engine name (strip "(chunked N)" / "(chunked N, M failed)" suffix).
+    const buckets = new Map<string, { runs: number; totalMs: number; chunked: number; lastUsedAt: number }>()
+    for (const r of rows) {
+      const base = (r.engine || '').replace(/\s*\(chunked[^)]*\)\s*/i, '').trim() || 'unknown'
+      const isChunked = /\(chunked/.test(r.engine || '')
+      const cur = buckets.get(base) ?? { runs: 0, totalMs: 0, chunked: 0, lastUsedAt: 0 }
+      cur.runs++
+      cur.totalMs += r.duration_ms ?? 0
+      if (isChunked) cur.chunked++
+      if (r.ingested_at > cur.lastUsedAt) cur.lastUsedAt = r.ingested_at
+      buckets.set(base, cur)
+    }
+    return Array.from(buckets.entries()).map(([engine, b]) => ({
+      engine,
+      runs: b.runs,
+      totalSec: Math.round(b.totalMs / 1000),
+      avgSec: b.runs > 0 ? Math.round(b.totalMs / 1000 / b.runs) : 0,
+      chunkedRuns: b.chunked,
+      lastUsedAt: b.lastUsedAt
+    })).sort((a, b) => b.runs - a.runs)
+  }
+
   /** Quick preflight for the Settings UI test button. Always
    *  invalidates the binary cache first so a newly-installed
    *  whisper-cli (e.g. via brew install run from the Models tab) is

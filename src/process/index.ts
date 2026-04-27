@@ -191,6 +191,15 @@ async function initializeDeferred(): Promise<void> {
     registerMediaProtocolHandler()
   } catch (err) { log.warn(`Media protocol handler init failed: ${err}`) }
 
+  // v1.5.0 — schedule the daily transcription retention purge. No-op
+  // unless the analyst sets transcription.retentionDays > 0; the
+  // service reads the setting per-tick so the cron itself is harmless
+  // for users who don't opt in.
+  try {
+    const { transcriptionRetention } = await import('./services/transcription/TranscriptionRetentionService')
+    transcriptionRetention.start()
+  } catch (err) { log.warn(`Transcription retention init failed: ${err}`) }
+
   // Load enabled sources from DB and schedule them
   await collectorManager.loadFromDatabase()
 

@@ -1,6 +1,6 @@
 {
   "name": "heimdall",
-  "version": "1.4.14",
+  "version": "1.5.0",
   "productName": "Heimdall",
   "description": "Global Intelligence Monitoring Platform for Public Safety",
   "main": "./out/main/index.js",
