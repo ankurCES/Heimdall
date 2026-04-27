@@ -2900,6 +2900,26 @@ const migrations: Migration[] = [
       }
       log.info('Migration 050: intel_reports.{metadata_json,original_lang,original_content} added (v1.4.7 hotfix)')
     }
+  },
+  {
+    version: '051',
+    name: 'v1_4_12_transcript_pii_findings',
+    up: (db) => {
+      // v1.4.12 — Per-segment PII findings for transcripts. Stored as a
+      // JSON array of { segmentIndex, kind, offset_start, offset_end }
+      // entries (offsets are local to each segment's text). The original
+      // full_text and segments_json are NEVER mutated — the renderer
+      // overlays highlights / does the masking client-side based on the
+      // findings array, preserving chain-of-custody for the unredacted
+      // material while letting analysts work in masked mode by default.
+      const cols = (db.prepare(`PRAGMA table_info(transcripts)`).all() as Array<{ name: string }>)
+        .map(c => c.name)
+      if (!cols.includes('pii_findings_json')) {
+        try { db.exec(`ALTER TABLE transcripts ADD COLUMN pii_findings_json TEXT`) }
+        catch (err) { log.debug(`migration 051 add column: ${err}`) }
+      }
+      log.info('Migration 051: transcripts.pii_findings_json added (v1.4.12)')
+    }
   }
 ]
 

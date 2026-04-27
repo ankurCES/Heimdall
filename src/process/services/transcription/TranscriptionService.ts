@@ -70,6 +70,8 @@ export interface TranscriptRow {
   translated_at?: number | null
   // v1.4.7 — segment-level translation (migration 049)
   translated_segments_json?: string | null
+  // v1.4.12 — per-segment PII findings (migration 051)
+  pii_findings_json?: string | null
 }
 
 export interface TranscribeOptions {
@@ -231,17 +233,46 @@ export class TranscriptionService extends EventEmitter {
     const segmentsCapped = result.segments.slice(0, MAX_SEGMENTS)
     const fullTextCapped = result.fullText.slice(0, MAX_TEXT_PERSIST)
 
+    // v1.4.12 — per-segment PII scan. Reuses the existing
+    // RedactionService (NLP person names + regex SSN/phone/email/
+    // address + new credit-card/IP/MAC/coordinate kinds). Offsets are
+    // local to each segment's text so the renderer can highlight in
+    // place without re-tokenising the whole transcript.
+    let piiFindingsJson: string | null = null
+    try {
+      const { redactionService } = await import('../security/RedactionService')
+      const findings: Array<{ segmentIndex: number; kind: string; offset_start: number; offset_end: number; value: string }> = []
+      segmentsCapped.forEach((seg, idx) => {
+        const hits = redactionService.scan(seg.text || '')
+        for (const h of hits) {
+          findings.push({
+            segmentIndex: idx,
+            kind: h.kind,
+            offset_start: h.offset_start,
+            offset_end: h.offset_end,
+            value: h.value
+          })
+        }
+      })
+      if (findings.length > 0) {
+        piiFindingsJson = JSON.stringify(findings)
+        log.info(`transcription: PII scan found ${findings.length} hit(s) across ${segmentsCapped.length} segment(s) for ${name}`)
+      }
+    } catch (err) {
+      log.debug(`transcription: PII scan failed for ${name}: ${(err as Error).message}`)
+    }
+
     db.prepare(`
       INSERT INTO transcripts
         (id, source_path, source_kind, file_name, file_size, mime_type, sha256,
          duration_ms, language, model, engine, full_text, segments_json,
-         report_id, ingested_at)
-      VALUES (?, ?, 'file', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         report_id, ingested_at, pii_findings_json)
+      VALUES (?, ?, 'file', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       id, filePath, name, stat.size, mime, sha,
       result.durationMs, result.language, result.model, result.engine,
       fullTextCapped, JSON.stringify(segmentsCapped),
-      opts.reportId ?? null, now
+      opts.reportId ?? null, now, piiFindingsJson
     )
 
     // Auto-create an intel_reports row when transcript is substantial
@@ -532,7 +563,8 @@ export class TranscriptionService extends EventEmitter {
              duration_ms, language, model, engine, full_text, segments_json,
              report_id, ingested_at,
              translated_text, translated_lang, translated_at,
-             translated_segments_json
+             translated_segments_json,
+             pii_findings_json
       FROM transcripts WHERE id = ?
     `).get(id) as TranscriptRow) || null
   }
@@ -544,7 +576,8 @@ export class TranscriptionService extends EventEmitter {
              duration_ms, language, model, engine, full_text, segments_json,
              report_id, ingested_at,
              translated_text, translated_lang, translated_at,
-             translated_segments_json
+             translated_segments_json,
+             pii_findings_json
       FROM transcripts ORDER BY ingested_at DESC LIMIT ?
     `).all(limit) as TranscriptRow[]
   }

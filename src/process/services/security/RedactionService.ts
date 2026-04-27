@@ -31,6 +31,7 @@ import { auditChainService } from '../audit/AuditChainService'
 
 export interface RedactionHit {
   kind: 'person_name' | 'ssn' | 'phone' | 'email' | 'address'
+       | 'credit_card' | 'ip_address' | 'mac_address' | 'coordinate'
   value: string
   offset_start: number
   offset_end: number
@@ -40,6 +41,34 @@ const SSN_RE = /\b\d{3}-\d{2}-\d{4}\b/g
 const PHONE_RE = /\b(?:\+1[-.\s]?)?(?:\(?\d{3}\)?[-.\s]?)?\d{3}[-.\s]?\d{4}\b/g
 const EMAIL_RE = /\b[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Z|a-z]{2,}\b/g
 const ADDRESS_RE = /\b\d{1,5}\s+(?:[A-Z][a-z]+\s){1,3}(?:St|Ave|Blvd|Dr|Rd|Ln|Way|Ct|Pl|Pkwy|Cir)\b\.?(?:\s*,\s*[A-Z]{2}\s+\d{5}(?:-\d{4})?)?/g
+// v1.4.12 — extra patterns for transcript PII detection.
+// Credit card: 13-19 digit runs separated by spaces or dashes; Luhn-validated below.
+const CC_RE = /\b(?:\d[\s-]?){13,19}\b/g
+// IPv4: four 0-255 octets. Strict bounds checked; prevents false-positive on version strings.
+const IPV4_RE = /\b(?:(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\.){3}(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\b/g
+// IPv6: simplified — full + compressed forms.
+const IPV6_RE = /\b(?:[0-9a-fA-F]{1,4}:){2,7}[0-9a-fA-F]{1,4}\b/g
+// MAC address: six hex pairs separated by colons or dashes.
+const MAC_RE = /\b(?:[0-9A-Fa-f]{2}[:-]){5}[0-9A-Fa-f]{2}\b/g
+// Decimal lat,long coordinates: e.g. "37.7749, -122.4194". Conservative bounds.
+const COORD_RE = /\b-?(?:90(?:\.0+)?|[1-8]?\d(?:\.\d+)?)\s*,\s*-?(?:180(?:\.0+)?|1[0-7]\d(?:\.\d+)?|\d?\d(?:\.\d+)?)\b/g
+
+/** Luhn check for credit-card candidates. Filters out random 13-19
+ *  digit runs (phone strings, order numbers, etc.) that match the
+ *  permissive regex but aren't actually card numbers. */
+function isValidCreditCard(raw: string): boolean {
+  const digits = raw.replace(/\D/g, '')
+  if (digits.length < 13 || digits.length > 19) return false
+  let sum = 0
+  let alt = false
+  for (let i = digits.length - 1; i >= 0; i--) {
+    let d = parseInt(digits[i], 10)
+    if (alt) { d *= 2; if (d > 9) d -= 9 }
+    sum += d
+    alt = !alt
+  }
+  return sum % 10 === 0
+}
 
 export class RedactionService {
   scan(text: string): RedactionHit[] {
@@ -77,9 +106,32 @@ export class RedactionService {
     regexScan(PHONE_RE, 'phone')
     regexScan(EMAIL_RE, 'email')
     regexScan(ADDRESS_RE, 'address')
+    // v1.4.12 — additional kinds for transcript PII coverage.
+    // Credit cards run through Luhn before being flagged so we don't
+    // mass-redact long phone strings or order numbers.
+    {
+      const r = new RegExp(CC_RE.source, CC_RE.flags)
+      let m: RegExpExecArray | null
+      while ((m = r.exec(text)) !== null) {
+        if (isValidCreditCard(m[0])) {
+          hits.push({ kind: 'credit_card', value: m[0], offset_start: m.index, offset_end: m.index + m[0].length })
+        }
+      }
+    }
+    regexScan(IPV4_RE, 'ip_address')
+    regexScan(IPV6_RE, 'ip_address')
+    regexScan(MAC_RE, 'mac_address')
+    regexScan(COORD_RE, 'coordinate')
 
     // Deduplicate overlapping hits — keep the more specific kind
-    const priority: Record<RedactionHit['kind'], number> = { ssn: 5, email: 4, phone: 3, address: 2, person_name: 1 }
+    // Higher number wins on overlap. Most-specific patterns (validated)
+    // outrank looser ones — e.g. a 16-digit Luhn-valid credit card
+    // shouldn't also be flagged as a phone number even if PHONE_RE
+    // happened to match a substring of it.
+    const priority: Record<RedactionHit['kind'], number> = {
+      ssn: 9, credit_card: 8, email: 7, mac_address: 6, ip_address: 5,
+      coordinate: 4, phone: 3, address: 2, person_name: 1
+    }
     hits.sort((a, b) => priority[b.kind] - priority[a.kind])
     const used = new Set<number>()
     const deduped: RedactionHit[] = []

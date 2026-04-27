@@ -16,12 +16,12 @@
 // getPathForFile helper (Electron's contextBridge'd
 // webUtils.getPathForFile) so we never speculate about File.path.
 
-import { useEffect, useMemo, useState, useRef, useCallback, type DragEvent } from 'react'
+import { useEffect, useMemo, useState, useRef, useCallback, type DragEvent, type ReactNode } from 'react'
 import {
   Mic, Upload, Loader2, Trash2, Clock, Languages, Cpu, FileText, Search,
   AlertCircle, CheckCircle2, RefreshCw, Link as LinkIcon, Settings as SettingsIcon,
   Play, Pause, SkipBack, SkipForward, Volume2, VolumeX, Languages as LanguagesIcon,
-  Square, Circle, FolderOpen, X as XIcon, Download, ChevronDown
+  Square, Circle, FolderOpen, X as XIcon, Download, ChevronDown, ShieldOff, Shield
 } from 'lucide-react'
 import {
   DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem,
@@ -61,6 +61,62 @@ interface Transcript {
   translated_at?: number | null
   // v1.4.7 — segment-level translations (mirrors segments_json shape)
   translated_segments_json?: string | null
+  // v1.4.12 — per-segment PII findings array
+  pii_findings_json?: string | null
+}
+
+// v1.4.12 — PII finding (per-segment, offsets local to segment.text)
+interface PiiFinding {
+  segmentIndex: number
+  kind: 'person_name' | 'ssn' | 'phone' | 'email' | 'address'
+       | 'credit_card' | 'ip_address' | 'mac_address' | 'coordinate'
+  offset_start: number
+  offset_end: number
+  value: string
+}
+
+const PII_LABEL: Record<PiiFinding['kind'], string> = {
+  person_name: 'NAME',
+  ssn: 'SSN',
+  phone: 'PHONE',
+  email: 'EMAIL',
+  address: 'ADDRESS',
+  credit_card: 'CARD',
+  ip_address: 'IP',
+  mac_address: 'MAC',
+  coordinate: 'GEO'
+}
+
+/** Render a segment's text with PII spans highlighted (or masked).
+ *  Findings are sorted by offset and walked once; non-overlapping spans
+ *  are emitted as <mark> elements with a hover tooltip. */
+function renderSegmentText(text: string, findings: PiiFinding[], masked: boolean): ReactNode {
+  if (!findings.length) return text
+  const sorted = findings.slice().sort((a, b) => a.offset_start - b.offset_start)
+  const out: ReactNode[] = []
+  let cursor = 0
+  sorted.forEach((f, i) => {
+    if (f.offset_start < cursor) return  // skip overlap (defensive)
+    if (f.offset_start > cursor) out.push(text.slice(cursor, f.offset_start))
+    const fragment = text.slice(f.offset_start, f.offset_end)
+    out.push(
+      <mark
+        key={`pii-${i}`}
+        title={`${f.kind.replace('_', ' ')}: ${fragment}`}
+        className={cn(
+          'rounded px-0.5 cursor-help',
+          masked
+            ? 'bg-foreground text-background font-mono text-[11px]'
+            : 'bg-amber-500/30 text-amber-700 dark:text-amber-300 underline decoration-amber-500/60 decoration-dotted underline-offset-2'
+        )}
+      >
+        {masked ? `[${PII_LABEL[f.kind]}]` : fragment}
+      </mark>
+    )
+    cursor = f.offset_end
+  })
+  if (cursor < text.length) out.push(text.slice(cursor))
+  return out
 }
 
 interface EngineStatus {
@@ -555,7 +611,29 @@ function TranscriptDetail({ transcript, onDelete, onRetranscribe, onTranslate, o
   // segment view (default; lets you click to scrub) and a flat
   // "Full text" prose view for quick reading or copy-paste.
   const [layout, setLayout] = useState<'segments' | 'fulltext'>('segments')
+  // v1.4.12 — PII visibility mode. 'highlight' shows detected spans
+  // with an amber underline (default); 'masked' replaces them with
+  // [TYPE] tokens for screen-share / over-shoulder safety.
+  const [piiMode, setPiiMode] = useState<'highlight' | 'masked'>('highlight')
   const segmentRefs = useRef<Map<number, HTMLDivElement>>(new Map())
+
+  // Parse PII findings once and bucket by segment index.
+  const piiBySegment = useMemo(() => {
+    if (!transcript.pii_findings_json) return new Map<number, PiiFinding[]>()
+    try {
+      const all = JSON.parse(transcript.pii_findings_json) as PiiFinding[]
+      const map = new Map<number, PiiFinding[]>()
+      for (const f of all) {
+        const arr = map.get(f.segmentIndex) ?? []
+        arr.push(f)
+        map.set(f.segmentIndex, arr)
+      }
+      return map
+    } catch { return new Map<number, PiiFinding[]>() }
+  }, [transcript.pii_findings_json])
+  const piiCount = piiBySegment.size > 0
+    ? Array.from(piiBySegment.values()).reduce((s, a) => s + a.length, 0)
+    : 0
 
   // The segment array currently being rendered (and search-filtered) —
   // changes when the analyst toggles between Original and Translation.
@@ -608,6 +686,21 @@ function TranscriptDetail({ transcript, onDelete, onRetranscribe, onTranslate, o
               {transcript.engine && <span className="flex items-center gap-1"><Cpu className="h-3 w-3" /> {transcript.engine}{transcript.model ? ` · ${transcript.model}` : ''}</span>}
               <span>{segments.length} segments</span>
               {hasTranslation && <span className="flex items-center gap-1 text-emerald-600 dark:text-emerald-400"><LanguagesIcon className="h-3 w-3" /> Translated</span>}
+              {piiCount > 0 && (
+                <button
+                  onClick={() => setPiiMode((m) => m === 'masked' ? 'highlight' : 'masked')}
+                  className={cn(
+                    'flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium border transition-colors',
+                    piiMode === 'masked'
+                      ? 'border-foreground/40 bg-foreground/10 text-foreground'
+                      : 'border-amber-500/40 bg-amber-500/10 text-amber-700 dark:text-amber-300 hover:bg-amber-500/20'
+                  )}
+                  title={piiMode === 'masked' ? 'Click to reveal PII' : 'Click to mask PII'}
+                >
+                  {piiMode === 'masked' ? <ShieldOff className="h-3 w-3" /> : <Shield className="h-3 w-3" />}
+                  {piiCount} PII {piiMode === 'masked' ? 'masked' : 'detected'}
+                </button>
+              )}
             </div>
             <div className="text-[11px] text-muted-foreground mt-1 font-mono truncate" title={transcript.source_path}>{transcript.source_path}</div>
           </div>
@@ -796,7 +889,9 @@ function TranscriptDetail({ transcript, onDelete, onRetranscribe, onTranslate, o
                   >
                     {fmtTime(s.start)}
                   </button>
-                  <span className="text-sm">{s.text}</span>
+                  <span className="text-sm">
+                    {renderSegmentText(s.text, piiBySegment.get(origIdx) ?? [], piiMode === 'masked')}
+                  </span>
                 </div>
               )
             })}
