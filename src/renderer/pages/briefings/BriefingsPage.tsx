@@ -175,6 +175,15 @@ export function BriefingsPage() {
   const { value: enabled, save: saveEnabled } = useSetting<boolean>('briefing.dailyEnabled', false)
   const { value: lookback, save: saveLookback } = useSetting<number>('briefing.lookbackHours', 24)
   const { value: classification, save: saveClassification } = useSetting<string>('briefing.classification', 'UNCLASSIFIED')
+  const { value: autoEmail, save: saveAutoEmail } = useSetting<boolean>('briefing.autoEmail', false)
+  const { value: emailFormat, save: saveEmailFormat } = useSetting<string>('briefing.emailFormat', 'pdf')
+  const { value: emailRecipients, save: saveEmailRecipients } = useSetting<string[]>('briefing.emailRecipients', [])
+  const [recipientsInput, setRecipientsInput] = useState('')
+  const [recipientsInited, setRecipientsInited] = useState(false)
+  if (!recipientsInited && Array.isArray(emailRecipients)) {
+    setRecipientsInput((emailRecipients ?? []).join(', '))
+    setRecipientsInited(true)
+  }
 
   const load = useCallback(async () => {
     try {
@@ -311,35 +320,93 @@ export function BriefingsPage() {
               <SettingsIcon className="h-3.5 w-3.5" /> Settings
             </CardTitle>
           </CardHeader>
-          <CardContent className="grid grid-cols-3 gap-4">
-            <div className="space-y-1">
-              <Label htmlFor="b-enabled" className="text-xs">Enable daily cron</Label>
-              <div className="flex items-center gap-2 h-9">
-                <Switch id="b-enabled" checked={!!enabled} onCheckedChange={(v) => void saveEnabled(v)} />
-                <span className="text-xs text-muted-foreground">{enabled ? 'on' : 'off'}</span>
+          <CardContent className="space-y-4">
+            <div className="grid grid-cols-3 gap-4">
+              <div className="space-y-1">
+                <Label htmlFor="b-enabled" className="text-xs">Enable daily cron</Label>
+                <div className="flex items-center gap-2 h-9">
+                  <Switch id="b-enabled" checked={!!enabled} onCheckedChange={(v) => void saveEnabled(v)} />
+                  <span className="text-xs text-muted-foreground">{enabled ? 'on' : 'off'}</span>
+                </div>
+              </div>
+              <div className="space-y-1">
+                <Label htmlFor="b-lookback" className="text-xs">Lookback (hours)</Label>
+                <Input
+                  id="b-lookback" type="number" min={1} max={168} step={1}
+                  value={lookback ?? 24}
+                  onChange={(e) => {
+                    const n = Number(e.target.value)
+                    if (Number.isFinite(n) && n >= 1 && n <= 168) void saveLookback(n)
+                  }}
+                  className="font-mono text-sm h-9"
+                />
+              </div>
+              <div className="space-y-1">
+                <Label htmlFor="b-class" className="text-xs">Classification line</Label>
+                <Input
+                  id="b-class" type="text"
+                  value={classification ?? 'UNCLASSIFIED'}
+                  onChange={(e) => void saveClassification(e.target.value)}
+                  placeholder="UNCLASSIFIED"
+                  className="font-mono text-sm h-9"
+                />
               </div>
             </div>
-            <div className="space-y-1">
-              <Label htmlFor="b-lookback" className="text-xs">Lookback (hours)</Label>
-              <Input
-                id="b-lookback" type="number" min={1} max={168} step={1}
-                value={lookback ?? 24}
-                onChange={(e) => {
-                  const n = Number(e.target.value)
-                  if (Number.isFinite(n) && n >= 1 && n <= 168) void saveLookback(n)
-                }}
-                className="font-mono text-sm h-9"
-              />
-            </div>
-            <div className="space-y-1">
-              <Label htmlFor="b-class" className="text-xs">Classification line</Label>
-              <Input
-                id="b-class" type="text"
-                value={classification ?? 'UNCLASSIFIED'}
-                onChange={(e) => void saveClassification(e.target.value)}
-                placeholder="UNCLASSIFIED"
-                className="font-mono text-sm h-9"
-              />
+
+            {/* v1.6.2 — auto-email on cron */}
+            <div className="border-t border-border pt-4 space-y-3">
+              <div className="flex items-center justify-between gap-3">
+                <div className="space-y-0.5 flex-1">
+                  <Label htmlFor="b-autoemail" className="text-xs cursor-pointer flex items-center gap-1.5">
+                    <Mail className="h-3 w-3" /> Auto-email each generated briefing
+                  </Label>
+                  <p className="text-[11px] text-muted-foreground">
+                    After the cron synthesises the briefing, send it to the recipients below as a {(emailFormat || 'pdf').toUpperCase()} attachment.
+                    Requires SMTP configured in Settings → SMTP. Off by default.
+                  </p>
+                </div>
+                <Switch
+                  id="b-autoemail"
+                  checked={!!autoEmail}
+                  onCheckedChange={(v) => void saveAutoEmail(v)}
+                />
+              </div>
+              <div className="grid grid-cols-3 gap-4">
+                <div className="space-y-1 col-span-2">
+                  <Label htmlFor="b-recipients" className="text-xs">Recipients (comma-separated)</Label>
+                  <Input
+                    id="b-recipients" type="text"
+                    value={recipientsInput}
+                    onChange={(e) => setRecipientsInput(e.target.value)}
+                    onBlur={() => {
+                      const list = recipientsInput
+                        .split(',')
+                        .map((s) => s.trim())
+                        .filter((s) => s && /.+@.+\..+/.test(s))
+                      void saveEmailRecipients(list)
+                    }}
+                    placeholder="chief@agency.gov, ops@agency.gov"
+                    className="font-mono text-sm h-9"
+                  />
+                  <p className="text-[11px] text-muted-foreground">
+                    {(emailRecipients ?? []).length === 0
+                      ? 'Falls back to SMTP defaults when blank.'
+                      : `${(emailRecipients ?? []).length} recipient${(emailRecipients ?? []).length !== 1 ? 's' : ''} on save.`}
+                  </p>
+                </div>
+                <div className="space-y-1">
+                  <Label htmlFor="b-format" className="text-xs">Attachment format</Label>
+                  <select
+                    id="b-format"
+                    value={emailFormat ?? 'pdf'}
+                    onChange={(e) => void saveEmailFormat(e.target.value)}
+                    className="w-full h-9 rounded-md border border-input bg-background px-3 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
+                  >
+                    <option value="pdf">PDF (with letterhead)</option>
+                    <option value="docx">Word (.docx)</option>
+                  </select>
+                </div>
+              </div>
             </div>
           </CardContent>
         </Card>

@@ -190,6 +190,25 @@ export class DailyBriefingService {
         WHERE id = ?
       `).run(cleanBody, model, id)
       log.info(`daily-briefing: ${id} ready (${cleanBody.length} chars, model=${model})`)
+
+      // v1.6.2 — auto-email on cron when the analyst opted in. Wrapped
+      // in its own try/catch so an SMTP failure doesn't roll back the
+      // ready→generated state — the briefing itself is still good,
+      // they just have to re-email manually.
+      const autoEmail = settingsService.get<boolean>('briefing.autoEmail') === true
+      if (autoEmail) {
+        const recipients = (settingsService.get<string[]>('briefing.emailRecipients') ?? []).filter(Boolean)
+        const fmt = (settingsService.get<'pdf' | 'docx'>('briefing.emailFormat') ?? 'pdf')
+        try {
+          // Lazy-import the exporter to keep the cold-path light when
+          // auto-email is off (which is the default).
+          const { emailBriefing } = await import('./DailyBriefingExporter')
+          const result = await emailBriefing(id, recipients, fmt)
+          log.info(`daily-briefing: ${id} auto-emailed to ${result.recipients.length} recipient(s)`)
+        } catch (mailErr) {
+          log.warn(`daily-briefing: ${id} auto-email failed: ${(mailErr as Error).message}`)
+        }
+      }
     } catch (err) {
       const msg = (err as Error).message ?? String(err)
       db.prepare(`
