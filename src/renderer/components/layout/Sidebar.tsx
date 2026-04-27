@@ -5,7 +5,7 @@ import {
   Settings, Activity, BookOpen, Coins, BarChart3, Radio,
   Layers, RefreshCw, Sparkles, Eye, AlertOctagon, GitCompare, TrendingUp,
   Network, Users, ShieldAlert, Shield, Bug, Moon, MapPin, Image, Share2, Brain, ChevronLeft, ChevronRight, ChevronDown,
-  Workflow
+  Workflow, Library, FolderOpen, Target, Server, Inbox, ShieldCheck
 } from 'lucide-react'
 import { cn } from '@renderer/lib/utils'
 import heimdallLogo from '@renderer/assets/heimdall-logo.png'
@@ -72,6 +72,18 @@ const NAV_GROUPS: NavGroup[] = [
       { to: '/alerts', icon: Bell, label: 'Alerts' },
       { to: '/meshtastic', icon: Radio, label: 'Meshtastic' },
       { to: '/telegram-intel', icon: Send, label: 'Telegram Intel' }
+    ]
+  },
+  {
+    id: 'library',
+    label: 'Library & Cases',
+    items: [
+      { to: '/library', icon: Library, label: 'Reports Library' },
+      { to: '/cases', icon: FolderOpen, label: 'Case Files' },
+      { to: '/indicators', icon: Target, label: 'Indicators (I&W)' },
+      { to: '/reliability', icon: Server, label: 'Source Reliability' },
+      { to: '/revisions', icon: Inbox, label: 'Revision Inbox' },
+      { to: '/ethics', icon: ShieldCheck, label: 'Ethics Console' }
     ]
   },
   {

@@ -120,6 +120,24 @@ export const ObsidianConfigSchema = z.object({
 
 export type ObsidianConfig = z.infer<typeof ObsidianConfigSchema>
 
+// Letterhead / agency identity for exported PDF/DOCX reports.
+// All fields optional — default branding is "Heimdall Intelligence Platform".
+// Logo is stored as a base64 PNG in the settings store; validated to <500KB
+// on upload so settings reads stay cheap.
+export const LetterheadConfigSchema = z.object({
+  agencyName: z.string().default(''),
+  agencyTagline: z.string().default(''),
+  agencyShortName: z.string().default(''),
+  logoBase64: z.string().default(''),
+  defaultClassification: z.string().default('UNCLASSIFIED//FOR OFFICIAL USE ONLY'),
+  distributionStatement: z.string().default(
+    'Distribution authorized for official use only. Reproduction prohibited without originator approval.'
+  ),
+  footerText: z.string().default(''),
+  signaturesEnabled: z.boolean().default(true)
+})
+export type LetterheadConfig = z.infer<typeof LetterheadConfigSchema>
+
 export interface AppSettings {
   smtp: SmtpConfig
   telegram: TelegramConfig
@@ -127,6 +145,7 @@ export interface AppSettings {
   safety: SafetyConfig
   llm: LlmConfig
   obsidian: ObsidianConfig
+  letterhead: LetterheadConfig
   apiKeys: ApiKeyEntry[]
   enabledDisciplines: string[]
 }

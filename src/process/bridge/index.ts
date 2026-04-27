@@ -40,6 +40,9 @@ import { registerDarkWebExplorerBridge } from './darkwebExplorerBridge'
 import { registerTelegramIntelBridge } from './telegramIntelBridge'
 import { registerWorkflowBridge } from './workflowBridge'
 import { registerTrainingBridge } from './trainingBridge'
+import { registerReportsBridge } from './reportsBridge'
+import { registerCasesBridge } from './casesBridge'
+import { registerCalibrationBridge } from './calibrationBridge'
 import log from 'electron-log'
 
 export function registerAllBridges(): void {
@@ -85,5 +88,8 @@ export function registerAllBridges(): void {
   registerTelegramIntelBridge()
   registerWorkflowBridge()
   registerTrainingBridge()
+  registerReportsBridge()
+  registerCasesBridge()
+  registerCalibrationBridge()
   log.info('All IPC bridges registered')
 }

@@ -35,10 +35,17 @@ import { MemoryPage } from './pages/memory/MemoryPage'
 import { DarkWebPage } from './pages/darkweb/DarkWebPage'
 import { TelegramIntelPage } from './pages/telegram-intel/TelegramIntelPage'
 import { WorkflowEditorPage } from './pages/workflows/WorkflowEditorPage'
+import { ReportsLibraryPage } from './pages/library/ReportsLibraryPage'
+import { CaseFilesPage } from './pages/cases/CaseFilesPage'
+import { IndicatorWatchlistPage } from './pages/library/indicators/IndicatorWatchlistPage'
+import { SourceReliabilityPage } from './pages/library/reliability/SourceReliabilityPage'
+import { RevisionInboxPage } from './pages/library/revisions/RevisionInboxPage'
+import { EthicsConsolePage } from './pages/ethics/EthicsConsolePage'
 import { Phase5Page } from './pages/phase5/Phase5Page'
 import { Toaster } from 'sonner'
 import { NotificationListener } from './components/NotificationListener'
 import { UnlockGate } from './components/UnlockGate'
+import { ReportMigrationSplash } from './components/splash/ReportMigrationSplash'
 import './styles/globals.css'
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
@@ -55,6 +62,7 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
       />
       <UnlockGate>
       <NotificationListener />
+      <ReportMigrationSplash />
       <Routes>
         <Route element={<Layout />}>
           <Route path="/" element={<DashboardPage />} />
@@ -86,6 +94,12 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
           <Route path="/darkweb" element={<DarkWebPage />} />
           <Route path="/telegram-intel" element={<TelegramIntelPage />} />
           <Route path="/workflows" element={<WorkflowEditorPage />} />
+          <Route path="/library" element={<ReportsLibraryPage />} />
+          <Route path="/cases" element={<CaseFilesPage />} />
+          <Route path="/indicators" element={<IndicatorWatchlistPage />} />
+          <Route path="/reliability" element={<SourceReliabilityPage />} />
+          <Route path="/revisions" element={<RevisionInboxPage />} />
+          <Route path="/ethics" element={<EthicsConsolePage />} />
           <Route path="/advanced" element={<Phase5Page />} />
           <Route path="/sync" element={<SyncPage />} />
           <Route path="/tokens" element={<TokensPage />} />

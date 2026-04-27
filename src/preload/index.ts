@@ -121,7 +121,23 @@ const testChannels = [
   'workflow:execute', 'workflow:runs',
   'training:status', 'training:mitre_sync', 'training:misp_sync_all',
   'training:misp_sync_one', 'training:feeds_list', 'training:scan_text',
-  'training:crest_ingest', 'training:exemplar_preview', 'training:tradecraft_history'
+  'training:crest_ingest', 'training:exemplar_preview', 'training:tradecraft_history',
+  'reports:list', 'reports:get', 'reports:search', 'reports:stats',
+  'reports:create', 'reports:update', 'reports:delete', 'reports:publish',
+  'reports:revise', 'reports:version_chain',
+  'reports:promote_one', 'reports:promotion_state', 'reports:promotion_run',
+  'reports:export_pdf', 'reports:signing_key_info', 'reports:distribution_log',
+  'cases:list', 'cases:get', 'cases:create', 'cases:update', 'cases:delete',
+  'cases:list_items', 'cases:add_item', 'cases:remove_item',
+  'cases:containing', 'cases:stats',
+  'indicators:list', 'indicators:observations', 'indicators:recent_hits',
+  'indicators:stats', 'indicators:run_now',
+  'sources:reliability_list', 'sources:reliability_claims',
+  'sources:reliability_recompute', 'sources:reliability_stats', 'sources:reliability_mark',
+  'revisions:pending', 'revisions:pending_count',
+  'revisions:acknowledge', 'revisions:dismiss', 'revisions:run_now',
+  'ethics:unresolved', 'ethics:flags_for_report', 'ethics:resolve',
+  'ethics:stats', 'ethics:rescreen_report'
 ]
 const allowedChannels = [...Object.values(IPC_CHANNELS), ...testChannels]
 const chatEvents = ['chat:chunk', 'chat:done', 'chat:error', 'chat:planRefined']
@@ -129,8 +145,9 @@ const darkwebEvents = ['darkweb:refresh_progress', 'darkweb:refresh_complete',
   'darkweb:seed_progress', 'darkweb:enrich_progress', 'darkweb:crawl_progress']
 const telegramIntelEvents = ['telegram-intel:status_update', 'telegram-intel:new_message']
 const workflowEvents = ['workflow:node_progress', 'workflow:run_complete']
+const reportsEvents = ['reports:promotion_progress']
 const syncEvents = ['sync:progress', 'enrichment:progress', 'watch:hits', 'markets:backfillProgress']
-const allowedEvents = [...Object.values(IPC_EVENTS), ...chatEvents, ...syncEvents, ...darkwebEvents, ...telegramIntelEvents, ...workflowEvents]
+const allowedEvents = [...Object.values(IPC_EVENTS), ...chatEvents, ...syncEvents, ...darkwebEvents, ...telegramIntelEvents, ...workflowEvents, ...reportsEvents]
 
 const api = {
   invoke: (channel: string, ...args: unknown[]): Promise<unknown> => {

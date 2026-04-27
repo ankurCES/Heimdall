@@ -246,6 +246,41 @@ async function initializeDeferred(): Promise<void> {
     log.debug(`Meshtastic config read failed at startup: ${err}`)
   }
 
+  // v1.1 — Reports library promotion. Scans existing chat_messages and
+  // moves anything that looks like a generated report into the new
+  // report_products table. Idempotent — exits immediately if the previous
+  // run completed. Streams progress to the renderer for the splash UI.
+  // Wrapped in setTimeout to let the renderer fully mount first so the
+  // splash event subscriber is ready.
+  setTimeout(async () => {
+    try {
+      const { startReportPromotionMigration } = await import('./bridge/reportsBridge')
+      startReportPromotionMigration()
+    } catch (err) {
+      log.warn(`Report promotion migration kick-off failed: ${err}`)
+    }
+  }, 3000)
+
+  // v1.1 calibration loops — Indicator Tracker + Auto-Revision both run
+  // on their own internal timers. Source Reliability recompute runs
+  // nightly via cron.
+  try {
+    const { indicatorTrackerService } = await import('./services/calibration/IndicatorTrackerService')
+    indicatorTrackerService.start()
+  } catch (err) { log.warn(`indicator tracker start failed: ${err}`) }
+
+  try {
+    const { autoRevisionService } = await import('./services/calibration/AutoRevisionService')
+    autoRevisionService.start()
+  } catch (err) { log.warn(`auto-revision start failed: ${err}`) }
+
+  cronService.schedule('calibration.reliability', '0 6 * * *', 'Source-reliability nightly recompute', async () => {
+    try {
+      const { sourceReliabilityService } = await import('./services/calibration/SourceReliabilityService')
+      sourceReliabilityService.recomputeAll()
+    } catch (err) { log.error(`calibration.reliability failed: ${err}`) }
+  })
+
   log.info('Deferred initialization complete')
 }
 

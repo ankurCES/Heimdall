@@ -2269,6 +2269,227 @@ const migrations: Migration[] = [
       `)
       log.info('Migration 041: training_corpus + threat_feeds + report_quality_scores tables created')
     }
+  },
+  {
+    version: '042',
+    name: 'v1_1_living_report',
+    up: (db) => {
+      // ─────────────────────────────────────────────────────────────────
+      // v1.1 "Living Report" — reports as first-class products with
+      // continuous indicator tracking, source reliability, auto-revision,
+      // case files, and ethics flagging.
+      //
+      // Single migration covers all v1.1 tables (cleaner upgrade path
+      // than seven small migrations for what is logically one feature set).
+      // ─────────────────────────────────────────────────────────────────
+
+      db.exec(`
+        -- ── Reports as first-class products ───────────────────────────
+        CREATE TABLE IF NOT EXISTS report_products (
+          id TEXT PRIMARY KEY,
+          session_id TEXT,
+          workflow_run_id TEXT,
+          parent_report_id TEXT,
+          version INTEGER NOT NULL DEFAULT 1,
+          title TEXT NOT NULL,
+          format TEXT NOT NULL,
+          classification TEXT NOT NULL DEFAULT 'UNCLASSIFIED//FOUO',
+          query TEXT,
+          body_markdown TEXT NOT NULL,
+          tradecraft_score INTEGER,
+          tradecraft_deficiencies_json TEXT,
+          was_regenerated INTEGER NOT NULL DEFAULT 0,
+          model_used TEXT,
+          llm_connection TEXT,
+          source_findings_sha TEXT,
+          generated_at INTEGER NOT NULL,
+          status TEXT NOT NULL DEFAULT 'draft',
+          superseded_by_id TEXT,
+          tags_json TEXT NOT NULL DEFAULT '[]',
+          region_tags_json TEXT NOT NULL DEFAULT '[]',
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_rp_status ON report_products(status);
+        CREATE INDEX IF NOT EXISTS idx_rp_format ON report_products(format);
+        CREATE INDEX IF NOT EXISTS idx_rp_generated ON report_products(generated_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_rp_parent ON report_products(parent_report_id);
+        CREATE INDEX IF NOT EXISTS idx_rp_session ON report_products(session_id);
+
+        -- FTS5 over title + body for the Library search.
+        -- External-content table mode: data lives in report_products,
+        -- index keeps a parallel structure synced via triggers below.
+        CREATE VIRTUAL TABLE IF NOT EXISTS report_products_fts USING fts5(
+          title, body_markdown, tags,
+          content='report_products',
+          content_rowid='rowid',
+          tokenize='porter unicode61'
+        );
+
+        CREATE TRIGGER IF NOT EXISTS rp_ai AFTER INSERT ON report_products BEGIN
+          INSERT INTO report_products_fts(rowid, title, body_markdown, tags)
+            VALUES (new.rowid, new.title, new.body_markdown, new.tags_json);
+        END;
+        CREATE TRIGGER IF NOT EXISTS rp_au AFTER UPDATE ON report_products BEGIN
+          INSERT INTO report_products_fts(report_products_fts, rowid, title, body_markdown, tags)
+            VALUES ('delete', old.rowid, old.title, old.body_markdown, old.tags_json);
+          INSERT INTO report_products_fts(rowid, title, body_markdown, tags)
+            VALUES (new.rowid, new.title, new.body_markdown, new.tags_json);
+        END;
+        CREATE TRIGGER IF NOT EXISTS rp_ad AFTER DELETE ON report_products BEGIN
+          INSERT INTO report_products_fts(report_products_fts, rowid, title, body_markdown, tags)
+            VALUES ('delete', old.rowid, old.title, old.body_markdown, old.tags_json);
+        END;
+
+        -- ── Indicator tracking (Theme 1.1) ────────────────────────────
+        CREATE TABLE IF NOT EXISTS report_indicators (
+          id TEXT PRIMARY KEY,
+          report_id TEXT NOT NULL,
+          hypothesis TEXT NOT NULL,
+          indicator_text TEXT NOT NULL,
+          direction TEXT NOT NULL,
+          priority TEXT NOT NULL DEFAULT 'medium',
+          match_keywords_json TEXT,
+          match_entities_json TEXT,
+          active INTEGER NOT NULL DEFAULT 1,
+          observation_count INTEGER NOT NULL DEFAULT 0,
+          last_observed_at INTEGER,
+          created_at INTEGER NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_ri_report ON report_indicators(report_id);
+        CREATE INDEX IF NOT EXISTS idx_ri_active ON report_indicators(active, priority);
+
+        CREATE TABLE IF NOT EXISTS indicator_observations (
+          id TEXT PRIMARY KEY,
+          indicator_id TEXT NOT NULL,
+          intel_report_id TEXT,
+          matched_text TEXT,
+          match_score REAL,
+          observed_at INTEGER NOT NULL,
+          reviewed INTEGER NOT NULL DEFAULT 0,
+          reviewer_action TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_io_indicator ON indicator_observations(indicator_id, observed_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_io_observed ON indicator_observations(observed_at DESC);
+
+        -- ── Source reliability (Theme 1.2) ────────────────────────────
+        CREATE TABLE IF NOT EXISTS source_reliability (
+          source_key TEXT PRIMARY KEY,
+          display_name TEXT,
+          current_rating TEXT NOT NULL DEFAULT 'F',
+          current_score REAL NOT NULL DEFAULT 0.5,
+          total_claims INTEGER NOT NULL DEFAULT 0,
+          confirmed_claims INTEGER NOT NULL DEFAULT 0,
+          contradicted_claims INTEGER NOT NULL DEFAULT 0,
+          last_evaluated_at INTEGER,
+          metadata_json TEXT
+        );
+
+        CREATE TABLE IF NOT EXISTS source_claims (
+          id TEXT PRIMARY KEY,
+          source_key TEXT NOT NULL,
+          report_id TEXT,
+          claim_text TEXT NOT NULL,
+          claim_entities_json TEXT,
+          status TEXT NOT NULL DEFAULT 'unverified',
+          evidence_json TEXT,
+          asserted_at INTEGER NOT NULL,
+          evaluated_at INTEGER
+        );
+        CREATE INDEX IF NOT EXISTS idx_sc_source ON source_claims(source_key, asserted_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_sc_status ON source_claims(status);
+
+        -- ── Auto-revision (Theme 1.3) ─────────────────────────────────
+        CREATE TABLE IF NOT EXISTS report_revisions (
+          id TEXT PRIMARY KEY,
+          report_id TEXT NOT NULL,
+          trigger_type TEXT NOT NULL,
+          trigger_evidence TEXT,
+          trigger_intel_id TEXT,
+          affected_judgment TEXT,
+          status TEXT NOT NULL DEFAULT 'pending',
+          new_version_id TEXT,
+          created_at INTEGER NOT NULL,
+          reviewed_at INTEGER,
+          reviewer_notes TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_rr_report ON report_revisions(report_id);
+        CREATE INDEX IF NOT EXISTS idx_rr_status ON report_revisions(status, created_at DESC);
+
+        -- ── Case files (Theme 5.4) ────────────────────────────────────
+        CREATE TABLE IF NOT EXISTS case_files (
+          id TEXT PRIMARY KEY,
+          name TEXT NOT NULL,
+          description TEXT,
+          status TEXT NOT NULL DEFAULT 'open',
+          classification TEXT,
+          lead_analyst TEXT,
+          tags_json TEXT NOT NULL DEFAULT '[]',
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_cf_status ON case_files(status, updated_at DESC);
+
+        CREATE TABLE IF NOT EXISTS case_file_items (
+          id TEXT PRIMARY KEY,
+          case_file_id TEXT NOT NULL,
+          item_type TEXT NOT NULL,
+          item_id TEXT NOT NULL,
+          added_by TEXT,
+          added_at INTEGER NOT NULL,
+          notes TEXT,
+          UNIQUE(case_file_id, item_type, item_id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_cfi_case ON case_file_items(case_file_id);
+        CREATE INDEX IF NOT EXISTS idx_cfi_item ON case_file_items(item_type, item_id);
+
+        -- ── Distribution tracking (PDF/DOCX export trail) ────────────
+        CREATE TABLE IF NOT EXISTS report_distributions (
+          id TEXT PRIMARY KEY,
+          report_id TEXT NOT NULL,
+          format TEXT NOT NULL,
+          recipient TEXT,
+          signature_sha TEXT NOT NULL,
+          signature_b64 TEXT,
+          exported_at INTEGER NOT NULL,
+          exported_by TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_rd_report ON report_distributions(report_id, exported_at DESC);
+
+        -- ── Ethics flags (cross-cutting) ─────────────────────────────
+        CREATE TABLE IF NOT EXISTS ethics_flags (
+          id TEXT PRIMARY KEY,
+          subject_type TEXT NOT NULL,
+          subject_id TEXT NOT NULL,
+          flag_type TEXT NOT NULL,
+          severity TEXT NOT NULL,
+          evidence TEXT,
+          resolution TEXT,
+          resolution_notes TEXT,
+          reviewed_by TEXT,
+          created_at INTEGER NOT NULL,
+          reviewed_at INTEGER
+        );
+        CREATE INDEX IF NOT EXISTS idx_ef_subject ON ethics_flags(subject_type, subject_id);
+        CREATE INDEX IF NOT EXISTS idx_ef_resolution ON ethics_flags(resolution, created_at DESC);
+
+        -- Tracks the one-shot promotion migration so we don't re-scan on
+        -- every boot. Single row with id=1.
+        CREATE TABLE IF NOT EXISTS report_promotion_state (
+          id INTEGER PRIMARY KEY CHECK (id = 1),
+          status TEXT NOT NULL DEFAULT 'pending',
+          total INTEGER NOT NULL DEFAULT 0,
+          processed INTEGER NOT NULL DEFAULT 0,
+          promoted INTEGER NOT NULL DEFAULT 0,
+          skipped INTEGER NOT NULL DEFAULT 0,
+          started_at INTEGER,
+          completed_at INTEGER,
+          last_error TEXT
+        );
+        INSERT OR IGNORE INTO report_promotion_state (id, status) VALUES (1, 'pending');
+      `)
+      log.info('Migration 042: v1.1 living-report tables created (12 tables, 1 FTS index)')
+    }
   }
 ]
 
