@@ -3221,6 +3221,31 @@ const migrations: Migration[] = [
       `)
       log.info('Migration 056: daily_briefings_fts + sync triggers installed (v1.6.4)')
     }
+  },
+  {
+    version: '057',
+    name: 'entity_watchlist',
+    up: (db) => {
+      // v1.7.4 — analyst pins canonical entities to a watchlist; a
+      // 5-minute cron compares live intel mentions against the
+      // last_alerted_intel_id cursor on each row and emits a toast
+      // when a genuinely-new mention lands. Same shape as the v1.5.3
+      // saved-search alerts but anchored to a canonical entity
+      // rather than a free-form FTS query.
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS entity_watchlist (
+          id TEXT PRIMARY KEY,
+          canonical_id TEXT NOT NULL UNIQUE,
+          alert_enabled INTEGER NOT NULL DEFAULT 1,
+          last_alerted_intel_id TEXT,
+          last_alerted_at INTEGER,
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_entity_watchlist_alert ON entity_watchlist(alert_enabled);
+      `)
+      log.info('Migration 057: entity_watchlist table created (v1.7.4)')
+    }
   }
 ]
 

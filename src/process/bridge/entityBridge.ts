@@ -6,6 +6,7 @@ import { entityTimelineService } from '../services/entity/EntityTimelineService'
 import { entityCoMentionService } from '../services/entity/EntityCoMentionService'
 import { entityGeoService } from '../services/entity/EntityGeoService'
 import { entityMergeService } from '../services/entity/EntityMergeService'
+import { entityWatchlist } from '../services/entity/EntityWatchlistService'
 
 /**
  * Theme 4.6 — entity resolution IPC.
@@ -67,6 +68,17 @@ export function registerEntityBridge(): void {
   })
   ipcMain.handle('entity:split', (_evt, args: { sourceCanonicalId: string; splitValues: string[]; newCanonicalValue: string }) => {
     return entityMergeService.split(args)
+  })
+
+  // v1.7.4 — entity watchlist (anchored alerts).
+  ipcMain.handle('entity:watch_add', (_evt, canonicalId: string) => entityWatchlist.add(canonicalId))
+  ipcMain.handle('entity:watch_remove', (_evt, canonicalId: string) => {
+    entityWatchlist.remove(canonicalId); return { ok: true }
+  })
+  ipcMain.handle('entity:watch_status', (_evt, canonicalId: string) => entityWatchlist.getByCanonicalId(canonicalId))
+  ipcMain.handle('entity:watch_list', () => entityWatchlist.list())
+  ipcMain.handle('entity:watch_set_enabled', (_evt, args: { canonicalId: string; enabled: boolean }) => {
+    entityWatchlist.setEnabled(args.canonicalId, args.enabled); return { ok: true }
   })
 
   log.info('entity bridge registered')

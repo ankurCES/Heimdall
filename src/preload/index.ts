@@ -50,6 +50,8 @@ const testChannels = [
   'entity:resolve', 'entity:latest', 'entity:top', 'entity:types',
   'entity:aliases', 'entity:reports', 'entity:pol', 'entity:timeline',
   'entity:co_mentions', 'entity:geo_pins', 'entity:merge', 'entity:split',
+  'entity:watch_add', 'entity:watch_remove', 'entity:watch_status',
+  'entity:watch_list', 'entity:watch_set_enabled',
   'ci:analyze', 'ci:latest', 'ci:top', 'ci:for_report',
   'ci:state_media', 'ci:bias_list',
   'cybint:tactics', 'cybint:techniques', 'cybint:tag_techniques',

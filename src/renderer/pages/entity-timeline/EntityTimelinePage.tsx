@@ -18,7 +18,8 @@ import { useEffect, useMemo, useState } from 'react'
 import { useParams, useNavigate, Link } from 'react-router-dom'
 import {
   Clock, FileText, Mic, Users, FileScan, ScrollText, Image as ImageIcon,
-  ArrowLeft, Loader2, AlertCircle, GitMerge, Network, MapPin, List, Combine
+  ArrowLeft, Loader2, AlertCircle, GitMerge, Network, MapPin, List, Combine,
+  Bell, BellOff
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { MapContainer, TileLayer, CircleMarker, Popup } from 'react-leaflet'
@@ -159,6 +160,8 @@ export function EntityTimelinePage() {
   const [geoLoading, setGeoLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [view, setView] = useState<'timeline' | 'map'>('timeline')
+  const [watchEnabled, setWatchEnabled] = useState<boolean>(false)
+  const [watchLoading, setWatchLoading] = useState<boolean>(false)
   const [activeKinds, setActiveKinds] = useState<Set<Kind>>(new Set(['intel', 'transcript', 'humint', 'document', 'briefing', 'image']))
 
   useEffect(() => {
@@ -193,7 +196,35 @@ export function EntityTimelinePage() {
       } catch { setGeo(null) }
       finally { setGeoLoading(false) }
     })()
+    // v1.7.4 — load current watch state for the toggle.
+    void (async () => {
+      try {
+        const w = await window.heimdall.invoke('entity:watch_status', id) as { alert_enabled: 0 | 1 } | null
+        setWatchEnabled(!!(w && w.alert_enabled === 1))
+      } catch { setWatchEnabled(false) }
+    })()
   }, [id])
+
+  const toggleWatch = async () => {
+    if (!id) return
+    setWatchLoading(true)
+    try {
+      if (watchEnabled) {
+        await window.heimdall.invoke('entity:watch_remove', id)
+        setWatchEnabled(false)
+        toast.message('Stopped watching this entity')
+      } else {
+        await window.heimdall.invoke('entity:watch_add', id)
+        setWatchEnabled(true)
+        toast.success('Watching this entity', {
+          description: 'You\'ll get a toast when new intel mentions arrive (5-min cron). First-tick existing mentions are skipped.',
+          duration: 6000
+        })
+      }
+    } catch (err) {
+      toast.error('Watch toggle failed', { description: String(err).replace(/^Error:\s*/, '') })
+    } finally { setWatchLoading(false) }
+  }
 
   const visibleEvents = useMemo(() => {
     if (!timeline) return []
@@ -267,6 +298,25 @@ export function EntityTimelinePage() {
           )}
           {timeline && (
             <div className="ml-auto flex items-center gap-1">
+              <Button
+                size="sm"
+                variant={watchEnabled ? 'default' : 'outline'}
+                onClick={toggleWatch}
+                disabled={watchLoading}
+                className={cn('h-8', watchEnabled && 'bg-emerald-600 hover:bg-emerald-700')}
+                title={watchEnabled
+                  ? 'Watching this entity — toast on new intel mentions. Click to unwatch.'
+                  : 'Add to watchlist — get a toast when new intel mentions arrive (5-min cron).'}
+              >
+                {watchLoading ? (
+                  <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />
+                ) : watchEnabled ? (
+                  <Bell className="h-3.5 w-3.5 mr-1" />
+                ) : (
+                  <BellOff className="h-3.5 w-3.5 mr-1" />
+                )}
+                {watchEnabled ? 'Watching' : 'Watch'}
+              </Button>
               <Button
                 size="sm" variant="ghost"
                 onClick={mergeIntoTarget}

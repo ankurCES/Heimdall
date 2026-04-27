@@ -218,6 +218,15 @@ async function initializeDeferred(): Promise<void> {
     dailyBriefingService.start()
   } catch (err) { log.warn(`Daily briefing init failed: ${err}`) }
 
+  // v1.7.4 — entity watchlist alerts. 5-minute cron compares live
+  // intel mentions of watched canonicals against last_alerted_intel_id;
+  // emits a search:alert_hit event (reused channel) per new hit.
+  // First tick on a new watch records cursor without flooding.
+  try {
+    const { entityWatchlist } = await import('./services/entity/EntityWatchlistService')
+    entityWatchlist.start()
+  } catch (err) { log.warn(`Entity watchlist init failed: ${err}`) }
+
   // Load enabled sources from DB and schedule them
   await collectorManager.loadFromDatabase()
 
