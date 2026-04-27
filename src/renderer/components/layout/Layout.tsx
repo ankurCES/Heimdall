@@ -5,6 +5,7 @@ import { Sidebar } from './Sidebar'
 import { ErrorBoundary } from '../ErrorBoundary'
 import { ClassificationBanner, type Classification, isClassification } from '../ClassificationBanner'
 import { ModelDownloadBanner } from '../ModelDownloadBanner'
+import { UniversalSearchOverlay } from '../UniversalSearchOverlay'
 
 export function Layout() {
   const [mobileOpen, setMobileOpen] = useState(false)
@@ -86,6 +87,10 @@ export function Layout() {
       {/* v1.4.4 — non-intrusive corner toast for background model downloads.
           Renders nothing when no downloads are active or pending. */}
       <ModelDownloadBanner />
+
+      {/* v1.5.1 — Cmd/Ctrl+K spotlight search across intel + transcripts.
+          Listens for the keystroke globally; renders nothing until opened. */}
+      <UniversalSearchOverlay />
     </div>
   )
 }

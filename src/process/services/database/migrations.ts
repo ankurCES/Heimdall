@@ -2920,6 +2920,92 @@ const migrations: Migration[] = [
       }
       log.info('Migration 051: transcripts.pii_findings_json added (v1.4.12)')
     }
+  },
+  {
+    version: '052',
+    name: 'transcripts_fts5',
+    up: (db) => {
+      // v1.5.1 — FTS5 full-text index over transcripts. Mirrors the
+      // intel_reports_fts pattern (migration 036): external-content
+      // virtual table + AFTER-INSERT/UPDATE/DELETE triggers to keep
+      // sync going forward. Searched columns: file_name, full_text,
+      // language. Translated text is also indexed when present so
+      // analysts can find foreign-language audio by its English
+      // translation.
+      try {
+        db.exec(`
+          CREATE VIRTUAL TABLE IF NOT EXISTS transcripts_fts USING fts5(
+            file_name,
+            full_text,
+            translated_text,
+            language,
+            content='transcripts',
+            content_rowid='rowid',
+            tokenize='porter unicode61 remove_diacritics 2'
+          );
+        `)
+      } catch (err) {
+        log.warn(`Migration 052: FTS5 virtual table creation failed (${err}). Search will fall back to LIKE.`)
+        return
+      }
+
+      const total = (db.prepare('SELECT COUNT(*) AS c FROM transcripts').get() as { c: number }).c
+      const ftsTotal = (db.prepare('SELECT COUNT(*) AS c FROM transcripts_fts').get() as { c: number }).c
+      if (ftsTotal < total) {
+        log.info(`Migration 052: backfilling FTS5 index for ${total} transcripts (${ftsTotal} already indexed)…`)
+        const start = Date.now()
+        db.exec(`
+          INSERT INTO transcripts_fts(rowid, file_name, full_text, translated_text, language)
+          SELECT rowid,
+                 COALESCE(file_name, ''),
+                 COALESCE(full_text, ''),
+                 COALESCE(translated_text, ''),
+                 COALESCE(language, '')
+          FROM transcripts
+          WHERE rowid NOT IN (SELECT rowid FROM transcripts_fts);
+        `)
+        log.info(`Migration 052: FTS5 backfill complete in ${Date.now() - start}ms`)
+      }
+
+      db.exec(`
+        CREATE TRIGGER IF NOT EXISTS transcripts_fts_ai
+        AFTER INSERT ON transcripts BEGIN
+          INSERT INTO transcripts_fts(rowid, file_name, full_text, translated_text, language)
+          VALUES (new.rowid,
+                  COALESCE(new.file_name, ''),
+                  COALESCE(new.full_text, ''),
+                  COALESCE(new.translated_text, ''),
+                  COALESCE(new.language, ''));
+        END;
+
+        CREATE TRIGGER IF NOT EXISTS transcripts_fts_ad
+        AFTER DELETE ON transcripts BEGIN
+          INSERT INTO transcripts_fts(transcripts_fts, rowid, file_name, full_text, translated_text, language)
+          VALUES ('delete', old.rowid,
+                  COALESCE(old.file_name, ''),
+                  COALESCE(old.full_text, ''),
+                  COALESCE(old.translated_text, ''),
+                  COALESCE(old.language, ''));
+        END;
+
+        CREATE TRIGGER IF NOT EXISTS transcripts_fts_au
+        AFTER UPDATE ON transcripts BEGIN
+          INSERT INTO transcripts_fts(transcripts_fts, rowid, file_name, full_text, translated_text, language)
+          VALUES ('delete', old.rowid,
+                  COALESCE(old.file_name, ''),
+                  COALESCE(old.full_text, ''),
+                  COALESCE(old.translated_text, ''),
+                  COALESCE(old.language, ''));
+          INSERT INTO transcripts_fts(rowid, file_name, full_text, translated_text, language)
+          VALUES (new.rowid,
+                  COALESCE(new.file_name, ''),
+                  COALESCE(new.full_text, ''),
+                  COALESCE(new.translated_text, ''),
+                  COALESCE(new.language, ''));
+        END;
+      `)
+      log.info('Migration 052: transcripts FTS5 + sync triggers installed')
+    }
   }
 ]
 
