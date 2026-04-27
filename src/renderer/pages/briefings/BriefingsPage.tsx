@@ -26,6 +26,7 @@ import { Switch } from '@renderer/components/ui/switch'
 import { Badge } from '@renderer/components/ui/badge'
 import { useSetting } from '@renderer/hooks/useSettings'
 import { MarkdownRenderer } from '@renderer/components/MarkdownRenderer'
+import { promptDialog } from '@renderer/components/PromptDialog'
 import { cn, formatRelativeTime } from '@renderer/lib/utils'
 
 interface DailyBriefing {
@@ -390,11 +391,13 @@ export function BriefingsPage() {
   const emailBriefing = async () => {
     if (!selected) return
     setError(null)
-    const recipientsRaw = prompt(
-      `Email this briefing as PDF.\n\n` +
-      `Recipients (comma-separated). Leave blank to use SMTP defaults.`,
-      ''
-    )
+    const recipientsRaw = await promptDialog({
+      label: 'Email this briefing as PDF',
+      description: 'Recipients (comma-separated). Leave blank to use SMTP defaults from Settings → SMTP.',
+      placeholder: 'chief@agency.gov, ops@agency.gov',
+      confirmLabel: 'Send',
+      multiline: false
+    })
     if (recipientsRaw === null) return
     const recipients = recipientsRaw.split(',').map((s) => s.trim()).filter(Boolean)
     try {

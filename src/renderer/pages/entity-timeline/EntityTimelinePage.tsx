@@ -24,6 +24,7 @@ import {
 import { toast } from 'sonner'
 import { MapContainer, TileLayer, CircleMarker, Popup } from 'react-leaflet'
 import 'leaflet/dist/leaflet.css'
+import { promptDialog } from '@renderer/components/PromptDialog'
 import { Button } from '@renderer/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@renderer/components/ui/card'
 import { Badge } from '@renderer/components/ui/badge'
@@ -297,12 +298,16 @@ export function EntityTimelinePage() {
   // irreversible-by-default-but-audit-logged consequence.
   const mergeIntoTarget = async () => {
     if (!id || !timeline) return
-    const targetId = prompt(
-      `Fold "${timeline.summary.canonical_value}" into another canonical entity.\n\n` +
-      `Paste the target canonical id (UUID). Every intel_entities row pointing here will be repointed at the target. ` +
-      `This canonical entity will then be deleted.\n\n` +
-      `Audit-logged. Reversible only by re-running the resolver and re-clustering from scratch.`
-    )
+    const targetId = await promptDialog({
+      label: `Fold "${timeline.summary.canonical_value}" into another canonical entity`,
+      description:
+        'Paste the target canonical id (UUID). Every intel_entities row pointing here ' +
+        'will be repointed at the target. This canonical entity will then be deleted.\n\n' +
+        'Audit-logged. Reversible only by re-running the resolver and re-clustering from scratch.',
+      placeholder: 'a1b2c3d4-…',
+      confirmLabel: 'Merge',
+      validate: (v) => v.trim().length < 8 ? 'Canonical id looks too short' : null
+    })
     if (!targetId) return
     try {
       const r = await window.heimdall.invoke('entity:merge', {

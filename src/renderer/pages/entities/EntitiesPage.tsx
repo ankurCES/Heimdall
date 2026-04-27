@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { Users, RefreshCw, Loader2, Tag, FileText, ChevronRight, Clock, GitMerge } from 'lucide-react'
+import { promptDialog } from '@renderer/components/PromptDialog'
 import { Button } from '@renderer/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@renderer/components/ui/card'
 import { Badge } from '@renderer/components/ui/badge'
@@ -345,11 +346,13 @@ export function EntitiesPage() {
                               disabled={splitting || splitSelection.size === aliases.length}
                               onClick={async () => {
                                 if (!selected) return
-                                const newName = prompt(
-                                  `Create a new canonical entity from the selected ${splitSelection.size} alias${splitSelection.size !== 1 ? 'es' : ''}.\n\n` +
-                                  `Display name for the new canonical:`,
-                                  Array.from(splitSelection)[0]
-                                )
+                                const newName = await promptDialog({
+                                  label: `Create a new canonical entity from ${splitSelection.size} alias${splitSelection.size !== 1 ? 'es' : ''}`,
+                                  description: 'Display name for the new canonical entity. Same entity_type as the source — change later via Entities if needed.',
+                                  initialValue: Array.from(splitSelection)[0],
+                                  confirmLabel: 'Split',
+                                  validate: (v) => v.trim().length < 1 ? 'Name is required' : null
+                                })
                                 if (!newName) return
                                 setSplitting(true)
                                 try {

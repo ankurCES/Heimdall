@@ -29,6 +29,7 @@ import { Input } from '@renderer/components/ui/input'
 import { Badge } from '@renderer/components/ui/badge'
 import { cn, formatRelativeTime } from '@renderer/lib/utils'
 import { toast } from 'sonner'
+import { promptDialog } from '@renderer/components/PromptDialog'
 
 interface GraphNode {
   id: string
@@ -126,9 +127,19 @@ export function GraphCanvasPage() {
   }, [canvas?.id, canvas?.nodes.length])
 
   const createNew = async () => {
-    const name = prompt('Name this canvas:')
+    const name = await promptDialog({
+      label: 'Name this canvas',
+      placeholder: 'e.g. FIN7 ecosystem',
+      confirmLabel: 'Continue'
+    })
     if (!name) return
-    const canonicalId = prompt('Seed canonical entity id (paste from /entities or /entity/:id):')
+    const canonicalId = await promptDialog({
+      label: 'Seed canonical entity id',
+      description: 'Paste from /entities or /entity/:id (the "copy id" chip on each timeline page).',
+      placeholder: 'a1b2c3d4-…',
+      confirmLabel: 'Create canvas',
+      validate: (v) => v.trim().length < 8 ? 'Canonical id looks too short' : null
+    })
     if (!canonicalId) return
     setBusy(true); setError(null)
     try {

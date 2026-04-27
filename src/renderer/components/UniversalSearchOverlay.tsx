@@ -13,6 +13,7 @@ import { useEffect, useState, useRef, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Search, FileText, Mic, X as XIcon, Loader2, Star, Bookmark, Play, Trash2, Bell, BellOff, Users, FileScan, Image as ImageIcon, ScrollText } from 'lucide-react'
 import { toast } from 'sonner'
+import { promptDialog } from '@renderer/components/PromptDialog'
 import { cn } from '@renderer/lib/utils'
 
 type Kind = 'intel' | 'transcript' | 'humint' | 'document' | 'image' | 'briefing'
@@ -153,7 +154,16 @@ export function UniversalSearchOverlay() {
   const saveCurrent = async () => {
     const q = query.trim()
     if (!q) return
-    const name = prompt(`Name this saved search:`, q.slice(0, 60))
+    // Close the overlay first — promptDialog stacks above and the
+    // overlay's own keyboard handlers (Esc) would close ours instead.
+    setOpen(false)
+    const name = await promptDialog({
+      label: 'Name this saved search',
+      description: `Saving query: "${q}"${filter !== 'all' ? `\nKind filter: ${filter}` : ''}`,
+      initialValue: q.slice(0, 60),
+      confirmLabel: 'Save',
+      validate: (v) => v.trim().length < 1 ? 'Name required' : null
+    })
     if (!name) return
     try {
       await window.heimdall.invoke('search:saved_create', {
