@@ -208,6 +208,16 @@ async function initializeDeferred(): Promise<void> {
     savedSearchAlertCron.start()
   } catch (err) { log.warn(`Saved-search alert cron init failed: ${err}`) }
 
+  // v1.6.0 — schedule the automated daily intelligence briefing.
+  // Cron expression honours briefing.dailyCron (default '0 17 * * *'
+  // = 17:00 server time); the tick itself is gated on
+  // briefing.dailyEnabled so the cron is harmless until the analyst
+  // opts in.
+  try {
+    const { dailyBriefingService } = await import('./services/briefing/DailyBriefingService')
+    dailyBriefingService.start()
+  } catch (err) { log.warn(`Daily briefing init failed: ${err}`) }
+
   // Load enabled sources from DB and schedule them
   await collectorManager.loadFromDatabase()
 

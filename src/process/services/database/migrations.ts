@@ -3126,6 +3126,42 @@ const migrations: Migration[] = [
       }
       log.info('Migration 054: FTS5 added to humint_reports, documents, image_evidence (v1.5.5)')
     }
+  },
+  {
+    version: '055',
+    name: 'daily_briefings',
+    up: (db) => {
+      // v1.6.0 — Automated daily briefing snapshots.
+      //
+      // One row per generated briefing. body_md is the LLM-synthesised
+      // ICD-203-style markdown; the structured payload (top intel
+      // ids, severity histogram, indicator hits) lives in
+      // sources_json so the renderer can show "X intel reports
+      // contributed" and the analyst can drill back into the
+      // sources. Status is 'generating' while the LLM call is in
+      // flight, 'ready' on success, 'error' if the call failed
+      // (with the error stored in body_md for visibility).
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS daily_briefings (
+          id TEXT PRIMARY KEY,
+          period_start INTEGER NOT NULL,
+          period_end INTEGER NOT NULL,
+          generated_at INTEGER NOT NULL,
+          status TEXT NOT NULL DEFAULT 'generating',
+          classification TEXT NOT NULL DEFAULT 'UNCLASSIFIED',
+          model TEXT,
+          intel_count INTEGER NOT NULL DEFAULT 0,
+          transcript_count INTEGER NOT NULL DEFAULT 0,
+          high_severity_count INTEGER NOT NULL DEFAULT 0,
+          body_md TEXT,
+          sources_json TEXT,
+          error_text TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_daily_briefings_period ON daily_briefings(period_end DESC);
+        CREATE INDEX IF NOT EXISTS idx_daily_briefings_status ON daily_briefings(status);
+      `)
+      log.info('Migration 055: daily_briefings table created (v1.6.0)')
+    }
   }
 ]
 

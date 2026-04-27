@@ -59,6 +59,7 @@ const HealthDashboardPage = lazyNamed(() => import('./pages/system/HealthDashboa
 const ForecastAccountabilityPage = lazyNamed(() => import('./pages/system/forecast/ForecastAccountabilityPage'), 'ForecastAccountabilityPage')
 const MemoryGraphPage = lazyNamed(() => import('./pages/library/memory/MemoryGraphPage'), 'MemoryGraphPage')
 const Phase5Page = lazyNamed(() => import('./pages/phase5/Phase5Page'), 'Phase5Page')
+const BriefingsPage = lazyNamed(() => import('./pages/briefings/BriefingsPage'), 'BriefingsPage')
 
 // Lightweight loading indicator for route transitions. Sized to match
 // the main content area and centered so swap-in feels deliberate
@@ -134,6 +135,7 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
           <Route path="/sync" element={<Suspense fallback={<RouteFallback />}><SyncPage /></Suspense>} />
           <Route path="/tokens" element={<Suspense fallback={<RouteFallback />}><TokensPage /></Suspense>} />
           <Route path="/audit" element={<Suspense fallback={<RouteFallback />}><AuditPage /></Suspense>} />
+          <Route path="/briefings" element={<Suspense fallback={<RouteFallback />}><BriefingsPage /></Suspense>} />
           <Route path="/settings" element={<Suspense fallback={<RouteFallback />}><SettingsPage /></Suspense>} />
         </Route>
       </Routes>

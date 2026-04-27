@@ -48,6 +48,7 @@ import { registerCalibration2Bridge } from './calibration2Bridge'
 import { registerTranscriptionBridge } from './transcriptionBridge'
 import { registerModelsBridge } from './modelsBridge'
 import { registerSearchBridge } from './searchBridge'
+import { registerBriefingDailyBridge } from './briefingDailyBridge'
 import log from 'electron-log'
 
 export function registerAllBridges(): void {
@@ -101,5 +102,6 @@ export function registerAllBridges(): void {
   registerTranscriptionBridge()
   registerModelsBridge()
   registerSearchBridge()
+  registerBriefingDailyBridge()
   log.info('All IPC bridges registered')
 }
