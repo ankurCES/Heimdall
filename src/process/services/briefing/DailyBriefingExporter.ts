@@ -291,24 +291,45 @@ export async function emailBriefing(
   })
 
   const periodLabel = `${new Date(row.period_start).toLocaleDateString()} → ${new Date(row.period_end).toLocaleDateString()}`
-  const summaryLines = [
-    `Heimdall Daily Intelligence Briefing`,
-    ``,
-    `Period: ${periodLabel}`,
-    `Classification: ${row.classification}`,
-    `Generated: ${new Date(row.generated_at).toISOString()}`,
-    `Sources: ${row.intel_count} intel reports, ${row.transcript_count} transcripts, ${row.high_severity_count} high-severity`,
-    ``,
-    `Full briefing attached as ${format.toUpperCase()}.`,
-    ``,
-    `— Heimdall Intelligence Platform`
-  ].join('\n')
+
+  // v1.6.5 — analyst-customisable subject + body templates with
+  // {{var}} substitution. Falls back to a sensible default when the
+  // setting is blank. Available vars are documented in the Settings
+  // UI; substitution is dumb-but-safe (no expressions, no shell-out).
+  const vars: Record<string, string> = {
+    classification: row.classification,
+    period: periodLabel,
+    period_start: new Date(row.period_start).toISOString(),
+    period_end: new Date(row.period_end).toISOString(),
+    generated_at: new Date(row.generated_at).toISOString(),
+    intel_count: String(row.intel_count),
+    transcript_count: String(row.transcript_count),
+    high_severity_count: String(row.high_severity_count),
+    format: format.toUpperCase(),
+    model: row.model ?? 'unknown'
+  }
+  const subjectTpl = settingsService.get<string>('briefing.emailSubjectTemplate')
+    || `[{{classification}}] Daily Intelligence Briefing — {{period}}`
+  const bodyTpl = settingsService.get<string>('briefing.emailBodyTemplate')
+    || `Heimdall Daily Intelligence Briefing
+
+Period: {{period}}
+Classification: {{classification}}
+Generated: {{generated_at}}
+Sources: {{intel_count}} intel reports, {{transcript_count}} transcripts, {{high_severity_count}} high-severity
+
+Full briefing attached as {{format}}.
+
+— Heimdall Intelligence Platform`
+
+  const subject = renderTemplate(subjectTpl, vars)
+  const text = renderTemplate(bodyTpl, vars)
 
   await transporter.sendMail({
     from: smtp.fromAddress,
     to: targets.join(', '),
-    subject: `[${row.classification}] Daily Intelligence Briefing — ${periodLabel}`,
-    text: summaryLines,
+    subject,
+    text,
     attachments: [{
       filename: exported.filename,
       content: Buffer.from(exported.bytes)
@@ -317,4 +338,14 @@ export async function emailBriefing(
 
   log.info(`daily-briefing: emailed ${row.id} to ${targets.length} recipient(s) as ${format}`)
   return { ok: true, recipients: targets }
+}
+
+/** Dumb-but-safe {{var}} substitution. No expressions, no nested
+ *  templates, no shell-out — exactly what an operator-supplied
+ *  template needs. Unknown vars are left as-is so a typo is visible
+ *  in the output rather than silently dropped. */
+function renderTemplate(tpl: string, vars: Record<string, string>): string {
+  return tpl.replace(/\{\{\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*\}\}/g, (match, key) => {
+    return Object.prototype.hasOwnProperty.call(vars, key) ? vars[key] : match
+  })
 }

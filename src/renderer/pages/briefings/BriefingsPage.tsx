@@ -278,6 +278,8 @@ export function BriefingsPage() {
   const { value: autoEmail, save: saveAutoEmail } = useSetting<boolean>('briefing.autoEmail', false)
   const { value: emailFormat, save: saveEmailFormat } = useSetting<string>('briefing.emailFormat', 'pdf')
   const { value: emailRecipients, save: saveEmailRecipients } = useSetting<string[]>('briefing.emailRecipients', [])
+  const { value: emailSubject, save: saveEmailSubject } = useSetting<string>('briefing.emailSubjectTemplate', '')
+  const { value: emailBody, save: saveEmailBody } = useSetting<string>('briefing.emailBodyTemplate', '')
   const [recipientsInput, setRecipientsInput] = useState('')
   const [recipientsInited, setRecipientsInited] = useState(false)
   if (!recipientsInited && Array.isArray(emailRecipients)) {
@@ -541,6 +543,41 @@ export function BriefingsPage() {
                     <option value="pdf">PDF (with letterhead)</option>
                     <option value="docx">Word (.docx)</option>
                   </select>
+                </div>
+              </div>
+
+              {/* v1.6.5 — analyst-customisable subject + body templates.
+                  {{var}} substitution; available vars listed below the
+                  textarea. Blank uses sensible defaults. */}
+              <div className="space-y-3">
+                <div className="space-y-1">
+                  <Label htmlFor="b-subj" className="text-xs">Email subject template</Label>
+                  <Input
+                    id="b-subj"
+                    value={emailSubject ?? ''}
+                    onChange={(e) => void saveEmailSubject(e.target.value)}
+                    placeholder="[{{classification}}] Daily Intelligence Briefing — {{period}}"
+                    className="font-mono text-xs h-9"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <Label htmlFor="b-body" className="text-xs">Email body template</Label>
+                  <textarea
+                    id="b-body"
+                    value={emailBody ?? ''}
+                    onChange={(e) => void saveEmailBody(e.target.value)}
+                    placeholder={
+                      'Heimdall Daily Intelligence Briefing\n\n' +
+                      'Period: {{period}}\nClassification: {{classification}}\n' +
+                      'Sources: {{intel_count}} intel, {{transcript_count}} transcripts\n\n' +
+                      'Full briefing attached as {{format}}.'
+                    }
+                    rows={6}
+                    className="w-full rounded-md border border-input bg-background px-3 py-2 text-xs font-mono focus:outline-none focus:ring-1 focus:ring-ring resize-y"
+                  />
+                  <p className="text-[11px] text-muted-foreground">
+                    Variables: <code className="text-[11px]">{`{{classification}} {{period}} {{period_start}} {{period_end}} {{generated_at}} {{intel_count}} {{transcript_count}} {{high_severity_count}} {{format}} {{model}}`}</code>
+                  </p>
                 </div>
               </div>
             </div>
