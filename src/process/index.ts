@@ -158,6 +158,15 @@ async function initializeDeferred(): Promise<void> {
   // Register all collector factories
   registerAllCollectors()
 
+  // v1.4 — register premium OSINT integrations as agent-callable tools
+  // (Shodan, VirusTotal, GreyNoise, AbuseIPDB, HIBP, urlscan). Each
+  // reads its API key from settings.osint.apiKeys; missing keys produce
+  // a helpful "configure in Settings" error rather than a silent failure.
+  try {
+    const { registerPremiumOsintTools } = await import('./services/osint/PremiumOsintTools')
+    registerPremiumOsintTools()
+  } catch (err) { log.warn(`Premium OSINT tools registration failed: ${err}`) }
+
   // Load enabled sources from DB and schedule them
   await collectorManager.loadFromDatabase()
 

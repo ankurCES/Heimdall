@@ -55,6 +55,98 @@ const FREE_SOURCES: SeedSource[] = [
       ]
     }
   },
+  // v1.4 — Multi-language news (Russian, Chinese, Arabic, Spanish, French, German).
+  // Translation happens at ingest via TranslationService when a non-English
+  // source is detected. Original-language text is preserved in metadata.
+  {
+    name: 'Russian News RSS',
+    discipline: 'osint',
+    type: 'rss',
+    schedule: '*/30 * * * *',
+    config: {
+      lang: 'ru',
+      feeds: [
+        { url: 'https://www.kommersant.ru/RSS/news.xml', name: 'Kommersant (RU)' },
+        { url: 'https://russian.rt.com/rss', name: 'RT Russian' },
+        { url: 'https://tass.com/rss/v2.xml', name: 'TASS (EN translation)' },
+        { url: 'https://meduza.io/rss/all', name: 'Meduza (RU/EN)' }
+      ]
+    }
+  },
+  {
+    name: 'Chinese News RSS',
+    discipline: 'osint',
+    type: 'rss',
+    schedule: '*/30 * * * *',
+    config: {
+      lang: 'zh',
+      feeds: [
+        { url: 'https://www.scmp.com/rss/91/feed', name: 'SCMP China' },
+        { url: 'https://www.globaltimes.cn/rss/outbrain.xml', name: 'Global Times (state)' },
+        { url: 'http://www.xinhuanet.com/english/rss/worldrss.xml', name: 'Xinhua English' },
+        { url: 'https://www.taipeitimes.com/xml/index.rss', name: 'Taipei Times' }
+      ]
+    }
+  },
+  {
+    name: 'Arabic & MENA News RSS',
+    discipline: 'osint',
+    type: 'rss',
+    schedule: '*/30 * * * *',
+    config: {
+      lang: 'ar',
+      feeds: [
+        { url: 'https://www.aljazeera.com/xml/rss/all.xml', name: 'Al Jazeera EN' },
+        { url: 'https://english.alarabiya.net/.mrss/en.xml', name: 'Al Arabiya' },
+        { url: 'https://www.middleeasteye.net/rss', name: 'Middle East Eye' },
+        { url: 'https://en.wafa.ps/RSS', name: 'WAFA (Palestine)' }
+      ]
+    }
+  },
+  {
+    name: 'Spanish & Latin America RSS',
+    discipline: 'osint',
+    type: 'rss',
+    schedule: '*/30 * * * *',
+    config: {
+      lang: 'es',
+      feeds: [
+        { url: 'https://feeds.elpais.com/mrss-s/pages/ep/site/elpais.com/section/internacional/portada', name: 'El País Internacional' },
+        { url: 'https://www.infobae.com/feeds/rss/america/', name: 'Infobae América' },
+        { url: 'https://www.lanacion.com.ar/arc/outboundfeeds/rss/?outputType=xml', name: 'La Nación (AR)' },
+        { url: 'https://www.eluniversal.com.mx/rss.xml', name: 'El Universal (MX)' }
+      ]
+    }
+  },
+  {
+    name: 'French & Francophone News RSS',
+    discipline: 'osint',
+    type: 'rss',
+    schedule: '*/30 * * * *',
+    config: {
+      lang: 'fr',
+      feeds: [
+        { url: 'https://www.lemonde.fr/international/rss_full.xml', name: 'Le Monde International' },
+        { url: 'https://www.france24.com/fr/rss', name: 'France 24' },
+        { url: 'https://www.lefigaro.fr/rss/figaro_international.xml', name: 'Le Figaro International' },
+        { url: 'https://rss.rfi.fr/rfi-fr-monde.xml', name: 'RFI Monde' }
+      ]
+    }
+  },
+  {
+    name: 'German News RSS',
+    discipline: 'osint',
+    type: 'rss',
+    schedule: '*/30 * * * *',
+    config: {
+      lang: 'de',
+      feeds: [
+        { url: 'https://www.spiegel.de/international/index.rss', name: 'Der Spiegel International' },
+        { url: 'https://www.dw.com/atom/rss-en-all', name: 'Deutsche Welle EN' },
+        { url: 'https://www.tagesschau.de/xml/rss2/', name: 'Tagesschau' }
+      ]
+    }
+  },
   {
     name: 'Court Records (Security)',
     discipline: 'osint',

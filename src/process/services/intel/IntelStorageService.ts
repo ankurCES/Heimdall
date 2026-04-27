@@ -78,11 +78,39 @@ export class IntelStorageService {
         // These are fire-and-forget async ops
         this.syncToObsidian(stored)
         this.evaluateAlerts(stored)
+        // v1.4 — opportunistic translation of non-English content. Best
+        // effort: a translation failure must NEVER drop the report.
+        this.translateNewReports(stored).catch((err) =>
+          log.debug(`translateNewReports failed: ${err}`)
+        )
         // Enrichment handled by background EnrichmentOrchestrator — don't duplicate
       })
     }
 
     return stored
+  }
+
+  /**
+   * v1.4 — for any newly-stored report whose content looks non-English,
+   * fire off translation. Skips short content and obvious-English text
+   * via Unicode-block heuristic (no LLM call needed for the common
+   * case). Caps to 10 translations per ingest batch to avoid burning
+   * the LLM token budget on a fire-hose of foreign-language content.
+   */
+  private async translateNewReports(reports: IntelReport[]): Promise<void> {
+    const { translationService } = await import('../translation/TranslationService')
+    let queued = 0
+    for (const report of reports) {
+      if (queued >= 10) break
+      if (translationService.shouldTranslate(report.content)) {
+        try {
+          await translationService.translateAndStore(report.id)
+          queued++
+        } catch (err) {
+          log.debug(`translate ${report.id}: ${err}`)
+        }
+      }
+    }
   }
 
   private emitNewReports(reports: IntelReport[]): void {
