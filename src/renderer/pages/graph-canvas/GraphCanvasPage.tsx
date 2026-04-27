@@ -21,7 +21,7 @@ import { useNavigate } from 'react-router-dom'
 import ForceGraph2D from 'react-force-graph-2d'
 import {
   GitMerge, Plus, Loader2, RefreshCw, Trash2, Save, AlertCircle,
-  Network, Sparkles, ArrowRight, X as XIcon, Pin, PinOff
+  Network, Sparkles, ArrowRight, X as XIcon, Pin, PinOff, Search, Palette
 } from 'lucide-react'
 import { Button } from '@renderer/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@renderer/components/ui/card'
@@ -68,6 +68,16 @@ interface Canvas {
   updated_at: number
 }
 
+// v1.8.2 — community-detection palette (Louvain via graphology). When
+// the analyst flips the "Color by community" toggle, each detected
+// cluster gets a distinct hue from this palette so the cohort
+// structure is immediately visible. 12 colours = 12 communities;
+// after that we wrap.
+const COMMUNITY_COLORS = [
+  '#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899',
+  '#14b8a6', '#f97316', '#84cc16', '#06b6d4', '#a855f7', '#eab308'
+]
+
 // Per-entity-type colours. Leaves any unknown type at the muted grey.
 const TYPE_COLORS: Record<string, string> = {
   person:        '#a78bfa',
@@ -95,6 +105,11 @@ export function GraphCanvasPage() {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null)
+  // v1.8.2 — in-canvas filter + community-detection colouring.
+  const [searchQ, setSearchQ] = useState('')
+  const [colorMode, setColorMode] = useState<'type' | 'community'>('type')
+  const [communities, setCommunities] = useState<Record<string, number>>({})
+  const [communityCount, setCommunityCount] = useState(0)
   const fgRef = useRef<{ d3ReheatSimulation: () => void; zoomToFit: (ms?: number, padding?: number) => void } | null>(null)
   const navigate = useNavigate()
 
@@ -125,6 +140,44 @@ export function GraphCanvasPage() {
     const t = setTimeout(() => { try { fgRef.current?.zoomToFit(400, 60) } catch { /* */ } }, 200)
     return () => clearTimeout(t)
   }, [canvas?.id, canvas?.nodes.length])
+
+  // v1.8.2 — compute Louvain communities when the analyst flips the
+  // colour-by-community toggle. Lazy-imports graphology so the
+  // base canvas load doesn't pay for it. Re-runs whenever the
+  // underlying graph changes shape.
+  useEffect(() => {
+    if (!canvas || colorMode !== 'community') {
+      setCommunities({}); setCommunityCount(0)
+      return
+    }
+    void (async () => {
+      try {
+        const [{ default: Graph }, { default: louvain }] = await Promise.all([
+          import('graphology'),
+          import('graphology-communities-louvain')
+        ])
+        const g = new Graph({ type: 'undirected', multi: false, allowSelfLoops: false })
+        for (const n of canvas.nodes) g.addNode(n.id)
+        for (const e of canvas.edges) {
+          const s = typeof e.source === 'string' ? e.source : e.source.id
+          const t = typeof e.target === 'string' ? e.target : e.target.id
+          if (s === t) continue
+          if (!g.hasNode(s) || !g.hasNode(t)) continue
+          if (g.hasEdge(s, t)) continue
+          g.addEdge(s, t, { weight: e.shared_reports || 1 })
+        }
+        if (g.order < 2 || g.size < 1) {
+          setCommunities({}); setCommunityCount(0); return
+        }
+        const result = louvain(g, { getEdgeWeight: 'weight' }) as Record<string, number>
+        setCommunities(result)
+        setCommunityCount(new Set(Object.values(result)).size)
+      } catch (err) {
+        toast.error('Community detection failed', { description: String(err).replace(/^Error:\s*/, '') })
+        setCommunities({}); setCommunityCount(0)
+      }
+    })()
+  }, [canvas?.id, canvas?.nodes.length, canvas?.edges.length, colorMode])
 
   const createNew = async () => {
     const name = await promptDialog({
@@ -320,7 +373,7 @@ export function GraphCanvasPage() {
         )}
         {canvas && !loading && (
           <>
-            <div className="absolute top-3 left-3 flex items-center gap-2 z-10 pointer-events-none">
+            <div className="absolute top-3 left-3 right-3 flex items-center gap-2 z-10 pointer-events-none flex-wrap">
               <div className="bg-card/90 backdrop-blur border border-border rounded-md px-3 py-1.5 text-xs pointer-events-auto">
                 <span className="font-medium">{canvas.name}</span>
                 <span className="text-muted-foreground ml-2">{canvas.nodes.length} nodes · {canvas.edges.length} edges</span>
@@ -333,6 +386,45 @@ export function GraphCanvasPage() {
               >
                 <RefreshCw className="h-3.5 w-3.5" />
               </Button>
+              {/* v1.8.2 — in-canvas filter. Highlights matching nodes
+                  by dimming everything else. */}
+              <div className="bg-card/90 backdrop-blur border border-border rounded-md px-2 py-1 flex items-center gap-1 pointer-events-auto">
+                <Search className="h-3 w-3 text-muted-foreground" />
+                <input
+                  type="text"
+                  value={searchQ}
+                  onChange={(e) => setSearchQ(e.target.value)}
+                  placeholder="Filter nodes…"
+                  className="bg-transparent outline-none text-xs w-32 placeholder:text-muted-foreground"
+                />
+                {searchQ && (
+                  <button
+                    onClick={() => setSearchQ('')}
+                    className="text-muted-foreground hover:text-foreground"
+                  >
+                    <XIcon className="h-3 w-3" />
+                  </button>
+                )}
+              </div>
+              {/* v1.8.2 — colour-by-community toggle. Runs Louvain
+                  on the current graph and recolours nodes by cluster. */}
+              <button
+                onClick={() => setColorMode((m) => m === 'community' ? 'type' : 'community')}
+                className={cn(
+                  'pointer-events-auto h-7 px-2 rounded-md border text-xs flex items-center gap-1 backdrop-blur',
+                  colorMode === 'community'
+                    ? 'bg-primary/15 border-primary/40 text-primary'
+                    : 'bg-card/90 border-border text-muted-foreground hover:text-foreground'
+                )}
+                title={colorMode === 'community'
+                  ? 'Coloured by Louvain communities — click to revert'
+                  : 'Recolour nodes by Louvain community detection'}
+              >
+                <Palette className="h-3 w-3" />
+                {colorMode === 'community'
+                  ? `${communityCount} communit${communityCount === 1 ? 'y' : 'ies'}`
+                  : 'Communities'}
+              </button>
             </div>
             <ForceGraph2D
               ref={fgRef as never}
@@ -343,7 +435,19 @@ export function GraphCanvasPage() {
               nodeLabel={(n: GraphNode) => `${n.label} (${n.entity_type})`}
               nodeRelSize={5}
               nodeVal={(n: GraphNode) => 1 + Math.log10((n.mention_count || 0) + 1)}
-              nodeColor={(n: GraphNode) => colorForType(n.entity_type)}
+              nodeColor={(n: GraphNode) => {
+                // v1.8.2 — dim nodes that don't match the search filter
+                // so the matching cluster reads visually. Empty
+                // searchQ = no dimming.
+                const q = searchQ.trim().toLowerCase()
+                if (q && !n.label.toLowerCase().includes(q)) return '#1f2937'
+                if (colorMode === 'community') {
+                  const cid = communities[n.id]
+                  if (cid !== undefined) return COMMUNITY_COLORS[cid % COMMUNITY_COLORS.length]
+                  return DEFAULT_COLOR
+                }
+                return colorForType(n.entity_type)
+              }}
               nodeCanvasObjectMode={() => 'after'}
               nodeCanvasObject={(node: GraphNode, ctx: CanvasRenderingContext2D, scale: number) => {
                 if (scale < 1.2) return  // hide labels when zoomed out
