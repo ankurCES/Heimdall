@@ -11,12 +11,14 @@
 
 import { useEffect, useState, useRef, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Search, FileText, Mic, X as XIcon, Loader2, Star, Bookmark, Play, Trash2, Bell, BellOff } from 'lucide-react'
+import { Search, FileText, Mic, X as XIcon, Loader2, Star, Bookmark, Play, Trash2, Bell, BellOff, Users, FileScan, Image as ImageIcon } from 'lucide-react'
 import { toast } from 'sonner'
 import { cn } from '@renderer/lib/utils'
 
+type Kind = 'intel' | 'transcript' | 'humint' | 'document' | 'image'
+
 interface SearchHit {
-  kind: 'intel' | 'transcript'
+  kind: Kind
   id: string
   title: string
   snippet: string
@@ -30,6 +32,10 @@ interface SearchHit {
     language?: string | null
     engine?: string | null
     reportId?: string | null
+    sessionId?: string | null
+    pageCount?: number | null
+    cameraMake?: string | null
+    cameraModel?: string | null
   }
   createdAt: number
 }
@@ -52,7 +58,7 @@ export function UniversalSearchOverlay() {
   const [hits, setHits] = useState<SearchHit[]>([])
   const [loading, setLoading] = useState(false)
   const [highlight, setHighlight] = useState(0)
-  const [filter, setFilter] = useState<'all' | 'intel' | 'transcript'>('all')
+  const [filter, setFilter] = useState<'all' | Kind>('all')
   const [saved, setSaved] = useState<Array<{ id: string; name: string; query: string; kinds_filter: string | null; last_hit_count: number; alert_enabled: 0 | 1 }>>([])
   const [showSaved, setShowSaved] = useState(false)
   const inputRef = useRef<HTMLInputElement | null>(null)
@@ -79,22 +85,36 @@ export function UniversalSearchOverlay() {
     const off = window.heimdall.on('search:alert_hit', (...args: unknown[]) => {
       const a = args[0] as {
         saved_search_name: string
-        hit_kind: 'intel' | 'transcript'
+        hit_kind: Kind
         hit_id: string
         hit_title: string
       } | undefined
       if (!a) return
+      const kindLabel = a.hit_kind === 'transcript' ? 'Transcript'
+        : a.hit_kind === 'humint' ? 'HUMINT'
+        : a.hit_kind === 'document' ? 'Document'
+        : a.hit_kind === 'image' ? 'Image'
+        : 'Intel'
       toast.message(`🔔 ${a.saved_search_name}: new hit`, {
-        description: `${a.hit_kind === 'transcript' ? 'Transcript' : 'Intel'} — ${a.hit_title}`,
+        description: `${kindLabel} — ${a.hit_title}`,
         duration: 8000,
         action: {
           label: 'Open',
           onClick: () => {
-            if (a.hit_kind === 'intel') {
-              navigate(`/library?report=${encodeURIComponent(a.hit_id)}`)
-            } else {
-              sessionStorage.setItem('transcripts:focusId', a.hit_id)
-              navigate('/transcripts')
+            switch (a.hit_kind) {
+              case 'intel':
+                navigate(`/library?report=${encodeURIComponent(a.hit_id)}`)
+                break
+              case 'transcript':
+                sessionStorage.setItem('transcripts:focusId', a.hit_id)
+                navigate('/transcripts')
+                break
+              case 'image':
+                sessionStorage.setItem('images:focusId', a.hit_id)
+                navigate('/images')
+                break
+              default:
+                navigate('/browse')
             }
           }
         }
@@ -145,7 +165,7 @@ export function UniversalSearchOverlay() {
       const r = await window.heimdall.invoke('search:saved_run', { id, limit: 30 }) as { search: { query: string; kinds_filter: string | null }; hits: SearchHit[] }
       if (r) {
         setQuery(r.search.query)
-        setFilter(r.search.kinds_filter ? (r.search.kinds_filter.split(',')[0] as 'intel' | 'transcript') : 'all')
+        setFilter(r.search.kinds_filter ? (r.search.kinds_filter.split(',')[0] as Kind) : 'all')
         setHits(r.hits)
         setHighlight(0)
         setShowSaved(false)
@@ -173,7 +193,7 @@ export function UniversalSearchOverlay() {
     } catch { /* */ }
   }
 
-  const runSearch = useCallback(async (q: string, kindFilter: 'all' | 'intel' | 'transcript') => {
+  const runSearch = useCallback(async (q: string, kindFilter: 'all' | Kind) => {
     if (!q.trim()) { setHits([]); setLoading(false); return }
     setLoading(true)
     try {
@@ -205,13 +225,27 @@ export function UniversalSearchOverlay() {
 
   const navigateToHit = useCallback((hit: SearchHit) => {
     setOpen(false)
-    if (hit.kind === 'intel') {
-      navigate(`/library?report=${encodeURIComponent(hit.id)}`)
-    } else {
-      // Transcripts page picks the row up by id via its list refresh +
-      // sessionStorage hint we set here.
-      sessionStorage.setItem('transcripts:focusId', hit.id)
-      navigate('/transcripts')
+    switch (hit.kind) {
+      case 'intel':
+        navigate(`/library?report=${encodeURIComponent(hit.id)}`)
+        break
+      case 'transcript':
+        sessionStorage.setItem('transcripts:focusId', hit.id)
+        navigate('/transcripts')
+        break
+      case 'humint':
+        // HUMINT report opens via the chat session it was consolidated from.
+        navigate(`/chat?session=${encodeURIComponent(hit.meta.sessionId ?? '')}`)
+        break
+      case 'document':
+        // Documents currently surface inside their parent intel report.
+        if (hit.meta.reportId) navigate(`/library?report=${encodeURIComponent(hit.meta.reportId)}`)
+        else navigate('/quarantine')
+        break
+      case 'image':
+        sessionStorage.setItem('images:focusId', hit.id)
+        navigate('/images')
+        break
     }
   }, [navigate])
 
@@ -255,7 +289,7 @@ export function UniversalSearchOverlay() {
         </div>
 
         <div className="flex items-center gap-1 px-3 py-1.5 border-b border-border bg-muted/20">
-          {(['all', 'intel', 'transcript'] as const).map((k) => (
+          {(['all', 'intel', 'transcript', 'humint', 'document', 'image'] as const).map((k) => (
             <button
               key={k}
               onClick={() => setFilter(k)}
@@ -266,7 +300,12 @@ export function UniversalSearchOverlay() {
                   : 'text-muted-foreground hover:bg-accent'
               )}
             >
-              {k === 'all' ? 'All' : k === 'intel' ? 'Intel reports' : 'Transcripts'}
+              {k === 'all' ? 'All'
+                : k === 'intel' ? 'Intel'
+                : k === 'transcript' ? 'Transcripts'
+                : k === 'humint' ? 'HUMINT'
+                : k === 'document' ? 'Documents'
+                : 'Images'}
             </button>
           ))}
           <button
@@ -396,11 +435,11 @@ export function UniversalSearchOverlay() {
               )}
             >
               <div className="mt-0.5 shrink-0">
-                {hit.kind === 'intel' ? (
-                  <FileText className="h-3.5 w-3.5 text-blue-600 dark:text-blue-400" />
-                ) : (
-                  <Mic className="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400" />
-                )}
+                {hit.kind === 'intel' && <FileText className="h-3.5 w-3.5 text-blue-600 dark:text-blue-400" />}
+                {hit.kind === 'transcript' && <Mic className="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400" />}
+                {hit.kind === 'humint' && <Users className="h-3.5 w-3.5 text-purple-600 dark:text-purple-400" />}
+                {hit.kind === 'document' && <FileScan className="h-3.5 w-3.5 text-orange-600 dark:text-orange-400" />}
+                {hit.kind === 'image' && <ImageIcon className="h-3.5 w-3.5 text-pink-600 dark:text-pink-400" />}
               </div>
               <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-2 text-sm">
@@ -421,7 +460,14 @@ export function UniversalSearchOverlay() {
                   dangerouslySetInnerHTML={{ __html: hit.snippet }}
                 />
                 <div className="text-[10px] text-muted-foreground mt-1 flex items-center gap-2">
-                  <span>{hit.kind === 'intel' ? hit.meta.sourceName ?? 'unknown' : hit.meta.engine ?? '—'}</span>
+                  <span>
+                    {hit.kind === 'intel' ? (hit.meta.sourceName ?? 'unknown')
+                      : hit.kind === 'transcript' ? (hit.meta.engine ?? '—')
+                      : hit.kind === 'humint' ? `session ${hit.meta.sessionId?.slice(0, 8) ?? '—'}`
+                      : hit.kind === 'document' ? (hit.meta.pageCount ? `${hit.meta.pageCount}p` : 'document')
+                      : hit.kind === 'image' ? `${hit.meta.cameraMake ?? '—'} ${hit.meta.cameraModel ?? ''}`.trim()
+                      : '—'}
+                  </span>
                   <span>·</span>
                   <span>{formatRelativeTime(hit.createdAt)}</span>
                 </div>

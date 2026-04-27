@@ -15,7 +15,7 @@
 import log from 'electron-log'
 import { getDatabase } from '../database'
 
-export type SearchKind = 'intel' | 'transcript'
+export type SearchKind = 'intel' | 'transcript' | 'humint' | 'document' | 'image'
 
 export interface SearchHit {
   kind: SearchKind
@@ -33,6 +33,10 @@ export interface SearchHit {
     language?: string | null     // transcript only
     engine?: string | null       // transcript only
     reportId?: string | null     // transcript → intel pairing if any
+    sessionId?: string | null    // humint only
+    pageCount?: number | null    // document only
+    cameraMake?: string | null   // image only
+    cameraModel?: string | null  // image only
   }
   createdAt: number
 }
@@ -53,6 +57,10 @@ export class UniversalSearchService {
     const wantIntel = !opts.kinds || opts.kinds.includes('intel')
     const wantTranscript = !opts.kinds || opts.kinds.includes('transcript')
 
+    const wantHumint = !opts.kinds || opts.kinds.includes('humint')
+    const wantDocument = !opts.kinds || opts.kinds.includes('document')
+    const wantImage = !opts.kinds || opts.kinds.includes('image')
+
     const out: SearchHit[] = []
     if (wantIntel) {
       try { out.push(...this.searchIntel(query, PER_CORPUS_LIMIT)) }
@@ -61,6 +69,18 @@ export class UniversalSearchService {
     if (wantTranscript) {
       try { out.push(...this.searchTranscripts(query, PER_CORPUS_LIMIT)) }
       catch (err) { log.debug(`search: transcript FTS failed: ${(err as Error).message}`) }
+    }
+    if (wantHumint) {
+      try { out.push(...this.searchHumint(query, PER_CORPUS_LIMIT)) }
+      catch (err) { log.debug(`search: humint FTS failed: ${(err as Error).message}`) }
+    }
+    if (wantDocument) {
+      try { out.push(...this.searchDocuments(query, PER_CORPUS_LIMIT)) }
+      catch (err) { log.debug(`search: document FTS failed: ${(err as Error).message}`) }
+    }
+    if (wantImage) {
+      try { out.push(...this.searchImages(query, PER_CORPUS_LIMIT)) }
+      catch (err) { log.debug(`search: image FTS failed: ${(err as Error).message}`) }
     }
     // Merge: lower bm25 = stronger match. Cross-corpus ranking is
     // intentionally simple — bm25 across SQL stmts isn't directly
@@ -141,6 +161,98 @@ export class UniversalSearchService {
         engine: r.engine,
         reportId: r.report_id
       },
+      createdAt: r.ingested_at
+    }))
+  }
+
+  private searchHumint(matchQuery: string, limit: number): SearchHit[] {
+    const db = getDatabase()
+    const rows = db.prepare(`
+      SELECT h.id            AS id,
+             h.session_id    AS session_id,
+             h.created_at    AS created_at,
+             snippet(humint_reports_fts, -1, '<mark>', '</mark>', '…', 12) AS snippet,
+             bm25(humint_reports_fts) AS score
+      FROM humint_reports_fts
+      JOIN humint_reports h ON h.rowid = humint_reports_fts.rowid
+      WHERE humint_reports_fts MATCH ?
+      ORDER BY score
+      LIMIT ?
+    `).all(matchQuery, limit) as Array<{
+      id: string; session_id: string | null; created_at: number; snippet: string; score: number
+    }>
+    return rows.map((r) => ({
+      kind: 'humint' as const,
+      id: r.id,
+      title: r.session_id ? `HUMINT session ${r.session_id.slice(0, 8)}` : `HUMINT ${r.id.slice(0, 8)}`,
+      snippet: r.snippet || '',
+      score: r.score,
+      matchedColumn: 'humint',
+      meta: { sessionId: r.session_id },
+      createdAt: r.created_at
+    }))
+  }
+
+  private searchDocuments(matchQuery: string, limit: number): SearchHit[] {
+    const db = getDatabase()
+    const rows = db.prepare(`
+      SELECT d.id           AS id,
+             d.file_name    AS file_name,
+             d.page_count   AS page_count,
+             d.ingested_at  AS ingested_at,
+             d.report_id    AS report_id,
+             snippet(documents_fts, -1, '<mark>', '</mark>', '…', 12) AS snippet,
+             bm25(documents_fts) AS score
+      FROM documents_fts
+      JOIN documents d ON d.rowid = documents_fts.rowid
+      WHERE documents_fts MATCH ?
+      ORDER BY score
+      LIMIT ?
+    `).all(matchQuery, limit) as Array<{
+      id: string; file_name: string | null; page_count: number | null
+      ingested_at: number; report_id: string | null; snippet: string; score: number
+    }>
+    return rows.map((r) => ({
+      kind: 'document' as const,
+      id: r.id,
+      title: r.file_name || r.id,
+      snippet: r.snippet || '',
+      score: r.score,
+      matchedColumn: 'document',
+      meta: { pageCount: r.page_count, reportId: r.report_id },
+      createdAt: r.ingested_at
+    }))
+  }
+
+  private searchImages(matchQuery: string, limit: number): SearchHit[] {
+    const db = getDatabase()
+    const rows = db.prepare(`
+      SELECT i.id            AS id,
+             i.file_name     AS file_name,
+             i.camera_make   AS camera_make,
+             i.camera_model  AS camera_model,
+             i.ingested_at   AS ingested_at,
+             i.report_id     AS report_id,
+             snippet(image_evidence_fts, -1, '<mark>', '</mark>', '…', 12) AS snippet,
+             bm25(image_evidence_fts) AS score
+      FROM image_evidence_fts
+      JOIN image_evidence i ON i.rowid = image_evidence_fts.rowid
+      WHERE image_evidence_fts MATCH ?
+      ORDER BY score
+      LIMIT ?
+    `).all(matchQuery, limit) as Array<{
+      id: string; file_name: string | null; camera_make: string | null
+      camera_model: string | null; ingested_at: number; report_id: string | null
+      snippet: string; score: number
+    }>
+    return rows.map((r) => ({
+      kind: 'image' as const,
+      id: r.id,
+      title: r.file_name || r.id,
+      snippet: r.snippet || '',
+      score: r.score,
+      matchedColumn: 'image',
+      meta: { cameraMake: r.camera_make, cameraModel: r.camera_model, reportId: r.report_id },
       createdAt: r.ingested_at
     }))
   }

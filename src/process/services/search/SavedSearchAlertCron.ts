@@ -24,10 +24,12 @@ import { emitToAll } from '../resource/WindowCache'
 const DEFAULT_CRON = '*/5 * * * *'    // every 5 minutes
 const MAX_ALERTS_PER_TICK = 5
 
+import type { SearchKind } from './UniversalSearchService'
+
 export interface SearchAlertHit {
   saved_search_id: string
   saved_search_name: string
-  hit_kind: 'intel' | 'transcript'
+  hit_kind: SearchKind
   hit_id: string
   hit_title: string
   hit_snippet: string

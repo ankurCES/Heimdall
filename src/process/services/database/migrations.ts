@@ -3039,6 +3039,93 @@ const migrations: Migration[] = [
       `)
       log.info('Migration 053: saved_searches table created (v1.5.2)')
     }
+  },
+  {
+    version: '054',
+    name: 'fts5_humint_documents_images',
+    up: (db) => {
+      // v1.5.5 — extend the universal-search corpus to three more
+      // tables: humint_reports, documents (OCR'd text), and
+      // image_evidence (camera metadata + raw EXIF + tags). Each
+      // gets its own FTS5 virtual table + AFTER-INSERT/UPDATE/DELETE
+      // triggers, mirroring the migration 036 / 052 pattern.
+      const tableSpecs = [
+        {
+          name: 'humint_reports',
+          fts: 'humint_reports_fts',
+          cols: ['analyst_notes', 'findings'],
+          coalesceCols: ['analyst_notes', 'findings']
+        },
+        {
+          name: 'documents',
+          fts: 'documents_fts',
+          cols: ['file_name', 'ocr_text'],
+          coalesceCols: ['file_name', 'ocr_text']
+        },
+        {
+          name: 'image_evidence',
+          fts: 'image_evidence_fts',
+          cols: ['file_name', 'camera_make', 'camera_model', 'tags_json'],
+          coalesceCols: ['file_name', 'camera_make', 'camera_model', 'tags_json']
+        }
+      ]
+
+      for (const spec of tableSpecs) {
+        try {
+          db.exec(`
+            CREATE VIRTUAL TABLE IF NOT EXISTS ${spec.fts} USING fts5(
+              ${spec.cols.join(', ')},
+              content='${spec.name}',
+              content_rowid='rowid',
+              tokenize='porter unicode61 remove_diacritics 2'
+            );
+          `)
+        } catch (err) {
+          log.warn(`Migration 054: ${spec.fts} create failed (${err}); skipping`)
+          continue
+        }
+
+        // Backfill any rows that aren't already in the FTS index.
+        const total = (db.prepare(`SELECT COUNT(*) AS c FROM ${spec.name}`).get() as { c: number }).c
+        const ftsTotal = (db.prepare(`SELECT COUNT(*) AS c FROM ${spec.fts}`).get() as { c: number }).c
+        if (ftsTotal < total) {
+          const colSelectList = spec.coalesceCols.map((c) => `COALESCE(${c}, '')`).join(', ')
+          const colInsertList = spec.cols.join(', ')
+          db.exec(`
+            INSERT INTO ${spec.fts}(rowid, ${colInsertList})
+            SELECT rowid, ${colSelectList}
+            FROM ${spec.name}
+            WHERE rowid NOT IN (SELECT rowid FROM ${spec.fts});
+          `)
+          log.info(`Migration 054: ${spec.fts} backfilled (${total - ftsTotal} rows)`)
+        }
+
+        const newCols = spec.coalesceCols.map((c) => `COALESCE(new.${c}, '')`).join(', ')
+        const oldCols = spec.coalesceCols.map((c) => `COALESCE(old.${c}, '')`).join(', ')
+        db.exec(`
+          CREATE TRIGGER IF NOT EXISTS ${spec.fts}_ai
+          AFTER INSERT ON ${spec.name} BEGIN
+            INSERT INTO ${spec.fts}(rowid, ${spec.cols.join(', ')})
+            VALUES (new.rowid, ${newCols});
+          END;
+
+          CREATE TRIGGER IF NOT EXISTS ${spec.fts}_ad
+          AFTER DELETE ON ${spec.name} BEGIN
+            INSERT INTO ${spec.fts}(${spec.fts}, rowid, ${spec.cols.join(', ')})
+            VALUES ('delete', old.rowid, ${oldCols});
+          END;
+
+          CREATE TRIGGER IF NOT EXISTS ${spec.fts}_au
+          AFTER UPDATE ON ${spec.name} BEGIN
+            INSERT INTO ${spec.fts}(${spec.fts}, rowid, ${spec.cols.join(', ')})
+            VALUES ('delete', old.rowid, ${oldCols});
+            INSERT INTO ${spec.fts}(rowid, ${spec.cols.join(', ')})
+            VALUES (new.rowid, ${newCols});
+          END;
+        `)
+      }
+      log.info('Migration 054: FTS5 added to humint_reports, documents, image_evidence (v1.5.5)')
+    }
   }
 ]
 
