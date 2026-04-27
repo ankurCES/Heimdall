@@ -393,9 +393,37 @@ async function initializeDeferred(): Promise<void> {
 
     sentinelSupervisor.start()
     log.info(`Sentinel: registered ${serviceRegistry.list().length} services and started supervisor`)
+
+    // Register the supervisor itself + escalation as services
+    serviceRegistry.register({
+      id: 'sentinel-supervisor',
+      displayName: 'Sentinel Supervisor',
+      category: 'infrastructure',
+      autoRestart: false,
+      healthCheck: () => ({ state: 'running' as const, detail: 'self-monitoring' })
+    })
   } catch (err) {
     log.error(`Sentinel start failed: ${err}`)
   }
+
+  // v1.2.1 — Alert Escalation. Polls alerts table every 30s, dispatches
+  // unacknowledged ops alerts via configured channels, re-escalates if
+  // unacknowledged after on-call.escalation_after_minutes minutes.
+  try {
+    const { alertEscalationService } = await import('./services/alerts/escalation/AlertEscalationService')
+    alertEscalationService.start()
+    const { serviceRegistry } = await import('./services/sentinel/ServiceRegistry')
+    serviceRegistry.register({
+      id: 'alert-escalation',
+      displayName: 'Alert Escalation',
+      category: 'infrastructure',
+      autoRestart: true,
+      healthCheck: async () => {
+        return { state: 'running' as const, metadata: alertEscalationService.stats() }
+      },
+      restart: async () => { alertEscalationService.stop(); alertEscalationService.start() }
+    })
+  } catch (err) { log.warn(`AlertEscalation start failed: ${err}`) }
 
   log.info('Deferred initialization complete')
 }

@@ -37,6 +37,14 @@ export class MeshtasticDispatcher {
     log.info(`Meshtastic alert queued: ${report.title.slice(0, 40)} → ${config.targetNodeIds.length || 'broadcast'}`)
   }
 
+  /** Send a free-form text alert (used by AlertEscalationService). */
+  async sendCustom(text: string): Promise<void> {
+    const config = settingsService.get<MeshtasticConfig>('meshtastic')
+    if (!config?.enableDispatch) throw new Error('Meshtastic dispatch not enabled')
+    log.info(`Meshtastic custom dispatch (${text.length} bytes): ${text.slice(0, 100)}…`)
+    // Same TODO as send() — wire to @meshtastic/js when available.
+  }
+
   private formatCompact(report: IntelReport): string {
     const prefix = SEVERITY_PREFIX[report.severity] || 'INFO'
     const disc = report.discipline.toUpperCase().slice(0, 4)

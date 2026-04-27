@@ -2591,6 +2591,108 @@ const migrations: Migration[] = [
       `)
       log.info('Migration 043: v1.2 autonomous-ops tables created (service_health, restart_history, llm_token_usage, resource_governance_config, health_snapshots)')
     }
+  },
+  {
+    version: '044',
+    name: 'v1_2_1_self_healing_and_escalation',
+    up: (db) => {
+      // ─────────────────────────────────────────────────────────────────
+      // v1.2.1 — Self-healing (Dead-Letter Queue + Circuit Breaker state)
+      // and v1.2.2 — Multi-channel alert escalation (rules + on-call +
+      // acknowledgements).
+      // ─────────────────────────────────────────────────────────────────
+
+      db.exec(`
+        -- Dead-letter queue for jobs that exhausted retries.
+        -- Operators inspect, replay, or discard manually.
+        CREATE TABLE IF NOT EXISTS dead_letter_queue (
+          id TEXT PRIMARY KEY,
+          job_kind TEXT NOT NULL,             -- e.g. 'fetch', 'llm_call', 'enrichment'
+          job_payload_json TEXT,              -- original args for replay
+          last_error TEXT,
+          retry_count INTEGER NOT NULL DEFAULT 0,
+          first_failed_at INTEGER NOT NULL,
+          last_failed_at INTEGER NOT NULL,
+          replayed_at INTEGER,
+          discarded_at INTEGER
+        );
+        CREATE INDEX IF NOT EXISTS idx_dlq_kind ON dead_letter_queue(job_kind, last_failed_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_dlq_active ON dead_letter_queue(replayed_at, discarded_at);
+
+        -- Circuit-breaker state per logical "circuit" (e.g. one per LLM
+        -- connection, one per host). Stored centrally so the breaker
+        -- survives main-process restarts.
+        CREATE TABLE IF NOT EXISTS circuit_breaker_state (
+          circuit_id TEXT PRIMARY KEY,
+          state TEXT NOT NULL DEFAULT 'closed',  -- closed | open | half_open
+          failure_count INTEGER NOT NULL DEFAULT 0,
+          success_count INTEGER NOT NULL DEFAULT 0,
+          opened_at INTEGER,
+          half_open_at INTEGER,
+          last_failure_at INTEGER,
+          last_failure_message TEXT
+        );
+
+        -- Alert escalation rules: route alerts to channels by severity +
+        -- source. Multiple rules can match; all matching rules fire.
+        CREATE TABLE IF NOT EXISTS alert_escalation_rules (
+          id TEXT PRIMARY KEY,
+          name TEXT NOT NULL,
+          enabled INTEGER NOT NULL DEFAULT 1,
+          match_severity_json TEXT NOT NULL DEFAULT '["high","critical"]',
+          match_source_glob TEXT,                 -- glob pattern, NULL = any
+          channels_json TEXT NOT NULL DEFAULT '[]', -- ['telegram','email','meshtastic','webhook','desktop']
+          channel_config_json TEXT,               -- per-channel overrides (e.g. webhook URL)
+          quiet_hours_json TEXT,                  -- {"start":"22:00","end":"07:00","tz":"local"}
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_aer_enabled ON alert_escalation_rules(enabled);
+
+        -- Alert acknowledgement log
+        CREATE TABLE IF NOT EXISTS alert_acknowledgements (
+          id TEXT PRIMARY KEY,
+          alert_id TEXT NOT NULL,
+          acknowledged_by TEXT NOT NULL DEFAULT 'analyst',
+          notes TEXT,
+          acknowledged_at INTEGER NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_aack_alert ON alert_acknowledgements(alert_id);
+
+        -- On-call schedule (single-row primary contact + future scheduling)
+        CREATE TABLE IF NOT EXISTS on_call_config (
+          id INTEGER PRIMARY KEY CHECK (id = 1),
+          primary_telegram_chat_id TEXT,
+          primary_email TEXT,
+          primary_meshtastic_node TEXT,
+          escalation_after_minutes INTEGER NOT NULL DEFAULT 15,  -- if no ack, repeat
+          updated_at INTEGER NOT NULL
+        );
+        INSERT OR IGNORE INTO on_call_config (id, escalation_after_minutes, updated_at)
+          VALUES (1, 15, ${Date.now()});
+      `)
+
+      // Extend the alerts table with operational columns. The original
+      // alerts table was intel-report-centric (one row per dispatch); we
+      // overload it for ops alerts using these new optional columns. Wrap
+      // each ALTER in a try/catch since SQLite has no IF NOT EXISTS for
+      // ADD COLUMN.
+      const tryAlter = (sql: string): void => {
+        try { db.exec(sql) } catch (err) {
+          if (!String(err).includes('duplicate column')) throw err
+        }
+      }
+      tryAlter(`ALTER TABLE alerts ADD COLUMN severity TEXT`)
+      tryAlter(`ALTER TABLE alerts ADD COLUMN source TEXT`)
+      tryAlter(`ALTER TABLE alerts ADD COLUMN title TEXT`)
+      tryAlter(`ALTER TABLE alerts ADD COLUMN body TEXT`)
+      tryAlter(`ALTER TABLE alerts ADD COLUMN payload TEXT`)
+      tryAlter(`ALTER TABLE alerts ADD COLUMN escalated_at INTEGER`)
+      tryAlter(`ALTER TABLE alerts ADD COLUMN acknowledged_at INTEGER`)
+      try { db.exec(`CREATE INDEX IF NOT EXISTS idx_alerts_severity ON alerts(severity, created_at DESC)`) } catch { /* */ }
+      try { db.exec(`CREATE INDEX IF NOT EXISTS idx_alerts_unack ON alerts(acknowledged_at, severity, created_at DESC)`) } catch { /* */ }
+      log.info('Migration 044: v1.2.1 self-healing + escalation tables created (dead_letter_queue, circuit_breaker_state, alert_escalation_rules, alert_acknowledgements, on_call_config)')
+    }
   }
 ]
 

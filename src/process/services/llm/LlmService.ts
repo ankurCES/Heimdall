@@ -247,6 +247,44 @@ export class LlmService {
     onChunk?: (chunk: string) => void
   ): Promise<string> {
     const baseUrl = this.normalizeBaseUrl(rawBaseUrl)
+    // Circuit ID per (host, model) — failures on one model don't break others.
+    let circuitId = `llm:${baseUrl}:${model}`
+    try {
+      const u = new URL(baseUrl)
+      circuitId = `llm:${u.host}:${model}`
+    } catch { /* keep raw */ }
+
+    // Self-healing wrapper: circuit breaker + bounded retry on transient
+    // failures. The breaker opens after 5 consecutive failures, cools off
+    // for 60s, then probes via HALF_OPEN. Streaming requests skip retry
+    // (the partial response would be unrecoverable on retry).
+    const { circuitBreaker } = await import('../sentinel/CircuitBreaker')
+    const { retryWithBackoff, RetryPredicates } = await import('../sentinel/RetryWithBackoff')
+
+    return circuitBreaker.run(circuitId, async () => {
+      if (onChunk) {
+        return this._chatOpenAICompatibleInner(baseUrl, apiKey, model, messages, onChunk)
+      }
+      return retryWithBackoff(
+        () => this._chatOpenAICompatibleInner(baseUrl, apiKey, model, messages),
+        {
+          maxAttempts: 3,
+          baseMs: 1000,
+          maxBackoffMs: 8000,
+          retryOn: RetryPredicates.llmTransient,
+          label: `llm:${model}`
+        }
+      )
+    })
+  }
+
+  private async _chatOpenAICompatibleInner(
+    baseUrl: string,
+    apiKey: string,
+    model: string,
+    messages: ChatMessage[],
+    onChunk?: (chunk: string) => void
+  ): Promise<string> {
     const headers: Record<string, string> = { 'Content-Type': 'application/json' }
     if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`
 

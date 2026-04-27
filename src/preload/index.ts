@@ -141,7 +141,12 @@ const testChannels = [
   'sentinel:services', 'sentinel:restart_history', 'sentinel:restart_service',
   'sentinel:enable_auto_restart', 'sentinel:poll_now', 'sentinel:snapshots',
   'governor:stats', 'governor:usage_by_model', 'governor:usage_by_task',
-  'governor:update_config'
+  'governor:update_config',
+  'sentinel:circuits', 'sentinel:circuit_reset',
+  'sentinel:dlq_list', 'sentinel:dlq_stats', 'sentinel:dlq_replay', 'sentinel:dlq_discard',
+  'escalation:rules', 'escalation:create_rule', 'escalation:update_rule', 'escalation:delete_rule',
+  'escalation:on_call', 'escalation:update_on_call',
+  'escalation:recent_alerts', 'escalation:stats', 'escalation:acknowledge', 'escalation:poll_now'
 ]
 const allowedChannels = [...Object.values(IPC_CHANNELS), ...testChannels]
 const chatEvents = ['chat:chunk', 'chat:done', 'chat:error', 'chat:planRefined']
@@ -150,8 +155,9 @@ const darkwebEvents = ['darkweb:refresh_progress', 'darkweb:refresh_complete',
 const telegramIntelEvents = ['telegram-intel:status_update', 'telegram-intel:new_message']
 const workflowEvents = ['workflow:node_progress', 'workflow:run_complete']
 const reportsEvents = ['reports:promotion_progress']
+const alertEvents = ['alert:incoming']
 const syncEvents = ['sync:progress', 'enrichment:progress', 'watch:hits', 'markets:backfillProgress']
-const allowedEvents = [...Object.values(IPC_EVENTS), ...chatEvents, ...syncEvents, ...darkwebEvents, ...telegramIntelEvents, ...workflowEvents, ...reportsEvents]
+const allowedEvents = [...Object.values(IPC_EVENTS), ...chatEvents, ...syncEvents, ...darkwebEvents, ...telegramIntelEvents, ...workflowEvents, ...reportsEvents, ...alertEvents]
 
 const api = {
   invoke: (channel: string, ...args: unknown[]): Promise<unknown> => {

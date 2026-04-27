@@ -42,6 +42,34 @@ export class EmailDispatcher {
     log.info(`Email alert sent: ${report.title.slice(0, 50)} → ${toAddresses.length} recipients`)
   }
 
+  /**
+   * Send a free-form text/html alert (used by AlertEscalationService for
+   * ops alerts that don't have an associated IntelReport).
+   */
+  async sendCustom(subject: string, body: string, recipients?: string[]): Promise<void> {
+    const config = settingsService.get<SmtpConfig>('smtp')
+    if (!config?.host) throw new Error('SMTP not configured')
+    const toAddresses = recipients || config.defaultRecipients
+    if (!toAddresses || toAddresses.length === 0) throw new Error('No email recipients configured')
+
+    const transporter = nodemailer.createTransport({
+      host: config.host,
+      port: config.port,
+      secure: config.tls && config.port === 465,
+      auth: config.username ? { user: config.username, pass: config.password } : undefined,
+      tls: config.tls ? { rejectUnauthorized: false } : undefined
+    })
+
+    await transporter.sendMail({
+      from: config.fromAddress,
+      to: toAddresses.join(', '),
+      subject,
+      text: body,
+      html: `<pre style="font-family: -apple-system, sans-serif; white-space: pre-wrap;">${this.escapeHtml(body)}</pre>`
+    })
+    log.info(`Email custom alert sent: ${subject.slice(0, 50)} → ${toAddresses.length} recipients`)
+  }
+
   private buildHtml(report: IntelReport, color: string): string {
     return `
 <!DOCTYPE html>

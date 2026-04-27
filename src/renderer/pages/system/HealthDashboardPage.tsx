@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback } from 'react'
-import { Activity, RefreshCw, Loader2, Play, Power, AlertTriangle, CheckCircle2, XCircle, MinusCircle, Clock, Database, Cpu, Send, ChevronRight } from 'lucide-react'
+import { Activity, RefreshCw, Loader2, Play, Power, AlertTriangle, CheckCircle2, XCircle, MinusCircle, Clock, Cpu, ChevronRight, Zap, Inbox, Bell, Check } from 'lucide-react'
 import { Card } from '@renderer/components/ui/card'
 import { Badge } from '@renderer/components/ui/badge'
 import { Button } from '@renderer/components/ui/button'
@@ -75,6 +75,39 @@ interface Snapshot {
   llmTokensLastHour: number
 }
 
+interface Circuit {
+  circuitId: string
+  state: 'closed' | 'open' | 'half_open'
+  failureCount: number
+  openedAt: number | null
+  lastFailureAt: number | null
+  lastFailureMessage: string | null
+}
+
+interface DlqStats {
+  active: number
+  replayed: number
+  discarded: number
+  byKind: Record<string, number>
+}
+
+interface OpsAlert {
+  id: string
+  severity: string | null
+  source: string | null
+  title: string | null
+  body: string | null
+  created_at: number
+  escalated_at: number | null
+  acknowledged_at: number | null
+}
+
+interface EscalationStats {
+  unacknowledged: number
+  bySeverity: Record<string, number>
+  lastDay: number
+}
+
 const STATE_ICONS = {
   running: CheckCircle2, degraded: AlertTriangle, failed: XCircle,
   stopped: Power, unknown: MinusCircle
@@ -134,17 +167,25 @@ export function HealthDashboardPage() {
   const [governor, setGovernor] = useState<GovernorStats | null>(null)
   const [models, setModels] = useState<ModelUsage[]>([])
   const [snapshots, setSnapshots] = useState<Snapshot[]>([])
+  const [circuits, setCircuits] = useState<Circuit[]>([])
+  const [dlqStats, setDlqStats] = useState<DlqStats | null>(null)
+  const [opsAlerts, setOpsAlerts] = useState<OpsAlert[]>([])
+  const [escStats, setEscStats] = useState<EscalationStats | null>(null)
   const [loading, setLoading] = useState(true)
   const [polling, setPolling] = useState(false)
 
   const load = useCallback(async () => {
     try {
-      const [s, r, g, m, sn] = await Promise.all([
+      const [s, r, g, m, sn, c, dlq, oa, es] = await Promise.all([
         window.heimdall.invoke('sentinel:services') as Promise<{ ok: boolean; services?: ServiceHealth[] }>,
         window.heimdall.invoke('sentinel:restart_history', 25) as Promise<{ ok: boolean; history?: RestartEntry[] }>,
         window.heimdall.invoke('governor:stats') as Promise<{ ok: boolean } & GovernorStats>,
         window.heimdall.invoke('governor:usage_by_model', 24) as Promise<{ ok: boolean; models?: ModelUsage[] }>,
-        window.heimdall.invoke('sentinel:snapshots', 60) as Promise<{ ok: boolean; snapshots?: Snapshot[] }>
+        window.heimdall.invoke('sentinel:snapshots', 60) as Promise<{ ok: boolean; snapshots?: Snapshot[] }>,
+        window.heimdall.invoke('sentinel:circuits') as Promise<{ ok: boolean; circuits?: Circuit[] }>,
+        window.heimdall.invoke('sentinel:dlq_stats') as Promise<{ ok: boolean } & DlqStats>,
+        window.heimdall.invoke('escalation:recent_alerts', 30) as Promise<{ ok: boolean; alerts?: OpsAlert[] }>,
+        window.heimdall.invoke('escalation:stats') as Promise<{ ok: boolean } & EscalationStats>
       ])
       if (s.ok && s.services) setServices(s.services)
       if (r.ok && r.history) setRestarts(r.history)
@@ -155,6 +196,10 @@ export function HealthDashboardPage() {
       })
       if (m.ok && m.models) setModels(m.models)
       if (sn.ok && sn.snapshots) setSnapshots([...sn.snapshots].reverse())
+      if (c.ok && c.circuits) setCircuits(c.circuits)
+      if (dlq.ok) setDlqStats({ active: dlq.active, replayed: dlq.replayed, discarded: dlq.discarded, byKind: dlq.byKind })
+      if (oa.ok && oa.alerts) setOpsAlerts(oa.alerts)
+      if (es.ok) setEscStats({ unacknowledged: es.unacknowledged, bySeverity: es.bySeverity, lastDay: es.lastDay })
     } catch (err) { toast.error(String(err)) }
     setLoading(false)
   }, [])
@@ -382,6 +427,135 @@ export function HealthDashboardPage() {
             </div>
           </Card>
         ))}
+
+        {/* Self-healing: Circuit Breakers + Dead-Letter Queue */}
+        {(circuits.length > 0 || (dlqStats && dlqStats.active > 0)) && (
+          <Card>
+            <div className="px-5 py-3 border-b border-border">
+              <div className="text-sm font-semibold flex items-center gap-2">
+                <Zap className="w-4 h-4 text-amber-400" /> Self-Healing
+              </div>
+              <div className="text-[10px] text-muted-foreground">
+                Circuit breakers wrap fragile operations (LLM calls, fetches). Dead-Letter Queue holds jobs that exhausted retries.
+              </div>
+            </div>
+            <div className="px-5 py-3 grid grid-cols-2 gap-4">
+              {/* Circuits */}
+              <div>
+                <div className="text-xs text-muted-foreground mb-2 uppercase">Circuit breakers ({circuits.length})</div>
+                {circuits.length === 0 ? (
+                  <p className="text-xs italic text-muted-foreground">No circuits yet — they appear after the first failure.</p>
+                ) : (
+                  <div className="space-y-1 max-h-48 overflow-y-auto">
+                    {circuits.map((c) => (
+                      <div key={c.circuitId} className="flex items-center gap-2 text-xs border border-border rounded px-2 py-1">
+                        <span className={`w-2 h-2 rounded-full ${
+                          c.state === 'open' ? 'bg-red-400' : c.state === 'half_open' ? 'bg-amber-400' : 'bg-emerald-400'
+                        }`} />
+                        <span className="font-mono flex-1 truncate" title={c.circuitId}>{c.circuitId}</span>
+                        <Badge variant="outline" className="text-[9px] capitalize">{c.state.replace('_', ' ')}</Badge>
+                        {c.failureCount > 0 && <span className="text-red-300 text-[9px]">{c.failureCount} fail</span>}
+                        {c.state !== 'closed' && (
+                          <button
+                            onClick={async () => {
+                              await window.heimdall.invoke('sentinel:circuit_reset', c.circuitId)
+                              toast.success(`Circuit ${c.circuitId} reset`)
+                              load()
+                            }}
+                            className="text-[9px] text-cyan-300 hover:text-cyan-200"
+                            title="Manually reset to CLOSED"
+                          >
+                            reset
+                          </button>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+              {/* DLQ */}
+              <div>
+                <div className="text-xs text-muted-foreground mb-2 uppercase">Dead-Letter Queue</div>
+                {dlqStats ? (
+                  <div className="space-y-2">
+                    <div className="flex items-center gap-3 text-xs">
+                      <span className="font-semibold text-amber-300">{dlqStats.active} active</span>
+                      <span className="text-muted-foreground">{dlqStats.replayed} replayed</span>
+                      <span className="text-muted-foreground">{dlqStats.discarded} discarded</span>
+                    </div>
+                    {Object.keys(dlqStats.byKind).length > 0 && (
+                      <div className="flex flex-wrap gap-1">
+                        {Object.entries(dlqStats.byKind).map(([k, n]) => (
+                          <Badge key={k} variant="outline" className="text-[9px]">{k}: {n}</Badge>
+                        ))}
+                      </div>
+                    )}
+                    {dlqStats.active === 0 && <p className="text-xs italic text-muted-foreground">Queue empty.</p>}
+                  </div>
+                ) : <Loader2 className="w-4 h-4 animate-spin" />}
+              </div>
+            </div>
+          </Card>
+        )}
+
+        {/* Operational alerts + escalation */}
+        {escStats && (
+          <Card>
+            <div className="px-5 py-3 border-b border-border flex items-center justify-between">
+              <div className="text-sm font-semibold flex items-center gap-2">
+                <Bell className="w-4 h-4 text-cyan-400" /> Operational Alerts
+              </div>
+              <div className="flex items-center gap-2 text-xs">
+                {escStats.unacknowledged > 0 && (
+                  <Badge variant="outline" className="bg-amber-500/10 text-amber-300 border-amber-500/30">
+                    {escStats.unacknowledged} unacknowledged
+                  </Badge>
+                )}
+                <span className="text-muted-foreground">{escStats.lastDay} in last 24h</span>
+              </div>
+            </div>
+            <div className="divide-y divide-border max-h-72 overflow-y-auto">
+              {opsAlerts.length === 0 ? (
+                <p className="text-xs italic text-muted-foreground px-5 py-4">No operational alerts yet.</p>
+              ) : opsAlerts.map((a) => (
+                <div key={a.id} className="px-5 py-2 flex items-start gap-3 text-xs">
+                  <span className={`w-2 h-2 rounded-full mt-1.5 ${
+                    a.severity === 'critical' ? 'bg-red-500' :
+                    a.severity === 'high' ? 'bg-orange-400' :
+                    a.severity === 'medium' ? 'bg-amber-400' : 'bg-slate-400'
+                  }`} />
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <Badge variant="outline" className="text-[9px] capitalize">{a.severity}</Badge>
+                      {a.source && <span className="text-muted-foreground font-mono">{a.source}</span>}
+                      <span className="font-medium truncate">{a.title}</span>
+                      {a.escalated_at && !a.acknowledged_at && (
+                        <Badge variant="outline" className="text-[9px] bg-cyan-500/10 text-cyan-300 border-cyan-500/30">escalated</Badge>
+                      )}
+                      {a.acknowledged_at && (
+                        <Badge variant="outline" className="text-[9px] bg-emerald-500/10 text-emerald-300 border-emerald-500/30">acked</Badge>
+                      )}
+                    </div>
+                    {a.body && <div className="text-[10px] text-muted-foreground italic mt-0.5 truncate">{a.body}</div>}
+                    <div className="text-[9px] text-muted-foreground mt-0.5">{formatTime(a.created_at)}</div>
+                  </div>
+                  {!a.acknowledged_at && (
+                    <button
+                      onClick={async () => {
+                        await window.heimdall.invoke('escalation:acknowledge', { alertId: a.id })
+                        toast.success('Alert acknowledged')
+                        load()
+                      }}
+                      className="text-cyan-300 hover:text-cyan-200 px-2 py-1 rounded text-[10px] border border-border"
+                    >
+                      <Check className="w-3 h-3 inline mr-1" /> Ack
+                    </button>
+                  )}
+                </div>
+              ))}
+            </div>
+          </Card>
+        )}
 
         {/* Health snapshot history (mini-chart) */}
         {snapshots.length > 0 && (

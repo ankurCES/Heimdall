@@ -41,6 +41,32 @@ export class TelegramDispatcher {
     log.info(`Telegram alert sent: ${report.title.slice(0, 50)} → ${targetIds.length} chats`)
   }
 
+  /**
+   * Send a free-form text alert (used by AlertEscalationService for ops
+   * alerts that don't have an associated IntelReport).
+   */
+  async sendCustom(subject: string, body: string, chatIds?: string[]): Promise<void> {
+    const config = settingsService.get<TelegramConfig>('telegram')
+    if (!config?.botToken) throw new Error('Telegram bot not configured')
+    const targetIds = chatIds || config.chatIds
+    if (!targetIds || targetIds.length === 0) throw new Error('No Telegram chat IDs configured')
+
+    const bot = new Bot(config.botToken)
+    const message = `*${this.escapeMd(subject)}*\n\n${this.escapeMd(body.slice(0, 3500))}`
+    for (const chatId of targetIds) {
+      try {
+        await bot.api.sendMessage(chatId, message, { parse_mode: 'MarkdownV2' })
+      } catch (err) {
+        log.warn(`Telegram sendCustom failed for ${chatId}: ${err}`)
+        throw err
+      }
+    }
+  }
+
+  private escapeMd(s: string): string {
+    return s.replace(/[_*[\]()~`>#+\-=|{}.!]/g, '\\$&')
+  }
+
   private formatMessage(report: IntelReport, format: string): string {
     const emoji = SEVERITY_EMOJI[report.severity] || '⚪'
 
