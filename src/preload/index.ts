@@ -146,7 +146,12 @@ const testChannels = [
   'sentinel:dlq_list', 'sentinel:dlq_stats', 'sentinel:dlq_replay', 'sentinel:dlq_discard',
   'escalation:rules', 'escalation:create_rule', 'escalation:update_rule', 'escalation:delete_rule',
   'escalation:on_call', 'escalation:update_on_call',
-  'escalation:recent_alerts', 'escalation:stats', 'escalation:acknowledge', 'escalation:poll_now'
+  'escalation:recent_alerts', 'escalation:stats', 'escalation:acknowledge', 'escalation:poll_now',
+  'forecast:claims', 'forecast:stats', 'forecast:record_outcome',
+  'forecast:extract', 'forecast:auto_record',
+  'audit:anchor_now', 'audit:anchors', 'audit:chain_stats',
+  'audit:verify_anchor', 'audit:export_anchors',
+  'opsec:config', 'opsec:update', 'opsec:posture'
 ]
 const allowedChannels = [...Object.values(IPC_CHANNELS), ...testChannels]
 const chatEvents = ['chat:chunk', 'chat:done', 'chat:error', 'chat:planRefined']

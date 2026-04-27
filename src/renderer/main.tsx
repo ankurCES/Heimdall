@@ -42,6 +42,7 @@ import { SourceReliabilityPage } from './pages/library/reliability/SourceReliabi
 import { RevisionInboxPage } from './pages/library/revisions/RevisionInboxPage'
 import { EthicsConsolePage } from './pages/ethics/EthicsConsolePage'
 import { HealthDashboardPage } from './pages/system/HealthDashboardPage'
+import { ForecastAccountabilityPage } from './pages/system/forecast/ForecastAccountabilityPage'
 import { Phase5Page } from './pages/phase5/Phase5Page'
 import { Toaster } from 'sonner'
 import { NotificationListener } from './components/NotificationListener'
@@ -102,6 +103,7 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
           <Route path="/revisions" element={<RevisionInboxPage />} />
           <Route path="/ethics" element={<EthicsConsolePage />} />
           <Route path="/system" element={<HealthDashboardPage />} />
+          <Route path="/forecast" element={<ForecastAccountabilityPage />} />
           <Route path="/advanced" element={<Phase5Page />} />
           <Route path="/sync" element={<SyncPage />} />
           <Route path="/tokens" element={<TokensPage />} />

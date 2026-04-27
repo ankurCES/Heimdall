@@ -119,6 +119,12 @@ export function registerReportsBridge(): void {
           const n = await indicatorExtractor.extractAndPersist(r)
           if (n > 0) log.info(`Extracted ${n} indicators from report ${r.id}`)
         } catch (err) { log.warn(`post-publish indicator extract failed: ${err}`) }
+        // v1.3 — extract forecast claims for accountability tracking
+        try {
+          const { forecastAccountabilityService } = await import('../services/forecast/ForecastAccountabilityService')
+          const n = forecastAccountabilityService.extractAndPersist(r)
+          if (n > 0) log.info(`Extracted ${n} forecast claims from report ${r.id}`)
+        } catch (err) { log.warn(`post-publish forecast extract failed: ${err}`) }
       })
 
       return { ok: true, report: r }

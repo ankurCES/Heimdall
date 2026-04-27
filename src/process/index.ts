@@ -406,6 +406,35 @@ async function initializeDeferred(): Promise<void> {
     log.error(`Sentinel start failed: ${err}`)
   }
 
+  // v1.3 — Audit Chain Anchor service. Hourly signing of audit chain head
+  // for third-party verifiability.
+  try {
+    const { auditChainAnchorService } = await import('./services/audit/AuditChainAnchorService')
+    auditChainAnchorService.start()
+    const { serviceRegistry } = await import('./services/sentinel/ServiceRegistry')
+    serviceRegistry.register({
+      id: 'audit-anchor',
+      displayName: 'Audit Chain Anchor',
+      category: 'infrastructure',
+      autoRestart: true,
+      healthCheck: async () => {
+        const stats = await auditChainAnchorService.chainStats()
+        return { state: 'running' as const, metadata: { chainLength: stats.chainLength, coverage: stats.coveragePercent + '%' } }
+      },
+      restart: async () => { auditChainAnchorService.stop(); auditChainAnchorService.start() }
+    })
+  } catch (err) { log.warn(`AuditChainAnchor start failed: ${err}`) }
+
+  // v1.3 — Forecast Accountability auto-record loop. Periodically scans
+  // claims with no recorded outcome and tries to match them against
+  // high-priority indicator hits.
+  cronService.schedule('forecast.auto_record', '*/30 * * * *', 'Forecast outcome auto-record', async () => {
+    try {
+      const { forecastAccountabilityService } = await import('./services/forecast/ForecastAccountabilityService')
+      forecastAccountabilityService.autoRecordFromIndicatorHits()
+    } catch (err) { log.error(`forecast.auto_record failed: ${err}`) }
+  })
+
   // v1.2.1 — Alert Escalation. Polls alerts table every 30s, dispatches
   // unacknowledged ops alerts via configured channels, re-escalates if
   // unacknowledged after on-call.escalation_after_minutes minutes.

@@ -6,7 +6,7 @@ import {
   Layers, RefreshCw, Sparkles, Eye, AlertOctagon, GitCompare, TrendingUp,
   Network, Users, ShieldAlert, Shield, Bug, Moon, MapPin, Image, Share2, Brain, ChevronLeft, ChevronRight, ChevronDown,
   Workflow, Library, FolderOpen, Target, Server, Inbox, ShieldCheck,
-  HeartPulse
+  HeartPulse, Award
 } from 'lucide-react'
 import { cn } from '@renderer/lib/utils'
 import heimdallLogo from '@renderer/assets/heimdall-logo.png'
@@ -92,6 +92,7 @@ const NAV_GROUPS: NavGroup[] = [
     label: 'System',
     items: [
       { to: '/system', icon: HeartPulse, label: 'System Health' },
+      { to: '/forecast', icon: Award, label: 'Forecast Accountability' },
       { to: '/tokens', icon: Coins, label: 'Token Usage' },
       { to: '/audit', icon: Activity, label: 'Audit Log' },
       { to: '/quarantine', icon: Bug, label: 'Quarantine' },

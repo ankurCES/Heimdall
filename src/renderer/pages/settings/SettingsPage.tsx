@@ -15,7 +15,8 @@ import {
   Plug,
   Globe2,
   GraduationCap,
-  Stamp
+  Stamp,
+  Shield
 } from 'lucide-react'
 import { cn } from '@renderer/lib/utils'
 import { ApiKeysTab } from './tabs/ApiKeysTab'
@@ -33,6 +34,7 @@ import { McpServersTab } from './tabs/McpServersTab'
 import { DarkWebTab } from './tabs/DarkWebTab'
 import { TrainingDataTab } from './tabs/TrainingDataTab'
 import { LetterheadTab } from './tabs/LetterheadTab'
+import { OpSecTab } from './tabs/OpSecTab'
 
 const tabs = [
   { id: 'sources', label: 'Sources', icon: Database, component: SourcesTab },
@@ -49,6 +51,7 @@ const tabs = [
   { id: 'darkweb', label: 'Dark Web', icon: Globe2, component: DarkWebTab },
   { id: 'training', label: 'Training Data', icon: GraduationCap, component: TrainingDataTab },
   { id: 'letterhead', label: 'Letterhead', icon: Stamp, component: LetterheadTab },
+  { id: 'opsec', label: 'OPSEC', icon: Shield, component: OpSecTab },
   { id: 'about', label: 'About', icon: Info, component: AboutTab }
 ]
 

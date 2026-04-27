@@ -2693,6 +2693,86 @@ const migrations: Migration[] = [
       try { db.exec(`CREATE INDEX IF NOT EXISTS idx_alerts_unack ON alerts(acknowledged_at, severity, created_at DESC)`) } catch { /* */ }
       log.info('Migration 044: v1.2.1 self-healing + escalation tables created (dead_letter_queue, circuit_breaker_state, alert_escalation_rules, alert_acknowledgements, on_call_config)')
     }
+  },
+  {
+    version: '045',
+    name: 'v1_3_calibration_hardening',
+    up: (db) => {
+      // ─────────────────────────────────────────────────────────────────
+      // v1.3 — Forecast accountability + Merkle audit chain + OPSEC config
+      // ─────────────────────────────────────────────────────────────────
+
+      db.exec(`
+        -- Forecast claims extracted from published reports. One row per
+        -- distinct (report, judgment, WEP-anchored prediction). The
+        -- ForecastAccountabilityService scores them against outcomes.
+        CREATE TABLE IF NOT EXISTS forecast_claims (
+          id TEXT PRIMARY KEY,
+          report_id TEXT NOT NULL,
+          claim_text TEXT NOT NULL,
+          wep_term TEXT,                      -- "almost certainly" | "likely" | etc.
+          probability_midpoint REAL,          -- 0.0-1.0 from the WEP scale
+          confidence_level TEXT,              -- low | moderate | high
+          subject_entity TEXT,                -- best-effort entity tag
+          time_horizon TEXT,                  -- "30 days" | "Q3 2026" | NULL
+          horizon_ends_at INTEGER,            -- absolute deadline if parseable
+          extracted_at INTEGER NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_fc_report ON forecast_claims(report_id);
+        CREATE INDEX IF NOT EXISTS idx_fc_horizon ON forecast_claims(horizon_ends_at);
+
+        -- Recorded outcomes (occurred / didn't occur / partial / undetermined).
+        -- Tied 1:1 to a claim. Auto-populated by indicator hits where
+        -- possible; otherwise set manually from the Accountability page.
+        CREATE TABLE IF NOT EXISTS forecast_outcomes (
+          id TEXT PRIMARY KEY,
+          claim_id TEXT NOT NULL UNIQUE,
+          outcome TEXT NOT NULL,              -- occurred | not_occurred | partial | undetermined
+          actual_probability REAL,            -- 0.0 (didn't happen) | 1.0 (happened) | partial value
+          evidence TEXT,
+          source_intel_id TEXT,
+          recorded_by TEXT,
+          recorded_at INTEGER NOT NULL,
+          brier_score REAL                    -- (predicted - actual)^2
+        );
+        CREATE INDEX IF NOT EXISTS idx_fo_claim ON forecast_outcomes(claim_id);
+        CREATE INDEX IF NOT EXISTS idx_fo_outcome ON forecast_outcomes(outcome);
+
+        -- Periodically signed chain head for distribution to verifiers.
+        -- The underlying tamper-evident chain lives in audit_log_chained
+        -- (created by migration 014 + maintained by AuditChainService).
+        -- Anchors give third parties a signed snapshot to verify against.
+        CREATE TABLE IF NOT EXISTS audit_chain_anchors (
+          id TEXT PRIMARY KEY,
+          head_seq INTEGER NOT NULL,
+          head_hash TEXT NOT NULL,
+          signature_b64 TEXT NOT NULL,
+          public_key_b64 TEXT NOT NULL,
+          fingerprint TEXT NOT NULL,
+          anchored_at INTEGER NOT NULL
+        );
+
+        -- OPSEC configuration. Defaults to maximum-restriction values; the
+        -- analyst (or settings UI) can relax them after a deliberate choice.
+        CREATE TABLE IF NOT EXISTS opsec_config (
+          id INTEGER PRIMARY KEY CHECK (id = 1),
+          mode TEXT NOT NULL DEFAULT 'paranoid',  -- paranoid | strict | standard | permissive
+          allow_external_telemetry INTEGER NOT NULL DEFAULT 0,
+          allow_cloud_llm INTEGER NOT NULL DEFAULT 1,
+          scrub_llm_logs INTEGER NOT NULL DEFAULT 1,
+          air_gap_enforced INTEGER NOT NULL DEFAULT 0,
+          allow_outbound_hostnames_json TEXT,
+          warn_on_external_calls INTEGER NOT NULL DEFAULT 1,
+          updated_at INTEGER NOT NULL
+        );
+        INSERT OR IGNORE INTO opsec_config
+          (id, mode, allow_external_telemetry, allow_cloud_llm, scrub_llm_logs,
+           air_gap_enforced, allow_outbound_hostnames_json, warn_on_external_calls, updated_at)
+        VALUES
+          (1, 'paranoid', 0, 1, 1, 0, '[]', 1, ${Date.now()});
+      `)
+      log.info('Migration 045: v1.3 calibration + hardening tables created (forecast_claims, forecast_outcomes, audit_chain_anchors, opsec_config)')
+    }
   }
 ]
 
