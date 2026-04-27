@@ -587,6 +587,88 @@ export class TranscriptionService extends EventEmitter {
   }
 
   /**
+   * v1.4.13 — Permanently redact a transcript.
+   *
+   * Walks the persisted pii_findings_json, rewrites full_text and
+   * segments_json with [KIND] tokens in place of each span, then
+   * clears the findings array (every span has been applied — there's
+   * nothing left to "reveal"). This is irreversible by design: the
+   * compliance use case is "an analyst confirmed the PII and we no
+   * longer want the unredacted material on disk."
+   *
+   * Audit: emits an audit_log entry with the affected transcript id,
+   * count of redactions, and a hash prefix of the resulting text so
+   * later auditors can verify the action ran without exposing the
+   * (now-redacted) content.
+   */
+  async permanentlyRedact(id: string): Promise<{ ok: boolean; redacted: number }> {
+    const db = getDatabase()
+    const row = db.prepare(`
+      SELECT id, full_text, segments_json, pii_findings_json FROM transcripts WHERE id = ?
+    `).get(id) as { id: string; full_text: string | null; segments_json: string | null; pii_findings_json: string | null } | undefined
+    if (!row) return { ok: false, redacted: 0 }
+    if (!row.pii_findings_json) return { ok: true, redacted: 0 }
+
+    let findings: Array<{ segmentIndex: number; kind: string; offset_start: number; offset_end: number }> = []
+    try { findings = JSON.parse(row.pii_findings_json) } catch { return { ok: false, redacted: 0 } }
+    if (!findings.length) return { ok: true, redacted: 0 }
+
+    type Seg = { start: number; end: number; text: string }
+    let segments: Seg[] = []
+    try { segments = row.segments_json ? JSON.parse(row.segments_json) as Seg[] : [] } catch { /* */ }
+
+    // Apply findings per-segment (offsets are local to each segment.text)
+    const bySegment = new Map<number, typeof findings>()
+    for (const f of findings) {
+      const arr = bySegment.get(f.segmentIndex) ?? []
+      arr.push(f)
+      bySegment.set(f.segmentIndex, arr)
+    }
+    const labelFor = (kind: string): string => {
+      const map: Record<string, string> = {
+        person_name: 'NAME', ssn: 'SSN', phone: 'PHONE', email: 'EMAIL', address: 'ADDRESS',
+        credit_card: 'CARD', ip_address: 'IP', mac_address: 'MAC', coordinate: 'GEO'
+      }
+      return `[${map[kind] ?? 'PII'}]`
+    }
+    const maskedSegments: Seg[] = segments.map((seg, idx) => {
+      const hits = bySegment.get(idx)
+      if (!hits || !hits.length) return seg
+      const sorted = hits.slice().sort((a, b) => b.offset_start - a.offset_start)
+      let text = seg.text
+      for (const h of sorted) {
+        text = text.slice(0, h.offset_start) + labelFor(h.kind) + text.slice(h.offset_end)
+      }
+      return { ...seg, text }
+    })
+    const maskedFullText = maskedSegments.length
+      ? maskedSegments.map(s => s.text.trim()).filter(Boolean).join(' ')
+      : (row.full_text ?? '')
+
+    const tx = db.transaction(() => {
+      db.prepare(`
+        UPDATE transcripts
+        SET full_text = ?, segments_json = ?, pii_findings_json = NULL
+        WHERE id = ?
+      `).run(maskedFullText, JSON.stringify(maskedSegments), id)
+    })
+    tx()
+
+    // Audit-log the redaction (best-effort; service may not be loaded).
+    try {
+      const { auditService } = await import('../audit/AuditService')
+      const hashPrefix = crypto.createHash('sha256').update(maskedFullText).digest('hex').slice(0, 16)
+      auditService.log('transcript.permanently_redacted', {
+        transcript_id: id, redacted_count: findings.length, content_sha256_prefix: hashPrefix
+      })
+    } catch (err) {
+      log.debug(`transcript.permanently_redact: audit log failed: ${(err as Error).message}`)
+    }
+    log.info(`transcription: permanently redacted ${findings.length} span(s) in ${id}`)
+    return { ok: true, redacted: findings.length }
+  }
+
+  /**
    * v1.4.6 / v1.4.7 — translate a non-English transcript to English.
    *
    * Uses the existing TranslationService (LLM-backed, 24h SHA-1 cache).

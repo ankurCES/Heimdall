@@ -164,6 +164,13 @@ export function registerTranscriptionBridge(): void {
     return { ok: true }
   })
 
+  // v1.4.13 — irreversibly rewrite full_text + segments_json with PII
+  // tokens. Compliance use case ("we no longer want the unredacted
+  // material on disk"). Audit-logged.
+  ipcMain.handle('transcription:permanently_redact', async (_evt, id: string) => {
+    return await transcriptionService.permanentlyRedact(id)
+  })
+
   // v1.4.9 — export a transcript as SRT / VTT / JSON / plain text.
   // The renderer asks for `view: 'original' | 'translation'` and a
   // format; the exporter produces both the body and a suggested
@@ -175,11 +182,12 @@ export function registerTranscriptionBridge(): void {
     format: ExportFormat
     view?: ExportView
     save?: boolean   // when true, opens a Save dialog and writes to disk
+    mask?: boolean   // v1.4.13 — apply pii_findings to mask spans before export
   }) => {
     const row = transcriptionService.get(args.id)
     if (!row) throw new Error(`Transcript not found: ${args.id}`)
 
-    const result = exportTranscript(row, args.format, args.view ?? 'original')
+    const result = exportTranscript(row, args.format, args.view ?? 'original', { mask: !!args.mask })
 
     if (args.save !== false) {
       const win = BrowserWindow.getFocusedWindow()

@@ -29,6 +29,7 @@ import {
 } from '@renderer/components/ui/dropdown-menu'
 import { Link } from 'react-router-dom'
 import { Button } from '@renderer/components/ui/button'
+import { useSetting } from '@renderer/hooks/useSettings'
 import { Card, CardContent, CardHeader, CardTitle } from '@renderer/components/ui/card'
 import { Badge } from '@renderer/components/ui/badge'
 import { Input } from '@renderer/components/ui/input'
@@ -581,12 +582,13 @@ function AudioPlayer({ transcriptId, mime, fallbackDurationMs, onTimeUpdate, ref
   )
 }
 
-function TranscriptDetail({ transcript, onDelete, onRetranscribe, onTranslate, onExport, busy, translating }: {
+function TranscriptDetail({ transcript, onDelete, onRetranscribe, onTranslate, onExport, onPermanentRedact, busy, translating }: {
   transcript: Transcript
   onDelete: () => void
   onRetranscribe: () => void
   onTranslate: () => void
-  onExport: (format: 'srt' | 'vtt' | 'json' | 'text', view: 'original' | 'translation') => void
+  onExport: (format: 'srt' | 'vtt' | 'json' | 'text', view: 'original' | 'translation', mask: boolean) => void
+  onPermanentRedact: () => void
   busy: boolean
   translating: boolean
 }) {
@@ -614,7 +616,18 @@ function TranscriptDetail({ transcript, onDelete, onRetranscribe, onTranslate, o
   // v1.4.12 — PII visibility mode. 'highlight' shows detected spans
   // with an amber underline (default); 'masked' replaces them with
   // [TYPE] tokens for screen-share / over-shoulder safety.
+  // v1.4.13 — initial mode honours transcription.maskByDefault so
+  // analysts in compliance-sensitive deployments can flip the global
+  // default to masked-on-open.
+  const { value: maskByDefault } = useSetting<boolean>('transcription.maskByDefault', false)
   const [piiMode, setPiiMode] = useState<'highlight' | 'masked'>('highlight')
+  const [piiInitialised, setPiiInitialised] = useState(false)
+  if (!piiInitialised && maskByDefault) {
+    setPiiMode('masked')
+    setPiiInitialised(true)
+  } else if (!piiInitialised && maskByDefault === false) {
+    setPiiInitialised(true)
+  }
   const segmentRefs = useRef<Map<number, HTMLDivElement>>(new Map())
 
   // Parse PII findings once and bucket by segment index.
@@ -725,32 +738,58 @@ function TranscriptDetail({ transcript, onDelete, onRetranscribe, onTranslate, o
                   <ChevronDown className="h-3 w-3 ml-1" />
                 </Button>
               </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-56">
+              <DropdownMenuContent align="end" className="w-64">
                 <DropdownMenuLabel className="text-[11px] text-muted-foreground font-normal">
                   Exporting from {view === 'translation' ? 'Translation (English)' : `Original${transcript.language ? ` (${transcript.language})` : ''}`}
                 </DropdownMenuLabel>
                 <DropdownMenuSeparator />
-                <DropdownMenuItem onSelect={() => onExport('srt', view)}>
+                <DropdownMenuItem onSelect={() => onExport('srt', view, false)}>
                   <FileText className="h-3.5 w-3.5 mr-2" /> SubRip (.srt)
                   <span className="ml-auto text-[10px] text-muted-foreground">subtitles</span>
                 </DropdownMenuItem>
-                <DropdownMenuItem onSelect={() => onExport('vtt', view)}>
+                <DropdownMenuItem onSelect={() => onExport('vtt', view, false)}>
                   <FileText className="h-3.5 w-3.5 mr-2" /> WebVTT (.vtt)
                   <span className="ml-auto text-[10px] text-muted-foreground">web</span>
                 </DropdownMenuItem>
-                <DropdownMenuItem onSelect={() => onExport('json', view)}>
+                <DropdownMenuItem onSelect={() => onExport('json', view, false)}>
                   <FileText className="h-3.5 w-3.5 mr-2" /> JSON
                   <span className="ml-auto text-[10px] text-muted-foreground">lossless</span>
                 </DropdownMenuItem>
-                <DropdownMenuItem onSelect={() => onExport('text', view)}>
+                <DropdownMenuItem onSelect={() => onExport('text', view, false)}>
                   <FileText className="h-3.5 w-3.5 mr-2" /> Plain text
                   <span className="ml-auto text-[10px] text-muted-foreground">no times</span>
                 </DropdownMenuItem>
+                {piiCount > 0 && view === 'original' && (
+                  <>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuLabel className="text-[11px] text-muted-foreground font-normal">
+                      PII-masked exports ({piiCount} span{piiCount > 1 ? 's' : ''} will be redacted)
+                    </DropdownMenuLabel>
+                    <DropdownMenuItem onSelect={() => onExport('srt', view, true)}>
+                      <Shield className="h-3.5 w-3.5 mr-2 text-amber-600 dark:text-amber-400" /> SubRip (masked)
+                      <span className="ml-auto text-[10px] text-muted-foreground">.redacted.srt</span>
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onSelect={() => onExport('text', view, true)}>
+                      <Shield className="h-3.5 w-3.5 mr-2 text-amber-600 dark:text-amber-400" /> Plain text (masked)
+                      <span className="ml-auto text-[10px] text-muted-foreground">.redacted.text</span>
+                    </DropdownMenuItem>
+                  </>
+                )}
               </DropdownMenuContent>
             </DropdownMenu>
             <Button size="sm" variant="ghost" onClick={onRetranscribe} disabled={busy} className="h-8">
               <RefreshCw className={cn('h-3.5 w-3.5 mr-1', busy && 'animate-spin')} /> Re-transcribe
             </Button>
+            {piiCount > 0 && (
+              <Button
+                size="sm" variant="ghost"
+                onClick={onPermanentRedact}
+                className="h-8 text-amber-600 dark:text-amber-400 hover:bg-amber-500/10"
+                title="Irreversibly rewrite the transcript with PII tokens (audit-logged)"
+              >
+                <Shield className="h-3.5 w-3.5" />
+              </Button>
+            )}
             <Button size="sm" variant="ghost" onClick={onDelete} className="h-8 text-red-600 dark:text-red-400 hover:bg-red-500/10">
               <Trash2 className="h-3.5 w-3.5" />
             </Button>
@@ -1136,7 +1175,7 @@ export function TranscriptsPage() {
     }
   }
 
-  const exportTranscript = async (format: 'srt' | 'vtt' | 'json' | 'text', view: 'original' | 'translation') => {
+  const exportTranscript = async (format: 'srt' | 'vtt' | 'json' | 'text', view: 'original' | 'translation', mask = false) => {
     if (!selected) return
     setError(null)
     try {
@@ -1144,12 +1183,32 @@ export function TranscriptsPage() {
         id: selected.id,
         format,
         view,
-        save: true
+        save: true,
+        mask
       }) as { ok: boolean; cancelled?: boolean; path?: string; bytes?: number; filename?: string }
       if (r.cancelled) return
       if (r.ok && r.path) {
-        // Could surface a toast; for now log is enough
-        console.info(`Exported ${format} (${r.bytes} chars) → ${r.path}`)
+        console.info(`Exported ${format}${mask ? ' (masked)' : ''} (${r.bytes} chars) → ${r.path}`)
+      }
+    } catch (err) {
+      setError(String(err).replace(/^Error:\s*/, ''))
+    }
+  }
+
+  const permanentlyRedact = async () => {
+    if (!selected) return
+    if (!confirm(
+      `Permanently rewrite "${selected.file_name ?? selected.id}" with PII tokens?\n\n` +
+      `This is IRREVERSIBLE. The original (unredacted) text will be removed from the database. ` +
+      `An audit-log entry will be written.`
+    )) return
+    setError(null)
+    try {
+      const r = await window.heimdall.invoke('transcription:permanently_redact', selected.id) as { ok: boolean; redacted: number }
+      if (r.ok) {
+        await load()
+      } else {
+        setError('Permanent redact failed.')
       }
     } catch (err) {
       setError(String(err).replace(/^Error:\s*/, ''))
@@ -1276,6 +1335,7 @@ export function TranscriptsPage() {
               onRetranscribe={retranscribe}
               onTranslate={translate}
               onExport={exportTranscript}
+              onPermanentRedact={permanentlyRedact}
               busy={busy}
               translating={translating}
             />

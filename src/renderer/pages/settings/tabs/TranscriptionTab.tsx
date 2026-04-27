@@ -19,7 +19,7 @@
 import { useEffect, useState, useCallback } from 'react'
 import {
   Mic, Cpu, Server, Volume2, Languages, Cloud, RefreshCw,
-  CheckCircle2, AlertCircle, Save, Loader2, Folder, HardDrive, Scissors
+  CheckCircle2, AlertCircle, Save, Loader2, Folder, HardDrive, Scissors, Shield
 } from 'lucide-react'
 import { Button } from '@renderer/components/ui/button'
 import { Input } from '@renderer/components/ui/input'
@@ -148,6 +148,7 @@ export function TranscriptionTab() {
   const { value: allowCloud, save: saveAllowCloud } = useSetting<boolean>('transcription.allowCloud', false)
   const { value: chunkingMode, save: saveChunkingMode } = useSetting<string>('transcription.chunking', 'auto')
   const { value: chunkLengthMin, save: saveChunkLengthMin } = useSetting<number>('transcription.chunkLengthMin', 10)
+  const { value: maskByDefault, save: saveMaskByDefault } = useSetting<boolean>('transcription.maskByDefault', false)
 
   const checkEngine = useCallback(async () => {
     setBusy(true)
@@ -329,6 +330,38 @@ export function TranscriptionTab() {
               Chunks land at silence boundaries within ±10% of this target. 10 min is a good default —
               shorter values give faster first-chunk feedback at the cost of more boundary cuts.
             </p>
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-base flex items-center gap-2">
+            <Shield className="h-4 w-4" /> PII handling
+          </CardTitle>
+          <CardDescription>
+            Heimdall scans every transcript on ingest for SSNs, phone numbers, emails, addresses,
+            credit cards (Luhn-validated), IPs, MAC addresses, and coordinates. Findings are stored
+            alongside the transcript; the original text is never mutated unless you explicitly use
+            the "Permanently redact" action on a transcript.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="flex items-center justify-between gap-4">
+            <div className="space-y-0.5 flex-1">
+              <Label htmlFor="transcription-mask-default" className="text-sm cursor-pointer">
+                Mask PII by default when opening transcripts
+              </Label>
+              <p className="text-xs text-muted-foreground">
+                Recommended for screen-share workflows. The pill in the transcript header still lets
+                you reveal on demand. Underlying text is unchanged either way.
+              </p>
+            </div>
+            <Switch
+              id="transcription-mask-default"
+              checked={!!maskByDefault}
+              onCheckedChange={(v) => void saveMaskByDefault(v)}
+            />
           </div>
         </CardContent>
       </Card>

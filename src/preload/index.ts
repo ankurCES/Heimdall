@@ -71,7 +71,7 @@ const testChannels = [
   'transcription:translate', 'transcription:save_blob',
   'transcription:ingest_pick_folder', 'transcription:enqueue_paths',
   'transcription:queue_status', 'transcription:queue_cancel', 'transcription:queue_clear',
-  'transcription:export',
+  'transcription:export', 'transcription:permanently_redact',
   'models:list', 'models:status', 'models:ensure_required', 'models:download_one',
   'models:reinstall', 'models:cancel', 'models:locate_binary', 'models:install_via_brew',
   'stix:export', 'stix:import', 'stix:import_pick', 'stix:runs',

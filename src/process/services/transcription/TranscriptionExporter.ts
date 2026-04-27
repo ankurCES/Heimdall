@@ -36,14 +36,28 @@ const MIME: Record<ExportFormat, string> = {
 
 /** Public entry point. Selects segments based on view, then dispatches
  *  to the right formatter. Throws if the requested view doesn't have
- *  data (e.g. translation view on an untranslated transcript). */
+ *  data (e.g. translation view on an untranslated transcript).
+ *
+ *  v1.4.13 — when `mask` is true, applies the persisted PII findings
+ *  (transcripts.pii_findings_json) to mask SSNs, credit cards, etc.
+ *  in the exported body before it hits disk. This is the analyst's
+ *  workflow for sharing a redacted SRT with a translator or attorney
+ *  without leaking PII. The original DB row is never touched —
+ *  unmasked re-exports remain available. */
 export function exportTranscript(
   row: TranscriptRow,
   format: ExportFormat,
-  view: ExportView = 'original'
+  view: ExportView = 'original',
+  options: { mask?: boolean } = {}
 ): ExportResult {
-  const segments = pickSegments(row, view)
-  const fullText = pickFullText(row, view)
+  let segments = pickSegments(row, view)
+  let fullText = pickFullText(row, view)
+
+  if (options.mask && view === 'original') {
+    const masked = applyPiiMaskFromFindings(row, segments, fullText)
+    segments = masked.segments
+    fullText = masked.fullText
+  }
 
   let body: string
   switch (format) {
@@ -56,7 +70,7 @@ export function exportTranscript(
   return {
     format,
     view,
-    filename: suggestFilename(row, format, view),
+    filename: suggestFilename(row, format, view, options.mask === true),
     mime: MIME[format],
     body
   }
@@ -191,9 +205,69 @@ function pad(n: number, w: number): string {
   return String(n).padStart(w, '0')
 }
 
-function suggestFilename(row: TranscriptRow, format: ExportFormat, view: ExportView): string {
+function suggestFilename(row: TranscriptRow, format: ExportFormat, view: ExportView, masked = false): string {
   const baseRaw = row.file_name || row.id
   const base = baseRaw.replace(/\.[a-z0-9]+$/i, '').replace(/[^A-Za-z0-9_.-]+/g, '_').slice(0, 80) || 'transcript'
-  const suffix = view === 'translation' ? '.en' : ''
-  return `${base}${suffix}.${format}`
+  const langSuffix = view === 'translation' ? '.en' : ''
+  const piiSuffix = masked ? '.redacted' : ''
+  return `${base}${langSuffix}${piiSuffix}.${format}`
+}
+
+// v1.4.13 — labels matching the renderer's PII pill, kept in sync.
+const PII_LABEL_FOR_KIND: Record<string, string> = {
+  person_name: 'NAME',
+  ssn: 'SSN',
+  phone: 'PHONE',
+  email: 'EMAIL',
+  address: 'ADDRESS',
+  credit_card: 'CARD',
+  ip_address: 'IP',
+  mac_address: 'MAC',
+  coordinate: 'GEO'
+}
+
+interface RawFinding {
+  segmentIndex: number
+  kind: string
+  offset_start: number
+  offset_end: number
+  value?: string
+}
+
+/** Apply persisted PII findings to mask each segment's text + the
+ *  joined fullText. Walks findings sorted desc-by-offset so the
+ *  splice positions don't shift mid-replacement. */
+function applyPiiMaskFromFindings(
+  row: TranscriptRow,
+  segments: TranscriptSegment[],
+  fullText: string
+): { segments: TranscriptSegment[]; fullText: string } {
+  if (!row.pii_findings_json) return { segments, fullText }
+  let findings: RawFinding[] = []
+  try { findings = JSON.parse(row.pii_findings_json) as RawFinding[] } catch { return { segments, fullText } }
+  if (!findings.length) return { segments, fullText }
+
+  // Mask each segment in place using findings bucketed by index.
+  const bySegment = new Map<number, RawFinding[]>()
+  for (const f of findings) {
+    const arr = bySegment.get(f.segmentIndex) ?? []
+    arr.push(f)
+    bySegment.set(f.segmentIndex, arr)
+  }
+  const maskedSegments: TranscriptSegment[] = segments.map((seg, idx) => {
+    const hits = bySegment.get(idx)
+    if (!hits || !hits.length) return seg
+    const sorted = hits.slice().sort((a, b) => b.offset_start - a.offset_start)
+    let text = seg.text
+    for (const h of sorted) {
+      const label = `[${PII_LABEL_FOR_KIND[h.kind] ?? 'PII'}]`
+      text = text.slice(0, h.offset_start) + label + text.slice(h.offset_end)
+    }
+    return { ...seg, text }
+  })
+  // Rebuild fullText from masked segments to keep them consistent.
+  const maskedFullText = maskedSegments.length
+    ? maskedSegments.map(s => s.text.trim()).filter(Boolean).join(' ')
+    : fullText
+  return { segments: maskedSegments, fullText: maskedFullText }
 }
