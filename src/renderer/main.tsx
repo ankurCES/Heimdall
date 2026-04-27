@@ -63,6 +63,7 @@ const BriefingsPage = lazyNamed(() => import('./pages/briefings/BriefingsPage'),
 const EntityTimelinePage = lazyNamed(() => import('./pages/entity-timeline/EntityTimelinePage'), 'EntityTimelinePage')
 const WatchlistPage = lazyNamed(() => import('./pages/watchlist/WatchlistPage'), 'WatchlistPage')
 const GraphCanvasPage = lazyNamed(() => import('./pages/graph-canvas/GraphCanvasPage'), 'GraphCanvasPage')
+const ComparisonsPage = lazyNamed(() => import('./pages/comparisons/ComparisonsPage'), 'ComparisonsPage')
 
 // Lightweight loading indicator for route transitions. Sized to match
 // the main content area and centered so swap-in feels deliberate
@@ -142,6 +143,7 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
           <Route path="/entity/:id" element={<Suspense fallback={<RouteFallback />}><EntityTimelinePage /></Suspense>} />
           <Route path="/watchlist" element={<Suspense fallback={<RouteFallback />}><WatchlistPage /></Suspense>} />
           <Route path="/graph" element={<Suspense fallback={<RouteFallback />}><GraphCanvasPage /></Suspense>} />
+          <Route path="/comparisons" element={<Suspense fallback={<RouteFallback />}><ComparisonsPage /></Suspense>} />
           <Route path="/settings" element={<Suspense fallback={<RouteFallback />}><SettingsPage /></Suspense>} />
         </Route>
       </Routes>

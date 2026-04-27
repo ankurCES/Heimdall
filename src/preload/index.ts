@@ -84,6 +84,8 @@ const testChannels = [
   'briefing:daily_list', 'briefing:daily_get', 'briefing:daily_generate_now',
   'briefing:daily_delete', 'briefing:daily_export', 'briefing:daily_email',
   'briefing:daily_diff',
+  'comparison:list', 'comparison:get', 'comparison:delete',
+  'comparison:generate_entities', 'comparison:generate_time_windows',
   'models:list', 'models:status', 'models:ensure_required', 'models:download_one',
   'models:reinstall', 'models:cancel', 'models:locate_binary', 'models:install_via_brew',
   'stix:export', 'stix:import', 'stix:import_pick', 'stix:runs',

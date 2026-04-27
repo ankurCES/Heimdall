@@ -3275,6 +3275,41 @@ const migrations: Migration[] = [
       `)
       log.info('Migration 058: graph_canvases table created (v1.8.0)')
     }
+  },
+  {
+    version: '059',
+    name: 'comparative_analyses',
+    up: (db) => {
+      // v1.9.0 — Phase 10 opener. Stores LLM-generated structured
+      // side-by-side comparisons between two analyst-chosen subjects:
+      //   kind='entities' — compare two canonical entities
+      //   kind='time_windows' — compare two periods of intel activity
+      // The 'left_subject_json' / 'right_subject_json' columns carry
+      // the kind-specific identifier (canonical_id for entities,
+      // {start, end} for time windows). body_md is the rendered
+      // markdown report; sources_json pins the underlying intel ids
+      // so the analyst can drill back even after retention purges
+      // the LLM body.
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS comparative_analyses (
+          id TEXT PRIMARY KEY,
+          name TEXT NOT NULL,
+          kind TEXT NOT NULL,
+          left_subject_json TEXT NOT NULL,
+          right_subject_json TEXT NOT NULL,
+          status TEXT NOT NULL DEFAULT 'generating',
+          model TEXT,
+          body_md TEXT,
+          sources_json TEXT,
+          error_text TEXT,
+          generated_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_comparative_analyses_kind ON comparative_analyses(kind);
+        CREATE INDEX IF NOT EXISTS idx_comparative_analyses_updated ON comparative_analyses(updated_at DESC);
+      `)
+      log.info('Migration 059: comparative_analyses table created (v1.9.0)')
+    }
   }
 ]
 

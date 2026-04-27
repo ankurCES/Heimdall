@@ -19,7 +19,7 @@ import { useParams, useNavigate, Link } from 'react-router-dom'
 import {
   Clock, FileText, Mic, Users, FileScan, ScrollText, Image as ImageIcon,
   ArrowLeft, Loader2, AlertCircle, GitMerge, Network, MapPin, List, Combine,
-  Bell, BellOff, Flame
+  Bell, BellOff, Flame, Scale
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { MapContainer, TileLayer, CircleMarker, Popup } from 'react-leaflet'
@@ -246,6 +246,32 @@ export function EntityTimelinePage() {
     })()
   }, [id])
 
+  // v1.9.0 — kick off a comparative analysis with this entity on the
+  // left and a prompted canonical id on the right. Navigates to
+  // /comparisons after submission so the analyst sees the row land.
+  const compareWithOther = async () => {
+    if (!id || !timeline) return
+    const otherId = await promptDialog({
+      label: `Compare "${timeline.summary.canonical_value}" with…`,
+      description: 'Paste the canonical id of the second entity. The LLM produces a structured side-by-side report (BLUF, shared themes, divergences, trajectory, open questions).',
+      placeholder: 'a1b2c3d4-…',
+      confirmLabel: 'Generate comparison',
+      validate: (v) => v.trim().length < 8 ? 'Canonical id looks too short' : v.trim() === id ? 'Cannot compare with itself' : null
+    })
+    if (!otherId) return
+    try {
+      await window.heimdall.invoke('comparison:generate_entities', {
+        leftCanonicalId: id,
+        rightCanonicalId: otherId.trim()
+      })
+      toast.success('Comparison submitted', { description: 'LLM is synthesising — check the Comparative Analysis page.' })
+      navigate('/comparisons')
+    } catch (err) {
+      const msg = String(err).replace(/^Error:\s*/, '')
+      toast.error('Comparison failed', { description: msg })
+    }
+  }
+
   const toggleWatch = async () => {
     if (!id) return
     setWatchLoading(true)
@@ -361,6 +387,14 @@ export function EntityTimelinePage() {
                   <BellOff className="h-3.5 w-3.5 mr-1" />
                 )}
                 {watchEnabled ? 'Watching' : 'Watch'}
+              </Button>
+              <Button
+                size="sm" variant="ghost"
+                onClick={compareWithOther}
+                className="h-8"
+                title="LLM-driven side-by-side with another entity"
+              >
+                <Scale className="h-3.5 w-3.5 mr-1" /> Compare with…
               </Button>
               <Button
                 size="sm" variant="ghost"
