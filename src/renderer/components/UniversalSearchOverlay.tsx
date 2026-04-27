@@ -11,7 +11,8 @@
 
 import { useEffect, useState, useRef, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Search, FileText, Mic, X as XIcon, Loader2, Star, Bookmark, Play, Trash2 } from 'lucide-react'
+import { Search, FileText, Mic, X as XIcon, Loader2, Star, Bookmark, Play, Trash2, Bell, BellOff } from 'lucide-react'
+import { toast } from 'sonner'
 import { cn } from '@renderer/lib/utils'
 
 interface SearchHit {
@@ -52,7 +53,7 @@ export function UniversalSearchOverlay() {
   const [loading, setLoading] = useState(false)
   const [highlight, setHighlight] = useState(0)
   const [filter, setFilter] = useState<'all' | 'intel' | 'transcript'>('all')
-  const [saved, setSaved] = useState<Array<{ id: string; name: string; query: string; kinds_filter: string | null; last_hit_count: number }>>([])
+  const [saved, setSaved] = useState<Array<{ id: string; name: string; query: string; kinds_filter: string | null; last_hit_count: number; alert_enabled: 0 | 1 }>>([])
   const [showSaved, setShowSaved] = useState(false)
   const inputRef = useRef<HTMLInputElement | null>(null)
   const navigate = useNavigate()
@@ -71,6 +72,37 @@ export function UniversalSearchOverlay() {
     return () => window.removeEventListener('keydown', onKey)
   }, [])
 
+  // v1.5.3 — surface saved-search alerts as toasts. Each new hit gets
+  // its own toast with a deep-link action so the analyst can jump
+  // straight to the report without re-running the query.
+  useEffect(() => {
+    const off = window.heimdall.on('search:alert_hit', (...args: unknown[]) => {
+      const a = args[0] as {
+        saved_search_name: string
+        hit_kind: 'intel' | 'transcript'
+        hit_id: string
+        hit_title: string
+      } | undefined
+      if (!a) return
+      toast.message(`🔔 ${a.saved_search_name}: new hit`, {
+        description: `${a.hit_kind === 'transcript' ? 'Transcript' : 'Intel'} — ${a.hit_title}`,
+        duration: 8000,
+        action: {
+          label: 'Open',
+          onClick: () => {
+            if (a.hit_kind === 'intel') {
+              navigate(`/library?report=${encodeURIComponent(a.hit_id)}`)
+            } else {
+              sessionStorage.setItem('transcripts:focusId', a.hit_id)
+              navigate('/transcripts')
+            }
+          }
+        }
+      })
+    })
+    return () => { try { off() } catch { /* */ } }
+  }, [navigate])
+
   // Auto-focus input on open + load saved searches.
   useEffect(() => {
     if (open) {
@@ -86,7 +118,7 @@ export function UniversalSearchOverlay() {
 
   const loadSaved = async () => {
     try {
-      const list = await window.heimdall.invoke('search:saved_list') as Array<{ id: string; name: string; query: string; kinds_filter: string | null; last_hit_count: number }>
+      const list = await window.heimdall.invoke('search:saved_list') as Array<{ id: string; name: string; query: string; kinds_filter: string | null; last_hit_count: number; alert_enabled: 0 | 1 }>
       setSaved(list)
     } catch { /* */ }
   }
@@ -126,6 +158,17 @@ export function UniversalSearchOverlay() {
     if (!confirm('Delete this saved search?')) return
     try {
       await window.heimdall.invoke('search:saved_delete', id)
+      await loadSaved()
+    } catch { /* */ }
+  }
+
+  const toggleAlerts = async (id: string, current: 0 | 1, e: React.MouseEvent) => {
+    e.stopPropagation()
+    try {
+      await window.heimdall.invoke('search:saved_update', {
+        id,
+        patch: { alert_enabled: current === 1 ? 0 : 1 }
+      })
       await loadSaved()
     } catch { /* */ }
   }
@@ -279,6 +322,18 @@ export function UniversalSearchOverlay() {
                   <span className="text-[10px] text-muted-foreground shrink-0">
                     {s.last_hit_count} hit{s.last_hit_count !== 1 ? 's' : ''}
                   </span>
+                  <button
+                    onClick={(e) => toggleAlerts(s.id, s.alert_enabled, e)}
+                    className={cn(
+                      'p-0.5 shrink-0',
+                      s.alert_enabled === 1
+                        ? 'text-emerald-600 dark:text-emerald-400'
+                        : 'text-muted-foreground hover:text-foreground'
+                    )}
+                    title={s.alert_enabled === 1 ? 'Alerts on (toasts when new hits arrive). Click to disable.' : 'Alerts off. Click to enable cron-driven alerts.'}
+                  >
+                    {s.alert_enabled === 1 ? <Bell className="h-3 w-3" /> : <BellOff className="h-3 w-3" />}
+                  </button>
                   <Play className="h-3 w-3 text-muted-foreground shrink-0" />
                   <button
                     onClick={(e) => deleteSaved(s.id, e)}

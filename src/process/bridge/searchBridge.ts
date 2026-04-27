@@ -22,5 +22,11 @@ export function registerSearchBridge(): void {
   })
   ipcMain.handle('search:saved_run', (_evt, args: { id: string; limit?: number }) => savedSearch.run(args.id, args.limit ?? 50))
 
+  // v1.5.3 — manual one-shot trigger for the alert cron (Settings UI button)
+  ipcMain.handle('search:alerts_run_now', async () => {
+    const { savedSearchAlertCron } = await import('../services/search/SavedSearchAlertCron')
+    return await savedSearchAlertCron.runOnce()
+  })
+
   log.info('search bridge registered')
 }

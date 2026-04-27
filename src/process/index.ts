@@ -200,6 +200,14 @@ async function initializeDeferred(): Promise<void> {
     transcriptionRetention.start()
   } catch (err) { log.warn(`Transcription retention init failed: ${err}`) }
 
+  // v1.5.3 — schedule cron-driven alerts for saved searches with
+  // alert_enabled. Idempotent; per-tick cap of 5 new alerts per
+  // search; first-run records cursor without emitting (no flood).
+  try {
+    const { savedSearchAlertCron } = await import('./services/search/SavedSearchAlertCron')
+    savedSearchAlertCron.start()
+  } catch (err) { log.warn(`Saved-search alert cron init failed: ${err}`) }
+
   // Load enabled sources from DB and schedule them
   await collectorManager.loadFromDatabase()
 

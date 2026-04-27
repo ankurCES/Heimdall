@@ -75,7 +75,7 @@ const testChannels = [
   'transcription:engine_stats', 'transcription:purge_now',
   'search:universal',
   'search:saved_list', 'search:saved_create', 'search:saved_update',
-  'search:saved_delete', 'search:saved_run',
+  'search:saved_delete', 'search:saved_run', 'search:alerts_run_now',
   'models:list', 'models:status', 'models:ensure_required', 'models:download_one',
   'models:reinstall', 'models:cancel', 'models:locate_binary', 'models:install_via_brew',
   'stix:export', 'stix:import', 'stix:import_pick', 'stix:runs',
@@ -178,7 +178,8 @@ const alertEvents = ['alert:incoming']
 const syncEvents = ['sync:progress', 'enrichment:progress', 'watch:hits', 'markets:backfillProgress']
 const modelsEvents = ['models:status_update']
 const transcriptionEvents = ['transcription:queue_progress', 'transcription:chunk_progress']
-const allowedEvents = [...Object.values(IPC_EVENTS), ...chatEvents, ...syncEvents, ...darkwebEvents, ...telegramIntelEvents, ...workflowEvents, ...reportsEvents, ...alertEvents, ...modelsEvents, ...transcriptionEvents]
+const searchEvents = ['search:alert_hit']
+const allowedEvents = [...Object.values(IPC_EVENTS), ...chatEvents, ...syncEvents, ...darkwebEvents, ...telegramIntelEvents, ...workflowEvents, ...reportsEvents, ...alertEvents, ...modelsEvents, ...transcriptionEvents, ...searchEvents]
 
 const api = {
   invoke: (channel: string, ...args: unknown[]): Promise<unknown> => {
