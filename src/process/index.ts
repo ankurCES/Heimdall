@@ -281,6 +281,122 @@ async function initializeDeferred(): Promise<void> {
     } catch (err) { log.error(`calibration.reliability failed: ${err}`) }
   })
 
+  // v1.2 — Sentinel + Service Registry. Each long-running service registers
+  // itself so the supervisor can poll health, log state transitions, and
+  // auto-restart on failure. We register the major services here directly
+  // (rather than scattering registration calls) so the wiring is auditable
+  // in one place.
+  try {
+    const { serviceRegistry } = await import('./services/sentinel/ServiceRegistry')
+    const { sentinelSupervisor } = await import('./services/sentinel/SentinelSupervisor')
+
+    serviceRegistry.register({
+      id: 'collector-manager',
+      displayName: 'Collector Manager',
+      category: 'collector',
+      autoRestart: true,
+      healthCheck: () => {
+        const status = collectorManager.getStatus?.() ?? []
+        const total = status.length
+        const running = status.filter((s) => s.running).length
+        if (total === 0) return { state: 'stopped' as const, detail: 'no collectors registered' }
+        const ratio = running / total
+        if (ratio < 0.5) {
+          return { state: 'degraded' as const, detail: `${running}/${total} collectors running`, metadata: { total, running } }
+        }
+        return { state: 'running' as const, metadata: { total, running } }
+      },
+      restart: async () => { await collectorManager.loadFromDatabase() }
+    })
+
+    serviceRegistry.register({
+      id: 'enrichment-orchestrator',
+      displayName: 'Enrichment Orchestrator',
+      category: 'enrichment',
+      autoRestart: true,
+      healthCheck: () => {
+        const isRunning = (enrichmentOrchestrator as { isRunning?: () => boolean }).isRunning?.() ?? true
+        return isRunning ? { state: 'running' as const } : { state: 'stopped' as const }
+      },
+      restart: async () => { enrichmentOrchestrator.start() }
+    })
+
+    serviceRegistry.register({
+      id: 'intel-pipeline',
+      displayName: 'Vector Pipeline',
+      category: 'enrichment',
+      autoRestart: true,
+      healthCheck: () => ({ state: 'running' as const }),
+      restart: async () => { await intelPipeline.start() }
+    })
+
+    serviceRegistry.register({
+      id: 'agent-orchestrator',
+      displayName: 'Agent Orchestrator',
+      category: 'enrichment',
+      autoRestart: true,
+      healthCheck: () => ({ state: 'running' as const }),
+      restart: async () => { agentOrchestrator.start() }
+    })
+
+    serviceRegistry.register({
+      id: 'cron-scheduler',
+      displayName: 'Cron Scheduler',
+      category: 'infrastructure',
+      autoRestart: false,    // restart would require recreating every job
+      healthCheck: () => {
+        const count = (cronService as { jobCount?: () => number }).jobCount?.() ?? 0
+        return count > 0 ? { state: 'running' as const, metadata: { jobs: count } } : { state: 'degraded' as const, detail: 'no scheduled jobs' }
+      }
+    })
+
+    serviceRegistry.register({
+      id: 'indicator-tracker',
+      displayName: 'I&W Indicator Tracker',
+      category: 'calibration',
+      autoRestart: true,
+      healthCheck: async () => {
+        const { indicatorTrackerService } = await import('./services/calibration/IndicatorTrackerService')
+        return { state: 'running' as const, metadata: indicatorTrackerService.stats() }
+      },
+      restart: async () => {
+        const { indicatorTrackerService } = await import('./services/calibration/IndicatorTrackerService')
+        indicatorTrackerService.stop()
+        indicatorTrackerService.start()
+      }
+    })
+
+    serviceRegistry.register({
+      id: 'auto-revision',
+      displayName: 'Auto-Revision Detector',
+      category: 'calibration',
+      autoRestart: true,
+      healthCheck: async () => {
+        const { autoRevisionService } = await import('./services/calibration/AutoRevisionService')
+        return { state: 'running' as const, metadata: { pending: autoRevisionService.pendingCount() } }
+      },
+      restart: async () => {
+        const { autoRevisionService } = await import('./services/calibration/AutoRevisionService')
+        autoRevisionService.stop()
+        autoRevisionService.start()
+      }
+    })
+
+    serviceRegistry.register({
+      id: 'resource-manager',
+      displayName: 'Resource Manager',
+      category: 'infrastructure',
+      autoRestart: true,
+      healthCheck: () => ({ state: 'running' as const }),
+      restart: async () => { resourceManager.stop(); resourceManager.start() }
+    })
+
+    sentinelSupervisor.start()
+    log.info(`Sentinel: registered ${serviceRegistry.list().length} services and started supervisor`)
+  } catch (err) {
+    log.error(`Sentinel start failed: ${err}`)
+  }
+
   log.info('Deferred initialization complete')
 }
 
@@ -375,6 +491,11 @@ if (!gotTheLock) {
     if (cleanedUp) return
     cleanedUp = true
     log.info('Heimdall shutting down — running cleanup')
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const sup = require('./services/sentinel/SentinelSupervisor') as typeof import('./services/sentinel/SentinelSupervisor')
+      sup.sentinelSupervisor.stop()
+    } catch (err) { log.debug(`sentinelSupervisor.stop: ${err}`) }
     try { resourceManager.stop() } catch (err) { log.debug(`resourceManager.stop: ${err}`) }
     try { enrichmentOrchestrator.stop() } catch (err) { log.debug(`enrichmentOrchestrator.stop: ${err}`) }
     try { intelPipeline.stop() } catch (err) { log.debug(`intelPipeline.stop: ${err}`) }

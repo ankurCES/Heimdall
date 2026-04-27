@@ -43,6 +43,7 @@ import { registerTrainingBridge } from './trainingBridge'
 import { registerReportsBridge } from './reportsBridge'
 import { registerCasesBridge } from './casesBridge'
 import { registerCalibrationBridge } from './calibrationBridge'
+import { registerSentinelBridge } from './sentinelBridge'
 import log from 'electron-log'
 
 export function registerAllBridges(): void {
@@ -91,5 +92,6 @@ export function registerAllBridges(): void {
   registerReportsBridge()
   registerCasesBridge()
   registerCalibrationBridge()
+  registerSentinelBridge()
   log.info('All IPC bridges registered')
 }

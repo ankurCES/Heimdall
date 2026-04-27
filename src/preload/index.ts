@@ -137,7 +137,11 @@ const testChannels = [
   'revisions:pending', 'revisions:pending_count',
   'revisions:acknowledge', 'revisions:dismiss', 'revisions:run_now',
   'ethics:unresolved', 'ethics:flags_for_report', 'ethics:resolve',
-  'ethics:stats', 'ethics:rescreen_report'
+  'ethics:stats', 'ethics:rescreen_report',
+  'sentinel:services', 'sentinel:restart_history', 'sentinel:restart_service',
+  'sentinel:enable_auto_restart', 'sentinel:poll_now', 'sentinel:snapshots',
+  'governor:stats', 'governor:usage_by_model', 'governor:usage_by_task',
+  'governor:update_config'
 ]
 const allowedChannels = [...Object.values(IPC_CHANNELS), ...testChannels]
 const chatEvents = ['chat:chunk', 'chat:done', 'chat:error', 'chat:planRefined']

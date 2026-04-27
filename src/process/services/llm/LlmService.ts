@@ -379,8 +379,10 @@ export class LlmService {
     })
   }
 
-  // Track token usage (estimate based on char count / 4)
-  private trackUsage(connName: string, model: string, messages: ChatMessage[], response: string, mode: ChatMode): void {
+  // Track token usage (estimate based on char count / 4) — writes to both
+  // the legacy token_usage table AND the new llm_token_usage table that
+  // ResourceGovernor reads for budget enforcement.
+  private trackUsage(connName: string, model: string, messages: ChatMessage[], response: string, mode: ChatMode, taskClass?: string, durationMs?: number): void {
     try {
       const promptChars = messages.reduce((sum, m) => sum + m.content.length, 0)
       const completionChars = response.length
@@ -395,6 +397,17 @@ export class LlmService {
         promptTokens, completionTokens, promptTokens + completionTokens,
         mode, timestamp()
       )
+
+      // ResourceGovernor ledger (lazy-loaded — present from v1.2 onward)
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        const rg = require('../sentinel/ResourceGovernor') as typeof import('../sentinel/ResourceGovernor')
+        rg.resourceGovernor.recordLlmUsage({
+          connectionName: connName, model, taskClass: taskClass ?? mode,
+          promptTokens, completionTokens, durationMs: durationMs ?? 0,
+          succeeded: true
+        })
+      } catch { /* governor not available in this context */ }
     } catch (err) {
       log.debug(`Token tracking failed: ${err}`)
     }

@@ -2490,6 +2490,107 @@ const migrations: Migration[] = [
       `)
       log.info('Migration 042: v1.1 living-report tables created (12 tables, 1 FTS index)')
     }
+  },
+  {
+    version: '043',
+    name: 'v1_2_autonomous_ops',
+    up: (db) => {
+      // ─────────────────────────────────────────────────────────────────
+      // v1.2 "Autonomous Operations" — service health tracking, restart
+      // history, and resource-governance ledger.
+      //
+      // Heimdall is meant to run unsupervised in agency environments. The
+      // SentinelSupervisor polls every registered service every 30s, logs
+      // state transitions, and triggers automatic restart on failure with
+      // bounded retry. The ResourceGovernor consults llm_token_usage to
+      // enforce per-hour budgets across model providers.
+      // ─────────────────────────────────────────────────────────────────
+
+      db.exec(`
+        -- Per-service running state. One row per registered service;
+        -- updated by Sentinel on every poll cycle.
+        CREATE TABLE IF NOT EXISTS service_health (
+          service_id TEXT PRIMARY KEY,
+          display_name TEXT NOT NULL,
+          category TEXT NOT NULL,                 -- collector | enrichment | llm | sync | infrastructure
+          state TEXT NOT NULL DEFAULT 'unknown',  -- running | degraded | failed | stopped | unknown
+          last_check_at INTEGER,
+          last_state_change_at INTEGER,
+          last_error TEXT,
+          consecutive_failures INTEGER NOT NULL DEFAULT 0,
+          restart_count INTEGER NOT NULL DEFAULT 0,
+          restart_disabled INTEGER NOT NULL DEFAULT 0,  -- 1 = circuit-broken, manual revive only
+          uptime_started_at INTEGER,
+          metadata_json TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_sh_state ON service_health(state);
+        CREATE INDEX IF NOT EXISTS idx_sh_category ON service_health(category);
+
+        -- Append-only restart log.
+        CREATE TABLE IF NOT EXISTS service_restart_history (
+          id TEXT PRIMARY KEY,
+          service_id TEXT NOT NULL,
+          triggered_by TEXT NOT NULL,             -- sentinel | manual | health-check
+          previous_state TEXT,
+          reason TEXT,
+          succeeded INTEGER NOT NULL DEFAULT 0,
+          duration_ms INTEGER,
+          created_at INTEGER NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_srh_service ON service_restart_history(service_id, created_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_srh_created ON service_restart_history(created_at DESC);
+
+        -- Per-call LLM token-usage ledger. Read by ResourceGovernor to
+        -- enforce hourly budgets. Aggregated rows are deleted by the
+        -- nightly retention cron (keep 30 days).
+        CREATE TABLE IF NOT EXISTS llm_token_usage (
+          id TEXT PRIMARY KEY,
+          connection_id TEXT,
+          connection_name TEXT,
+          model TEXT,
+          task_class TEXT,                        -- planner | analysis | vision | etc.
+          prompt_tokens INTEGER NOT NULL DEFAULT 0,
+          completion_tokens INTEGER NOT NULL DEFAULT 0,
+          total_tokens INTEGER NOT NULL DEFAULT 0,
+          duration_ms INTEGER,
+          succeeded INTEGER NOT NULL DEFAULT 1,
+          created_at INTEGER NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_ltu_created ON llm_token_usage(created_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_ltu_model ON llm_token_usage(model, created_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_ltu_task ON llm_token_usage(task_class, created_at DESC);
+
+        -- Resource-governance config (single-row table).
+        CREATE TABLE IF NOT EXISTS resource_governance_config (
+          id INTEGER PRIMARY KEY CHECK (id = 1),
+          max_llm_tokens_per_hour INTEGER NOT NULL DEFAULT 1000000,
+          max_concurrent_fetches INTEGER NOT NULL DEFAULT 6,
+          max_memory_mb INTEGER NOT NULL DEFAULT 4096,
+          max_disk_gb INTEGER NOT NULL DEFAULT 50,
+          enforce_budget INTEGER NOT NULL DEFAULT 1,
+          updated_at INTEGER NOT NULL
+        );
+        INSERT OR IGNORE INTO resource_governance_config
+          (id, max_llm_tokens_per_hour, max_concurrent_fetches, max_memory_mb, max_disk_gb, enforce_budget, updated_at)
+        VALUES (1, 1000000, 6, 4096, 50, 1, ${Date.now()});
+
+        -- Per-poll snapshot for the Health Dashboard's recent-history chart.
+        -- Bounded retention (last 24h, sampled every 30s) — purged nightly.
+        CREATE TABLE IF NOT EXISTS health_snapshots (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          taken_at INTEGER NOT NULL,
+          services_running INTEGER NOT NULL DEFAULT 0,
+          services_degraded INTEGER NOT NULL DEFAULT 0,
+          services_failed INTEGER NOT NULL DEFAULT 0,
+          collectors_pending INTEGER NOT NULL DEFAULT 0,
+          enrichment_queue_depth INTEGER NOT NULL DEFAULT 0,
+          memory_mb INTEGER,
+          llm_tokens_last_hour INTEGER NOT NULL DEFAULT 0
+        );
+        CREATE INDEX IF NOT EXISTS idx_hs_taken ON health_snapshots(taken_at DESC);
+      `)
+      log.info('Migration 043: v1.2 autonomous-ops tables created (service_health, restart_history, llm_token_usage, resource_governance_config, health_snapshots)')
+    }
   }
 ]
 
