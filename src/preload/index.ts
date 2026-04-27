@@ -69,6 +69,9 @@ const testChannels = [
   'transcription:ingest_file', 'transcription:ingest_pick', 'transcription:list',
   'transcription:get', 'transcription:delete', 'transcription:test_engine',
   'transcription:translate', 'transcription:save_blob',
+  'transcription:ingest_pick_folder', 'transcription:enqueue_paths',
+  'transcription:queue_status', 'transcription:queue_cancel', 'transcription:queue_clear',
+  'transcription:export',
   'models:list', 'models:status', 'models:ensure_required', 'models:download_one',
   'models:reinstall', 'models:cancel', 'models:locate_binary', 'models:install_via_brew',
   'stix:export', 'stix:import', 'stix:import_pick', 'stix:runs',
@@ -170,7 +173,8 @@ const reportsEvents = ['reports:promotion_progress']
 const alertEvents = ['alert:incoming']
 const syncEvents = ['sync:progress', 'enrichment:progress', 'watch:hits', 'markets:backfillProgress']
 const modelsEvents = ['models:status_update']
-const allowedEvents = [...Object.values(IPC_EVENTS), ...chatEvents, ...syncEvents, ...darkwebEvents, ...telegramIntelEvents, ...workflowEvents, ...reportsEvents, ...alertEvents, ...modelsEvents]
+const transcriptionEvents = ['transcription:queue_progress']
+const allowedEvents = [...Object.values(IPC_EVENTS), ...chatEvents, ...syncEvents, ...darkwebEvents, ...telegramIntelEvents, ...workflowEvents, ...reportsEvents, ...alertEvents, ...modelsEvents, ...transcriptionEvents]
 
 const api = {
   invoke: (channel: string, ...args: unknown[]): Promise<unknown> => {

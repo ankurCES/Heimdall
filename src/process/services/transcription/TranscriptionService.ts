@@ -178,7 +178,12 @@ export class TranscriptionService {
 
     // Whisper.cpp accepts most formats directly, but always-WAV resampling
     // gives the best compatibility across engines. Try ffmpeg if present.
-    const audioPath = await maybeTranscodeToWav(filePath, isVideo)
+    // v1.4.8 — also pass through an FFT denoiser (-af afftdn) when the
+    // analyst opts in. Useful for noisy phone recordings, field captures,
+    // etc.; off by default because aggressive denoise can clip sibilants
+    // on already-clean studio audio.
+    const denoise = settingsService.get<boolean>('transcription.denoise') === true
+    const audioPath = await maybeTranscodeToWav(filePath, isVideo, denoise)
 
     const result = await this.transcribe(audioPath, opts)
 
@@ -548,10 +553,15 @@ function guessMime(ext: string): string | null {
 }
 
 /** Try ffmpeg → 16kHz mono WAV for max engine compatibility.
- *  Returns the original path if ffmpeg is missing or transcode fails. */
-async function maybeTranscodeToWav(filePath: string, isVideo: boolean): Promise<string> {
-  // Skip transcode for already-WAV audio
-  if (!isVideo && filePath.toLowerCase().endsWith('.wav')) return filePath
+ *  Returns the original path if ffmpeg is missing or transcode fails.
+ *  When `denoise` is true, layers ffmpeg's afftdn FFT denoiser (~12 dB
+ *  noise floor reduction) which helps phone/field recordings without
+ *  killing throughput — denoise runs in the same ffmpeg pass as the
+ *  resample so there's no extra disk I/O. */
+async function maybeTranscodeToWav(filePath: string, isVideo: boolean, denoise = false): Promise<string> {
+  // Skip transcode for already-WAV audio (unless denoise is requested,
+  // in which case we still want a fresh pass to apply the filter).
+  if (!isVideo && !denoise && filePath.toLowerCase().endsWith('.wav')) return filePath
   const ffmpeg = await which('ffmpeg')
   if (!ffmpeg) {
     log.debug('transcription: ffmpeg not in PATH; passing original file to engine')
@@ -559,8 +569,14 @@ async function maybeTranscodeToWav(filePath: string, isVideo: boolean): Promise<
   }
   const tmpDir = app.getPath('temp')
   const out = path.join(tmpDir, `heimdall-tx-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.wav`)
+  // Filter chain: highpass to drop sub-80Hz rumble (HVAC, mic handling),
+  // then afftdn for FFT denoise. afftdn defaults are conservative and
+  // safe on most voice recordings.
+  const args = ['-y', '-i', filePath, '-ac', '1', '-ar', '16000', '-vn']
+  if (denoise) args.push('-af', 'highpass=f=80,afftdn=nf=-25')
+  args.push(out)
   try {
-    await runChild(ffmpeg, ['-y', '-i', filePath, '-ac', '1', '-ar', '16000', '-vn', out])
+    await runChild(ffmpeg, args)
     return out
   } catch (err) {
     log.debug(`transcription: ffmpeg transcode failed (${(err as Error).message}); using original`)

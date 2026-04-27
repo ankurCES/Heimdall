@@ -5,9 +5,55 @@
 
 import { ipcMain, dialog, BrowserWindow, app } from 'electron'
 import path from 'path'
-import { mkdir, writeFile } from 'fs/promises'
+import { mkdir, writeFile, readdir, stat } from 'fs/promises'
 import log from 'electron-log'
 import { transcriptionService } from '../services/transcription/TranscriptionService'
+import { transcriptionQueue } from '../services/transcription/TranscriptionQueueService'
+import { exportTranscript, type ExportFormat, type ExportView } from '../services/transcription/TranscriptionExporter'
+
+// File extensions the queue is willing to ingest. Mirrors the picker
+// filter so a recursive folder walk can't accidentally feed an
+// unsupported PDF/zip/etc. to whisper.cpp.
+const SUPPORTED_EXTS = new Set([
+  '.mp3', '.wav', '.m4a', '.flac', '.ogg', '.opus', '.aac', '.webm',
+  '.mp4', '.mkv', '.mov', '.avi', '.m4v', '.mpeg', '.mpg'
+])
+
+/** Recursively collect supported audio/video files from a directory.
+ *  Skips hidden files and node_modules / .git / __MACOSX dot-dirs. */
+async function walkForMedia(root: string, depthLimit = 8): Promise<string[]> {
+  const out: string[] = []
+  const skip = new Set(['node_modules', '.git', '__MACOSX', '.DS_Store'])
+  async function recurse(dir: string, depth: number): Promise<void> {
+    if (depth > depthLimit) return
+    let entries: string[] = []
+    try { entries = await readdir(dir) } catch { return }
+    for (const name of entries) {
+      if (name.startsWith('.') && name !== '.') continue
+      if (skip.has(name)) continue
+      const full = path.join(dir, name)
+      let st
+      try { st = await stat(full) } catch { continue }
+      if (st.isDirectory()) {
+        await recurse(full, depth + 1)
+      } else if (st.isFile()) {
+        const ext = path.extname(name).toLowerCase()
+        if (SUPPORTED_EXTS.has(ext)) out.push(full)
+      }
+    }
+  }
+  await recurse(root, 0)
+  return out
+}
+
+function broadcast(channel: string, payload: unknown): void {
+  for (const win of BrowserWindow.getAllWindows()) {
+    if (win.isDestroyed()) continue
+    try { win.webContents.send(channel, payload) } catch { /* */ }
+  }
+}
+
+let queueListenerWired = false
 
 function validatePath(p: string): string {
   const resolved = path.resolve(p)
@@ -19,6 +65,13 @@ function validatePath(p: string): string {
 }
 
 export function registerTranscriptionBridge(): void {
+  if (!queueListenerWired) {
+    transcriptionQueue.on('queue_progress', (snapshot) => {
+      broadcast('transcription:queue_progress', snapshot)
+    })
+    queueListenerWired = true
+  }
+
   ipcMain.handle('transcription:ingest_file', async (_evt, args: { path: string; report_id?: string | null; language?: string }) => {
     return await transcriptionService.ingestFile(validatePath(args.path), {
       reportId: args.report_id ?? null,
@@ -67,6 +120,79 @@ export function registerTranscriptionBridge(): void {
   ipcMain.handle('transcription:translate', (_evt, id: string) =>
     transcriptionService.translate(id)
   )
+
+  // v1.4.8 — bulk ingest. Pick a folder, walk it recursively, queue
+  // every supported audio/video file. Whisper.cpp already saturates
+  // every CPU core, so the queue runs serially (concurrency=1) for
+  // best end-to-end throughput and clean "X of Y" progress UX.
+  ipcMain.handle('transcription:ingest_pick_folder', async () => {
+    const win = BrowserWindow.getFocusedWindow()
+    const res = await dialog.showOpenDialog(win ?? undefined!, {
+      title: 'Select a folder to bulk-transcribe',
+      properties: ['openDirectory']
+    })
+    if (res.canceled || res.filePaths.length === 0) return { ok: false, queued: 0, scanned: 0, root: null }
+    const root = res.filePaths[0]
+    const found = await walkForMedia(root)
+    const queued = transcriptionQueue.enqueue(found)
+    log.info(`transcription: bulk ingest from ${root} — found ${found.length}, queued ${queued}`)
+    return { ok: true, queued, scanned: found.length, root }
+  })
+
+  // Direct enqueue from a list of paths (drag-drop of multiple files
+  // from the renderer hits this; ingest_file is the single-file path).
+  ipcMain.handle('transcription:enqueue_paths', (_evt, args: { paths: string[] }) => {
+    const paths = (args?.paths ?? []).filter((p) => SUPPORTED_EXTS.has(path.extname(p).toLowerCase()))
+    return { ok: true, queued: transcriptionQueue.enqueue(paths) }
+  })
+
+  ipcMain.handle('transcription:queue_status', () => transcriptionQueue.snapshot())
+
+  ipcMain.handle('transcription:queue_cancel', (_evt, args?: { path?: string }) => {
+    transcriptionQueue.cancel(args?.path)
+    return { ok: true }
+  })
+
+  ipcMain.handle('transcription:queue_clear', () => {
+    transcriptionQueue.clear()
+    return { ok: true }
+  })
+
+  // v1.4.9 — export a transcript as SRT / VTT / JSON / plain text.
+  // The renderer asks for `view: 'original' | 'translation'` and a
+  // format; the exporter produces both the body and a suggested
+  // filename. We open a save dialog seeded with that filename and
+  // write the file to whatever the analyst picks (or just return the
+  // body to the renderer when no save path is wanted).
+  ipcMain.handle('transcription:export', async (_evt, args: {
+    id: string
+    format: ExportFormat
+    view?: ExportView
+    save?: boolean   // when true, opens a Save dialog and writes to disk
+  }) => {
+    const row = transcriptionService.get(args.id)
+    if (!row) throw new Error(`Transcript not found: ${args.id}`)
+
+    const result = exportTranscript(row, args.format, args.view ?? 'original')
+
+    if (args.save !== false) {
+      const win = BrowserWindow.getFocusedWindow()
+      const dialogResult = await dialog.showSaveDialog(win ?? undefined!, {
+        title: `Export transcript as ${args.format.toUpperCase()}`,
+        defaultPath: result.filename,
+        filters: [{ name: args.format.toUpperCase(), extensions: [args.format] }]
+      })
+      if (dialogResult.canceled || !dialogResult.filePath) {
+        return { ok: false, cancelled: true, body: result.body, filename: result.filename, mime: result.mime }
+      }
+      await writeFile(dialogResult.filePath, result.body, 'utf-8')
+      log.info(`transcription: exported ${args.id} as ${args.format} → ${dialogResult.filePath} (${result.body.length} chars)`)
+      return { ok: true, path: dialogResult.filePath, filename: result.filename, mime: result.mime, bytes: result.body.length }
+    }
+
+    // body-only mode: renderer wants the string for clipboard / preview
+    return { ok: true, body: result.body, filename: result.filename, mime: result.mime }
+  })
 
   // v1.4.7 — receive an ArrayBuffer from the renderer's MediaRecorder,
   // write it to <userData>/recordings/, then immediately ingest the

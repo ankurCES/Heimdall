@@ -21,8 +21,12 @@ import {
   Mic, Upload, Loader2, Trash2, Clock, Languages, Cpu, FileText, Search,
   AlertCircle, CheckCircle2, RefreshCw, Link as LinkIcon, Settings as SettingsIcon,
   Play, Pause, SkipBack, SkipForward, Volume2, VolumeX, Languages as LanguagesIcon,
-  Square, Circle
+  Square, Circle, FolderOpen, X as XIcon, Download, ChevronDown
 } from 'lucide-react'
+import {
+  DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem,
+  DropdownMenuLabel, DropdownMenuSeparator
+} from '@renderer/components/ui/dropdown-menu'
 import { Link } from 'react-router-dom'
 import { Button } from '@renderer/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@renderer/components/ui/card'
@@ -521,11 +525,12 @@ function AudioPlayer({ transcriptId, mime, fallbackDurationMs, onTimeUpdate, ref
   )
 }
 
-function TranscriptDetail({ transcript, onDelete, onRetranscribe, onTranslate, busy, translating }: {
+function TranscriptDetail({ transcript, onDelete, onRetranscribe, onTranslate, onExport, busy, translating }: {
   transcript: Transcript
   onDelete: () => void
   onRetranscribe: () => void
   onTranslate: () => void
+  onExport: (format: 'srt' | 'vtt' | 'json' | 'text', view: 'original' | 'translation') => void
   busy: boolean
   translating: boolean
 }) {
@@ -620,6 +625,36 @@ function TranscriptDetail({ transcript, onDelete, onRetranscribe, onTranslate, b
                 </Button>
               </Link>
             )}
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button size="sm" variant="outline" className="h-8">
+                  <Download className="h-3.5 w-3.5 mr-1" /> Export
+                  <ChevronDown className="h-3 w-3 ml-1" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-56">
+                <DropdownMenuLabel className="text-[11px] text-muted-foreground font-normal">
+                  Exporting from {view === 'translation' ? 'Translation (English)' : `Original${transcript.language ? ` (${transcript.language})` : ''}`}
+                </DropdownMenuLabel>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem onSelect={() => onExport('srt', view)}>
+                  <FileText className="h-3.5 w-3.5 mr-2" /> SubRip (.srt)
+                  <span className="ml-auto text-[10px] text-muted-foreground">subtitles</span>
+                </DropdownMenuItem>
+                <DropdownMenuItem onSelect={() => onExport('vtt', view)}>
+                  <FileText className="h-3.5 w-3.5 mr-2" /> WebVTT (.vtt)
+                  <span className="ml-auto text-[10px] text-muted-foreground">web</span>
+                </DropdownMenuItem>
+                <DropdownMenuItem onSelect={() => onExport('json', view)}>
+                  <FileText className="h-3.5 w-3.5 mr-2" /> JSON
+                  <span className="ml-auto text-[10px] text-muted-foreground">lossless</span>
+                </DropdownMenuItem>
+                <DropdownMenuItem onSelect={() => onExport('text', view)}>
+                  <FileText className="h-3.5 w-3.5 mr-2" /> Plain text
+                  <span className="ml-auto text-[10px] text-muted-foreground">no times</span>
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
             <Button size="sm" variant="ghost" onClick={onRetranscribe} disabled={busy} className="h-8">
               <RefreshCw className={cn('h-3.5 w-3.5 mr-1', busy && 'animate-spin')} /> Re-transcribe
             </Button>
@@ -772,6 +807,91 @@ function TranscriptDetail({ transcript, onDelete, onRetranscribe, onTranslate, b
   )
 }
 
+// v1.4.8 — bulk ingest queue chrome. Renders nothing when the queue is
+// empty; otherwise shows a compact strip with current item, X of Y
+// progress, and cancel/clear controls.
+interface QueueItem {
+  path: string
+  fileName: string
+  state: 'pending' | 'running' | 'done' | 'error' | 'cancelled'
+  enqueuedAt: number
+  startedAt: number | null
+  finishedAt: number | null
+  transcriptId: string | null
+  error: string | null
+}
+interface QueueSnapshot {
+  items: QueueItem[]
+  total: number
+  pending: number
+  running: number
+  done: number
+  errored: number
+  cancelled: number
+  lastTranscriptId: string | null
+}
+
+function QueueStrip({ snapshot, onCancelAll, onClear }: {
+  snapshot: QueueSnapshot
+  onCancelAll: () => void
+  onClear: () => void
+}) {
+  const active = snapshot.items.find((i) => i.state === 'running')
+  const completed = snapshot.done + snapshot.errored + snapshot.cancelled
+  const totalActive = snapshot.total
+  if (totalActive === 0) return null
+  const allDone = snapshot.pending === 0 && snapshot.running === 0
+  const progressPct = totalActive > 0 ? Math.round((completed / totalActive) * 100) : 0
+
+  return (
+    <div className={cn(
+      'border rounded-md p-3 space-y-2',
+      allDone ? 'border-emerald-500/30 bg-emerald-500/5' : 'border-primary/30 bg-primary/5'
+    )}>
+      <div className="flex items-center justify-between gap-3">
+        <div className="flex items-center gap-2 min-w-0">
+          {allDone ? (
+            <CheckCircle2 className="h-4 w-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
+          ) : (
+            <Loader2 className="h-4 w-4 text-primary animate-spin shrink-0" />
+          )}
+          <div className="min-w-0">
+            <div className="text-sm font-medium truncate">
+              {allDone
+                ? `Bulk ingest finished — ${snapshot.done} done${snapshot.errored ? `, ${snapshot.errored} failed` : ''}${snapshot.cancelled ? `, ${snapshot.cancelled} cancelled` : ''}`
+                : active
+                  ? `Transcribing ${active.fileName}`
+                  : `Queue ready — ${snapshot.pending} pending`}
+            </div>
+            <div className="text-xs text-muted-foreground">
+              {completed} of {totalActive} ({progressPct}%)
+              {snapshot.errored > 0 && <span className="text-red-600 dark:text-red-400"> · {snapshot.errored} error{snapshot.errored > 1 ? 's' : ''}</span>}
+            </div>
+          </div>
+        </div>
+        <div className="flex items-center gap-1 shrink-0">
+          {snapshot.pending > 0 && (
+            <Button size="sm" variant="ghost" onClick={onCancelAll} className="h-7">
+              <XIcon className="h-3.5 w-3.5 mr-1" /> Cancel pending
+            </Button>
+          )}
+          {allDone && (
+            <Button size="sm" variant="ghost" onClick={onClear} className="h-7">
+              Clear
+            </Button>
+          )}
+        </div>
+      </div>
+      <div className="h-1 w-full bg-muted rounded-full overflow-hidden">
+        <div
+          className={cn('h-full transition-all duration-300', allDone ? 'bg-emerald-500' : 'bg-primary')}
+          style={{ width: `${Math.max(2, progressPct)}%` }}
+        />
+      </div>
+    </div>
+  )
+}
+
 export function TranscriptsPage() {
   const [transcripts, setTranscripts] = useState<Transcript[]>([])
   const [selected, setSelected] = useState<Transcript | null>(null)
@@ -780,6 +900,8 @@ export function TranscriptsPage() {
   const [translating, setTranslating] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [engine, setEngine] = useState<EngineStatus | null>(null)
+  const [queue, setQueue] = useState<QueueSnapshot | null>(null)
+  const lastQueueTranscriptId = useRef<string | null>(null)
   const ingestQueue = useRef<string[]>([])
 
   const load = useCallback(async () => {
@@ -803,6 +925,45 @@ export function TranscriptsPage() {
   }, [])
 
   useEffect(() => { void load(); void checkEngine() }, [load, checkEngine])
+
+  // v1.4.8 — bulk-ingest queue subscription. Initial fetch + push event
+  // for live progress. When the queue's most-recently-finished transcript
+  // changes, refresh the list so the new row appears in the left pane.
+  useEffect(() => {
+    void (async () => {
+      try {
+        const snap = await window.heimdall.invoke('transcription:queue_status') as QueueSnapshot
+        setQueue(snap)
+      } catch { /* */ }
+    })()
+    const off = window.heimdall.on('transcription:queue_progress', (...args: unknown[]) => {
+      const snap = args[0] as QueueSnapshot
+      setQueue(snap)
+      if (snap.lastTranscriptId && snap.lastTranscriptId !== lastQueueTranscriptId.current) {
+        lastQueueTranscriptId.current = snap.lastTranscriptId
+        void load()
+      }
+    })
+    return () => { try { off() } catch { /* */ } }
+  }, [load])
+
+  const bulkIngest = async () => {
+    setError(null)
+    try {
+      const r = await window.heimdall.invoke('transcription:ingest_pick_folder') as { ok: boolean; queued: number; scanned: number; root: string | null }
+      if (r.ok && r.scanned === 0) {
+        setError(`No supported audio/video files found in ${r.root}.`)
+      }
+    } catch (err) {
+      setError(String(err).replace(/^Error:\s*/, ''))
+    }
+  }
+  const cancelQueue = async () => {
+    try { await window.heimdall.invoke('transcription:queue_cancel', {}) } catch { /* */ }
+  }
+  const clearQueue = async () => {
+    try { await window.heimdall.invoke('transcription:queue_clear') } catch { /* */ }
+  }
 
   const ingestPaths = async (paths: string[]) => {
     if (!paths.length) return
@@ -844,6 +1005,26 @@ export function TranscriptsPage() {
       await window.heimdall.invoke('transcription:delete', selected.id)
       setSelected(null)
       await load()
+    } catch (err) {
+      setError(String(err).replace(/^Error:\s*/, ''))
+    }
+  }
+
+  const exportTranscript = async (format: 'srt' | 'vtt' | 'json' | 'text', view: 'original' | 'translation') => {
+    if (!selected) return
+    setError(null)
+    try {
+      const r = await window.heimdall.invoke('transcription:export', {
+        id: selected.id,
+        format,
+        view,
+        save: true
+      }) as { ok: boolean; cancelled?: boolean; path?: string; bytes?: number; filename?: string }
+      if (r.cancelled) return
+      if (r.ok && r.path) {
+        // Could surface a toast; for now log is enough
+        console.info(`Exported ${format} (${r.bytes} chars) → ${r.path}`)
+      }
     } catch (err) {
       setError(String(err).replace(/^Error:\s*/, ''))
     }
@@ -911,6 +1092,9 @@ export function TranscriptsPage() {
             {busy ? <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" /> : <Upload className="h-3.5 w-3.5 mr-1" />}
             Choose file…
           </Button>
+          <Button size="sm" variant="outline" onClick={bulkIngest} disabled={busy} className="h-8">
+            <FolderOpen className="h-3.5 w-3.5 mr-1" /> Ingest folder…
+          </Button>
           <RecordButton
             disabled={busy}
             onSaved={async (t) => {
@@ -922,6 +1106,9 @@ export function TranscriptsPage() {
             <AlertCircle className="h-3 w-3" /> {error}
           </span>}
         </div>
+        {queue && queue.total > 0 && (
+          <QueueStrip snapshot={queue} onCancelAll={cancelQueue} onClear={clearQueue} />
+        )}
       </div>
 
       <div className="flex flex-1 overflow-hidden">
@@ -962,6 +1149,7 @@ export function TranscriptsPage() {
               onDelete={deleteOne}
               onRetranscribe={retranscribe}
               onTranslate={translate}
+              onExport={exportTranscript}
               busy={busy}
               translating={translating}
             />

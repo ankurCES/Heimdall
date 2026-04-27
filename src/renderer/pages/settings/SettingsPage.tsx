@@ -17,7 +17,8 @@ import {
   GraduationCap,
   Stamp,
   Shield,
-  HardDrive
+  HardDrive,
+  Mic
 } from 'lucide-react'
 import { cn } from '@renderer/lib/utils'
 import { ApiKeysTab } from './tabs/ApiKeysTab'
@@ -37,6 +38,7 @@ import { TrainingDataTab } from './tabs/TrainingDataTab'
 import { LetterheadTab } from './tabs/LetterheadTab'
 import { OpSecTab } from './tabs/OpSecTab'
 import { ModelsTab } from './tabs/ModelsTab'
+import { TranscriptionTab } from './tabs/TranscriptionTab'
 
 const tabs = [
   { id: 'sources', label: 'Sources', icon: Database, component: SourcesTab },
@@ -47,6 +49,7 @@ const tabs = [
   { id: 'obsidian', label: 'Obsidian', icon: BookOpen, component: ObsidianTab },
   { id: 'llm', label: 'LLM', icon: Brain, component: LlmTab },
   { id: 'models', label: 'Local Models', icon: HardDrive, component: ModelsTab },
+  { id: 'transcription', label: 'Transcription', icon: Mic, component: TranscriptionTab },
   { id: 'safety', label: 'Safety', icon: ShieldCheck, component: SafetyTab },
   { id: 'compartments', label: 'Compartments', icon: Lock, component: CompartmentsTab },
   { id: 'profile', label: 'Analyst Profile', icon: User, component: AnalystProfileTab },
