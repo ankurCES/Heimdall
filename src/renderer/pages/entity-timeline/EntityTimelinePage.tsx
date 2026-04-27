@@ -19,7 +19,7 @@ import { useParams, useNavigate, Link } from 'react-router-dom'
 import {
   Clock, FileText, Mic, Users, FileScan, ScrollText, Image as ImageIcon,
   ArrowLeft, Loader2, AlertCircle, GitMerge, Network, MapPin, List, Combine,
-  Bell, BellOff
+  Bell, BellOff, Flame
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { MapContainer, TileLayer, CircleMarker, Popup } from 'react-leaflet'
@@ -119,6 +119,42 @@ const KIND_META: Record<Kind, { label: string; icon: typeof FileText; color: str
 function fmtAbsolute(ts: number): string {
   return new Date(ts).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })
 }
+
+// v1.7.6 — local-density score per pin. For each pin, count how many
+// other pins fall within ~50 km (rough — equirectangular distance is
+// fine here, no geodesic needed). Returns the per-pin score and the
+// global maximum so the renderer can normalise.
+//
+// O(N²) but N is capped at 200 pins by the service, so fine.
+function computeDensityScores(pins: Array<{ lat: number; lng: number }>): { scores: number[]; max: number } {
+  const N = pins.length
+  if (N === 0) return { scores: [], max: 0 }
+  const RADIUS_KM = 50
+  // Rough km/deg constants. Latitude is constant (~111 km/deg).
+  // Longitude depends on latitude — use the per-pin's own latitude
+  // to scale its longitude tolerance.
+  const KM_PER_DEG_LAT = 111
+  const scores = new Array<number>(N).fill(0)
+  for (let i = 0; i < N; i++) {
+    const p = pins[i]
+    const kmPerDegLng = Math.max(1, KM_PER_DEG_LAT * Math.cos((p.lat * Math.PI) / 180))
+    const dLat = RADIUS_KM / KM_PER_DEG_LAT
+    const dLng = RADIUS_KM / kmPerDegLng
+    let count = 0
+    for (let j = 0; j < N; j++) {
+      if (i === j) continue
+      const q = pins[j]
+      if (Math.abs(p.lat - q.lat) > dLat) continue
+      if (Math.abs(p.lng - q.lng) > dLng) continue
+      // Within bounding box — count it (no need for an exact great-circle
+      // here since the bbox at 50 km is already tight enough).
+      count++
+    }
+    scores[i] = count
+  }
+  const max = Math.max(...scores, 1)
+  return { scores, max }
+}
 function fmtDay(ts: number): string {
   return new Date(ts).toLocaleDateString([], { weekday: 'short', year: 'numeric', month: 'short', day: 'numeric' })
 }
@@ -160,6 +196,10 @@ export function EntityTimelinePage() {
   const [geoLoading, setGeoLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [view, setView] = useState<'timeline' | 'map'>('timeline')
+  // v1.7.6 — heatmap mode for entities with many overlapping pins.
+  // Uses local density (count of nearby pins) to scale radius +
+  // opacity so high-traffic clusters glow visibly.
+  const [heatmap, setHeatmap] = useState<boolean>(false)
   const [watchEnabled, setWatchEnabled] = useState<boolean>(false)
   const [watchLoading, setWatchLoading] = useState<boolean>(false)
   const [activeKinds, setActiveKinds] = useState<Set<Kind>>(new Set(['intel', 'transcript', 'humint', 'document', 'briefing', 'image']))
@@ -418,7 +458,9 @@ export function EntityTimelinePage() {
         )}
 
         {/* v1.7.2 — map view. Renders only when toggled on AND we
-            have pins; the toggle button is disabled otherwise. */}
+            have pins; the toggle button is disabled otherwise.
+            v1.7.6 — heatmap toggle scales each marker by local
+            density so overlapping clusters glow visibly. */}
         {view === 'map' && geo && geo.pins.length > 0 && (
           <div className="space-y-2">
             <div className="text-xs text-muted-foreground flex items-center gap-3 flex-wrap">
@@ -429,6 +471,21 @@ export function EntityTimelinePage() {
                 <ImageIcon className="h-3 w-3" /> {geo.by_kind.image} images
               </span>
               <span>· {geo.pins.length} geo-tagged mention{geo.pins.length !== 1 ? 's' : ''}</span>
+              <button
+                onClick={() => setHeatmap((h) => !h)}
+                className={cn(
+                  'ml-auto text-[11px] px-2 py-0.5 rounded flex items-center gap-1 border',
+                  heatmap
+                    ? 'bg-amber-500/15 border-amber-500/40 text-amber-700 dark:text-amber-300'
+                    : 'border-border text-muted-foreground hover:bg-accent'
+                )}
+                title={heatmap
+                  ? 'Heatmap on — markers scaled by local density'
+                  : 'Switch to heatmap mode'}
+              >
+                <Flame className="h-3 w-3" />
+                {heatmap ? 'Heatmap on' : 'Heatmap'}
+              </button>
             </div>
             <div className="h-[60vh] rounded-md overflow-hidden border border-border">
               <MapContainer
@@ -445,16 +502,37 @@ export function EntityTimelinePage() {
                   url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
                   subdomains="abcd"
                 />
-                {geo.pins.map((p, i) => (
+                {(() => {
+                  // Heatmap mode: pre-compute density scores so each
+                  // marker can be scaled by the count of nearby pins.
+                  // Standard mode: skip the O(N²) walk entirely.
+                  const density = heatmap ? computeDensityScores(geo.pins) : null
+                  return geo.pins.map((p, i) => {
+                  // In heatmap mode, color shifts blue→orange→red as
+                  // local density rises; radius grows from 6 → 16 px;
+                  // opacity stays high so dense clusters glow.
+                  const score = density ? density.scores[i] : 0
+                  const norm = density ? score / density.max : 0
+                  const baseColor = p.kind === 'intel' ? '#3b82f6' : '#ec4899'
+                  const heatColor = norm > 0.66 ? '#ef4444'
+                    : norm > 0.33 ? '#f97316'
+                    : norm > 0.1 ? '#eab308'
+                    : baseColor
+                  const color = heatmap ? heatColor : baseColor
+                  const radius = heatmap
+                    ? 6 + Math.round(norm * 10)
+                    : (p.kind === 'intel' ? 7 : 5)
+                  const fillOpacity = heatmap ? 0.55 : 0.7
+                  return (
                   <CircleMarker
                     key={`${p.kind}-${p.id}-${i}`}
                     center={[p.lat, p.lng]}
-                    radius={p.kind === 'intel' ? 7 : 5}
+                    radius={radius}
                     pathOptions={{
-                      color: p.kind === 'intel' ? '#3b82f6' : '#ec4899',
-                      fillColor: p.kind === 'intel' ? '#3b82f6' : '#ec4899',
-                      fillOpacity: 0.7,
-                      weight: 2
+                      color,
+                      fillColor: color,
+                      fillOpacity,
+                      weight: heatmap ? 1 : 2
                     }}
                     eventHandlers={{
                       click: () => {
@@ -470,11 +548,18 @@ export function EntityTimelinePage() {
                         {p.meta.severity && <div>Severity: {p.meta.severity}</div>}
                         {p.meta.discipline && <div>Discipline: {p.meta.discipline}</div>}
                         {p.meta.cameraMake && <div>{p.meta.cameraMake} {p.meta.cameraModel ?? ''}</div>}
+                        {heatmap && score > 0 && (
+                          <div className="text-[10px] text-amber-600">
+                            Density: {score} nearby pin{score !== 1 ? 's' : ''} (within 50 km)
+                          </div>
+                        )}
                         <div className="font-mono text-[10px]">{p.lat.toFixed(4)}, {p.lng.toFixed(4)}</div>
                       </div>
                     </Popup>
                   </CircleMarker>
-                ))}
+                  )
+                })
+                })()}
               </MapContainer>
             </div>
           </div>
