@@ -6,6 +6,7 @@ import { writeFile } from 'fs/promises'
 import log from 'electron-log'
 import { dailyBriefingService } from '../services/briefing/DailyBriefingService'
 import { exportBriefing, emailBriefing, type BriefingExportFormat } from '../services/briefing/DailyBriefingExporter'
+import { dailyBriefingDiffer } from '../services/briefing/DailyBriefingDiffer'
 
 export function registerBriefingDailyBridge(): void {
   ipcMain.handle('briefing:daily_list', (_evt, args?: { limit?: number }) =>
@@ -55,6 +56,19 @@ export function registerBriefingDailyBridge(): void {
     format?: BriefingExportFormat
   }) => {
     return await emailBriefing(args.id, args.recipients ?? [], args.format ?? 'pdf')
+  })
+
+  // v1.6.3 — diff two briefings. When `fromId` is omitted, the differ
+  // auto-picks the most recent earlier ready briefing.
+  ipcMain.handle('briefing:daily_diff', async (_evt, args: { fromId?: string; toId: string }) => {
+    let fromId = args.fromId
+    if (!fromId) {
+      const prev = dailyBriefingDiffer.findPrevious(args.toId)
+      if (!prev) return { ok: false, reason: 'no earlier briefing to compare against' }
+      fromId = prev.id
+    }
+    const diff = await dailyBriefingDiffer.diff(fromId, args.toId)
+    return { ok: true, diff }
   })
 
   log.info('briefing-daily bridge registered')

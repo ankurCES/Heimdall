@@ -9,7 +9,8 @@
 import { useEffect, useMemo, useState, useCallback } from 'react'
 import {
   FileText, RefreshCw, Loader2, AlertCircle, CheckCircle2, Clock as ClockIcon,
-  ScrollText, Trash2, Settings as SettingsIcon, Play, Download, ChevronDown, Mail
+  ScrollText, Trash2, Settings as SettingsIcon, Play, Download, ChevronDown, Mail,
+  GitCompare, TrendingUp, TrendingDown, Minus
 } from 'lucide-react'
 import {
   DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem,
@@ -61,12 +62,102 @@ function StatusPill({ status }: { status: DailyBriefing['status'] }) {
   return <span className="px-2 py-0.5 rounded text-[10px] font-medium bg-red-500/15 text-red-600 dark:text-red-400 inline-flex items-center gap-1"><AlertCircle className="h-3 w-3" /> Error</span>
 }
 
-function BriefingDetail({ briefing, onDelete, onRegenerate, onExport, onEmail, busy }: {
+interface BriefingDiffResult {
+  from: { id: string; period_end: number; intel_count: number; high_severity_count: number }
+  to: { id: string; period_end: number; intel_count: number; high_severity_count: number }
+  new_intel_ids: string[]
+  carried_intel_ids: string[]
+  new_transcript_ids: string[]
+  carried_transcript_ids: string[]
+  high_severity_delta: number
+  intel_count_delta: number
+  summary_md: string
+  generated_at: number
+}
+
+function DiffDeltaIcon({ delta }: { delta: number }) {
+  if (delta > 0) return <TrendingUp className="h-3 w-3 text-red-600 dark:text-red-400" />
+  if (delta < 0) return <TrendingDown className="h-3 w-3 text-emerald-600 dark:text-emerald-400" />
+  return <Minus className="h-3 w-3 text-muted-foreground" />
+}
+
+function DiffPanel({ diff, onClose }: { diff: BriefingDiffResult; onClose: () => void }) {
+  const fmtDate = (ts: number) => new Date(ts).toLocaleString()
+  const noChange =
+    diff.new_intel_ids.length === 0 &&
+    diff.new_transcript_ids.length === 0 &&
+    diff.high_severity_delta === 0 &&
+    diff.intel_count_delta === 0
+  return (
+    <div className="border border-primary/30 bg-primary/5 rounded-md p-4 space-y-3">
+      <div className="flex items-start justify-between gap-2">
+        <div>
+          <div className="text-sm font-medium flex items-center gap-2">
+            <GitCompare className="h-4 w-4 text-primary" /> Delta vs previous briefing
+          </div>
+          <div className="text-[11px] text-muted-foreground mt-0.5 font-mono">
+            {fmtDate(diff.from.period_end)} → {fmtDate(diff.to.period_end)}
+          </div>
+        </div>
+        <button onClick={onClose} className="text-muted-foreground hover:text-foreground p-0.5" title="Close">
+          <Trash2 className="h-3.5 w-3.5" />
+        </button>
+      </div>
+
+      <div className="grid grid-cols-3 gap-3 text-[11px]">
+        <div className="border border-border rounded p-2 bg-card">
+          <div className="text-muted-foreground">Intel volume</div>
+          <div className="text-base font-semibold flex items-center gap-1.5 mt-0.5">
+            <DiffDeltaIcon delta={diff.intel_count_delta} />
+            {diff.intel_count_delta > 0 ? '+' : ''}{diff.intel_count_delta}
+          </div>
+          <div className="text-[10px] text-muted-foreground">{diff.from.intel_count} → {diff.to.intel_count}</div>
+        </div>
+        <div className="border border-border rounded p-2 bg-card">
+          <div className="text-muted-foreground">High-severity</div>
+          <div className={cn(
+            'text-base font-semibold flex items-center gap-1.5 mt-0.5',
+            diff.high_severity_delta > 0 && 'text-red-600 dark:text-red-400'
+          )}>
+            <DiffDeltaIcon delta={diff.high_severity_delta} />
+            {diff.high_severity_delta > 0 ? '+' : ''}{diff.high_severity_delta}
+          </div>
+          <div className="text-[10px] text-muted-foreground">{diff.from.high_severity_count} → {diff.to.high_severity_count}</div>
+        </div>
+        <div className="border border-border rounded p-2 bg-card">
+          <div className="text-muted-foreground">New material</div>
+          <div className="text-base font-semibold mt-0.5">
+            {diff.new_intel_ids.length} intel
+          </div>
+          <div className="text-[10px] text-muted-foreground">+ {diff.new_transcript_ids.length} transcripts</div>
+        </div>
+      </div>
+
+      {noChange ? (
+        <div className="text-xs text-muted-foreground italic">No material change since the previous briefing.</div>
+      ) : diff.summary_md ? (
+        <div className="text-sm prose prose-sm dark:prose-invert max-w-none">
+          <MarkdownRenderer content={diff.summary_md} />
+        </div>
+      ) : (
+        <div className="text-xs text-muted-foreground italic">
+          (LLM delta synthesis unavailable — set counts shown above are still accurate.)
+        </div>
+      )}
+    </div>
+  )
+}
+
+function BriefingDetail({ briefing, onDelete, onRegenerate, onExport, onEmail, onCompare, diff, diffLoading, onCloseDiff, busy }: {
   briefing: DailyBriefing
   onDelete: () => void
   onRegenerate: () => void
   onExport: (format: 'pdf' | 'docx') => void
   onEmail: () => void
+  onCompare: () => void
+  diff: BriefingDiffResult | null
+  diffLoading: boolean
+  onCloseDiff: () => void
   busy: boolean
 }) {
   const sources = useMemo(() => {
@@ -104,6 +195,12 @@ function BriefingDetail({ briefing, onDelete, onRegenerate, onExport, onEmail, b
             </div>
           </div>
           <div className="flex items-center gap-1 shrink-0">
+            {briefing.status === 'ready' && (
+              <Button size="sm" variant="outline" onClick={onCompare} disabled={diffLoading} className="h-8" title="Diff vs the previous briefing">
+                {diffLoading ? <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" /> : <GitCompare className="h-3.5 w-3.5 mr-1" />}
+                Compare
+              </Button>
+            )}
             {briefing.status === 'ready' && (
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
@@ -143,7 +240,8 @@ function BriefingDetail({ briefing, onDelete, onRegenerate, onExport, onEmail, b
         </div>
       </div>
 
-      <div className="flex-1 overflow-auto p-6">
+      <div className="flex-1 overflow-auto p-6 space-y-4">
+        {diff && <DiffPanel diff={diff} onClose={onCloseDiff} />}
         {briefing.status === 'generating' && (
           <div className="flex items-center gap-2 text-sm text-muted-foreground">
             <Loader2 className="h-4 w-4 animate-spin" /> LLM synthesizing the briefing… this may take 30-60 seconds.
@@ -172,6 +270,8 @@ export function BriefingsPage() {
   const [selected, setSelected] = useState<DailyBriefing | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [diff, setDiff] = useState<BriefingDiffResult | null>(null)
+  const [diffLoading, setDiffLoading] = useState(false)
   const { value: enabled, save: saveEnabled } = useSetting<boolean>('briefing.dailyEnabled', false)
   const { value: lookback, save: saveLookback } = useSetting<number>('briefing.lookbackHours', 24)
   const { value: classification, save: saveClassification } = useSetting<string>('briefing.classification', 'UNCLASSIFIED')
@@ -227,6 +327,27 @@ export function BriefingsPage() {
       await load()
     } catch (err) { setError(String(err).replace(/^Error:\s*/, '')) }
   }
+
+  const compareWithPrevious = async () => {
+    if (!selected) return
+    setDiff(null)
+    setDiffLoading(true)
+    setError(null)
+    try {
+      const r = await window.heimdall.invoke('briefing:daily_diff', { toId: selected.id }) as
+        { ok: true; diff: BriefingDiffResult } | { ok: false; reason: string }
+      if (r.ok) setDiff(r.diff)
+      else toast.message('Nothing to compare', { description: r.reason })
+    } catch (err) {
+      const msg = String(err).replace(/^Error:\s*/, '')
+      setError(msg)
+      toast.error('Compare failed', { description: msg })
+    } finally { setDiffLoading(false) }
+  }
+
+  // Clear the open diff whenever the analyst flips to a different
+  // briefing — the panel was anchored to the previous selection.
+  useEffect(() => { setDiff(null) }, [selected?.id])
 
   const exportBriefingAs = async (format: 'pdf' | 'docx') => {
     if (!selected) return
@@ -458,6 +579,10 @@ export function BriefingsPage() {
               onRegenerate={regenerate}
               onExport={exportBriefingAs}
               onEmail={emailBriefing}
+              onCompare={compareWithPrevious}
+              diff={diff}
+              diffLoading={diffLoading}
+              onCloseDiff={() => setDiff(null)}
               busy={busy}
             />
           ) : (
