@@ -52,6 +52,8 @@ const testChannels = [
   'entity:co_mentions', 'entity:geo_pins', 'entity:merge', 'entity:split',
   'entity:watch_add', 'entity:watch_remove', 'entity:watch_status',
   'entity:watch_list', 'entity:watch_set_enabled',
+  'graph:list', 'graph:get', 'graph:create_from_entity', 'graph:expand',
+  'graph:save', 'graph:delete',
   'ci:analyze', 'ci:latest', 'ci:top', 'ci:for_report',
   'ci:state_media', 'ci:bias_list',
   'cybint:tactics', 'cybint:techniques', 'cybint:tag_techniques',

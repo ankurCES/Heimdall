@@ -3246,6 +3246,35 @@ const migrations: Migration[] = [
       `)
       log.info('Migration 057: entity_watchlist table created (v1.7.4)')
     }
+  },
+  {
+    version: '058',
+    name: 'graph_canvases',
+    up: (db) => {
+      // v1.8.0 — Phase 9 opener: cross-entity graph canvases.
+      //
+      // The analyst seeds a canvas with one or more canonical
+      // entities, expands neighbours via co-mentions, prunes nodes
+      // that aren't relevant, and saves the resulting graph for
+      // resumption. nodes_json + edges_json carry the persisted
+      // shape; we don't normalise into separate tables because the
+      // canvas is fundamentally a snapshot — analysts mutate it
+      // freely and we'd churn the schema on every drag.
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS graph_canvases (
+          id TEXT PRIMARY KEY,
+          name TEXT NOT NULL,
+          description TEXT,
+          nodes_json TEXT NOT NULL,
+          edges_json TEXT NOT NULL,
+          layout_json TEXT,
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_graph_canvases_updated ON graph_canvases(updated_at DESC);
+      `)
+      log.info('Migration 058: graph_canvases table created (v1.8.0)')
+    }
   }
 ]
 

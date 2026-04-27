@@ -83,6 +83,7 @@ const NAV_GROUPS: NavGroup[] = [
       { to: '/library', icon: Library, label: 'Reports Library' },
       { to: '/briefings', icon: ScrollText, label: 'Daily Briefings' },
       { to: '/watchlist', icon: BellRing, label: 'Entity Watchlist' },
+      { to: '/graph', icon: GitMerge, label: 'Graph Canvas' },
       { to: '/cases', icon: FolderOpen, label: 'Case Files' },
       { to: '/indicators', icon: Target, label: 'Indicators (I&W)' },
       { to: '/reliability', icon: Server, label: 'Source Reliability' },

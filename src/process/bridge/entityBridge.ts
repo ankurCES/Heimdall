@@ -7,6 +7,7 @@ import { entityCoMentionService } from '../services/entity/EntityCoMentionServic
 import { entityGeoService } from '../services/entity/EntityGeoService'
 import { entityMergeService } from '../services/entity/EntityMergeService'
 import { entityWatchlist } from '../services/entity/EntityWatchlistService'
+import { graphCanvasService } from '../services/entity/GraphCanvasService'
 
 /**
  * Theme 4.6 — entity resolution IPC.
@@ -79,6 +80,22 @@ export function registerEntityBridge(): void {
   ipcMain.handle('entity:watch_list', () => entityWatchlist.list())
   ipcMain.handle('entity:watch_set_enabled', (_evt, args: { canonicalId: string; enabled: boolean }) => {
     entityWatchlist.setEnabled(args.canonicalId, args.enabled); return { ok: true }
+  })
+
+  // v1.8.0 — Phase 9 graph canvas IPCs.
+  ipcMain.handle('graph:list', () => graphCanvasService.list())
+  ipcMain.handle('graph:get', (_evt, id: string) => graphCanvasService.get(id))
+  ipcMain.handle('graph:create_from_entity', (_evt, args: { name: string; canonicalId: string; expandLimit?: number; description?: string }) =>
+    graphCanvasService.createFromEntity(args)
+  )
+  ipcMain.handle('graph:expand', (_evt, args: { canvasId: string; canonicalId: string; expandLimit?: number }) =>
+    graphCanvasService.expand(args)
+  )
+  ipcMain.handle('graph:save', (_evt, args: Parameters<typeof graphCanvasService.save>[0]) =>
+    graphCanvasService.save(args)
+  )
+  ipcMain.handle('graph:delete', (_evt, id: string) => {
+    graphCanvasService.remove(id); return { ok: true }
   })
 
   log.info('entity bridge registered')
