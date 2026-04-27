@@ -3006,6 +3006,39 @@ const migrations: Migration[] = [
       `)
       log.info('Migration 052: transcripts FTS5 + sync triggers installed')
     }
+  },
+  {
+    version: '053',
+    name: 'saved_searches',
+    up: (db) => {
+      // v1.5.2 — analyst saves a search query for re-use. Query is the
+      // raw FTS5-grammar string the overlay would have submitted.
+      // kinds_filter is a comma-separated whitelist ('intel,transcript')
+      // or NULL for all.
+      // alert_enabled / alert_cron / last_alerted_max_id power the
+      // v1.5.3 cron-driven alerts that fire watch:hits when a new
+      // matching report arrives.
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS saved_searches (
+          id TEXT PRIMARY KEY,
+          name TEXT NOT NULL,
+          query TEXT NOT NULL,
+          kinds_filter TEXT,
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL,
+          last_run_at INTEGER,
+          last_hit_count INTEGER NOT NULL DEFAULT 0,
+          alert_enabled INTEGER NOT NULL DEFAULT 0,
+          alert_cron TEXT,
+          last_alerted_at INTEGER,
+          last_alerted_intel_id TEXT,
+          last_alerted_transcript_id TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_saved_searches_alert ON saved_searches(alert_enabled);
+        CREATE INDEX IF NOT EXISTS idx_saved_searches_updated ON saved_searches(updated_at DESC);
+      `)
+      log.info('Migration 053: saved_searches table created (v1.5.2)')
+    }
   }
 ]
 

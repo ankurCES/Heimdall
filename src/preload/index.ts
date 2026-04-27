@@ -74,6 +74,8 @@ const testChannels = [
   'transcription:export', 'transcription:permanently_redact',
   'transcription:engine_stats', 'transcription:purge_now',
   'search:universal',
+  'search:saved_list', 'search:saved_create', 'search:saved_update',
+  'search:saved_delete', 'search:saved_run',
   'models:list', 'models:status', 'models:ensure_required', 'models:download_one',
   'models:reinstall', 'models:cancel', 'models:locate_binary', 'models:install_via_brew',
   'stix:export', 'stix:import', 'stix:import_pick', 'stix:runs',

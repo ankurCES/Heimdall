@@ -11,7 +11,7 @@
 
 import { useEffect, useState, useRef, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Search, FileText, Mic, X as XIcon, Loader2 } from 'lucide-react'
+import { Search, FileText, Mic, X as XIcon, Loader2, Star, Bookmark, Play, Trash2 } from 'lucide-react'
 import { cn } from '@renderer/lib/utils'
 
 interface SearchHit {
@@ -52,6 +52,8 @@ export function UniversalSearchOverlay() {
   const [loading, setLoading] = useState(false)
   const [highlight, setHighlight] = useState(0)
   const [filter, setFilter] = useState<'all' | 'intel' | 'transcript'>('all')
+  const [saved, setSaved] = useState<Array<{ id: string; name: string; query: string; kinds_filter: string | null; last_hit_count: number }>>([])
+  const [showSaved, setShowSaved] = useState(false)
   const inputRef = useRef<HTMLInputElement | null>(null)
   const navigate = useNavigate()
   const debounceTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -69,17 +71,64 @@ export function UniversalSearchOverlay() {
     return () => window.removeEventListener('keydown', onKey)
   }, [])
 
-  // Auto-focus input on open.
+  // Auto-focus input on open + load saved searches.
   useEffect(() => {
     if (open) {
       requestAnimationFrame(() => inputRef.current?.focus())
+      void loadSaved()
     } else {
-      // Reset state when closed so re-opening starts fresh
       setQuery('')
       setHits([])
       setHighlight(0)
+      setShowSaved(false)
     }
   }, [open])
+
+  const loadSaved = async () => {
+    try {
+      const list = await window.heimdall.invoke('search:saved_list') as Array<{ id: string; name: string; query: string; kinds_filter: string | null; last_hit_count: number }>
+      setSaved(list)
+    } catch { /* */ }
+  }
+
+  const saveCurrent = async () => {
+    const q = query.trim()
+    if (!q) return
+    const name = prompt(`Name this saved search:`, q.slice(0, 60))
+    if (!name) return
+    try {
+      await window.heimdall.invoke('search:saved_create', {
+        name,
+        query: q,
+        kinds: filter === 'all' ? null : [filter]
+      })
+      await loadSaved()
+    } catch (err) {
+      console.warn('save failed:', err)
+    }
+  }
+
+  const runSaved = async (id: string) => {
+    try {
+      const r = await window.heimdall.invoke('search:saved_run', { id, limit: 30 }) as { search: { query: string; kinds_filter: string | null }; hits: SearchHit[] }
+      if (r) {
+        setQuery(r.search.query)
+        setFilter(r.search.kinds_filter ? (r.search.kinds_filter.split(',')[0] as 'intel' | 'transcript') : 'all')
+        setHits(r.hits)
+        setHighlight(0)
+        setShowSaved(false)
+      }
+    } catch (err) { console.warn('run saved failed:', err) }
+  }
+
+  const deleteSaved = async (id: string, e: React.MouseEvent) => {
+    e.stopPropagation()
+    if (!confirm('Delete this saved search?')) return
+    try {
+      await window.heimdall.invoke('search:saved_delete', id)
+      await loadSaved()
+    } catch { /* */ }
+  }
 
   const runSearch = useCallback(async (q: string, kindFilter: 'all' | 'intel' | 'transcript') => {
     if (!q.trim()) { setHits([]); setLoading(false); return }
@@ -177,21 +226,80 @@ export function UniversalSearchOverlay() {
               {k === 'all' ? 'All' : k === 'intel' ? 'Intel reports' : 'Transcripts'}
             </button>
           ))}
-          <span className="ml-auto text-[11px] text-muted-foreground">
+          <button
+            onClick={() => setShowSaved((s) => !s)}
+            className={cn(
+              'ml-auto text-[11px] px-2 py-0.5 rounded flex items-center gap-1',
+              showSaved
+                ? 'bg-primary/20 text-primary font-medium'
+                : 'text-muted-foreground hover:bg-accent'
+            )}
+            title="Saved searches"
+          >
+            <Bookmark className="h-3 w-3" />
+            {saved.length > 0 ? `${saved.length} saved` : 'saved'}
+          </button>
+          {query.trim() && hits.length > 0 && (
+            <button
+              onClick={saveCurrent}
+              className="text-[11px] px-2 py-0.5 rounded text-amber-600 dark:text-amber-400 hover:bg-amber-500/10 flex items-center gap-1"
+              title="Save this search"
+            >
+              <Star className="h-3 w-3" /> Save
+            </button>
+          )}
+          <span className="text-[11px] text-muted-foreground">
             {hits.length > 0 ? `${hits.length} hit${hits.length > 1 ? 's' : ''}` : query.trim() ? 'no matches' : ''}
           </span>
         </div>
 
         <div className="flex-1 overflow-auto py-1">
-          {hits.length === 0 && !loading && query.trim() && (
+          {showSaved && (
+            <div className="border-b border-border">
+              <div className="px-3 py-1.5 text-[11px] text-muted-foreground bg-muted/20">
+                Saved searches
+              </div>
+              {saved.length === 0 ? (
+                <div className="text-xs text-muted-foreground px-4 py-3 text-center">
+                  No saved searches yet. Run a query, then click <Star className="inline h-3 w-3" /> Save.
+                </div>
+              ) : saved.map((s) => (
+                <button
+                  key={s.id}
+                  onClick={() => runSaved(s.id)}
+                  className="w-full text-left px-3 py-2 flex gap-2 items-center hover:bg-accent/50"
+                >
+                  <Bookmark className="h-3.5 w-3.5 text-amber-600 dark:text-amber-400 shrink-0" />
+                  <div className="min-w-0 flex-1">
+                    <div className="text-sm font-medium truncate">{s.name}</div>
+                    <div className="text-[11px] text-muted-foreground truncate font-mono">
+                      {s.query}{s.kinds_filter ? ` · ${s.kinds_filter}` : ''}
+                    </div>
+                  </div>
+                  <span className="text-[10px] text-muted-foreground shrink-0">
+                    {s.last_hit_count} hit{s.last_hit_count !== 1 ? 's' : ''}
+                  </span>
+                  <Play className="h-3 w-3 text-muted-foreground shrink-0" />
+                  <button
+                    onClick={(e) => deleteSaved(s.id, e)}
+                    className="text-muted-foreground hover:text-red-500 p-0.5 shrink-0"
+                    title="Delete saved search"
+                  >
+                    <Trash2 className="h-3 w-3" />
+                  </button>
+                </button>
+              ))}
+            </div>
+          )}
+          {!showSaved && hits.length === 0 && !loading && query.trim() && (
             <div className="text-sm text-muted-foreground px-4 py-6 text-center">
               No matches. Try a phrase ("cyber attack"), prefix (terror*), or column filter (title:bombing).
             </div>
           )}
-          {hits.length === 0 && !query.trim() && (
+          {!showSaved && hits.length === 0 && !query.trim() && (
             <div className="text-xs text-muted-foreground px-4 py-6 text-center space-y-1">
               <div>Search every intel report and transcript across Heimdall.</div>
-              <div className="font-mono">↑↓ navigate · Enter open · Esc close · ⌘K toggle</div>
+              <div className="font-mono">↑↓ navigate · Enter open · Esc close · ⌘K toggle · ★ save</div>
             </div>
           )}
           {hits.map((hit, i) => (
