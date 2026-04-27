@@ -831,8 +831,20 @@ interface QueueSnapshot {
   lastTranscriptId: string | null
 }
 
-function QueueStrip({ snapshot, onCancelAll, onClear }: {
+interface ChunkProgress {
+  filePath: string
+  fileName: string
+  chunkIndex: number
+  chunkTotal: number
+  chunkDurationSec: number
+  state: 'started' | 'completed' | 'errored'
+  cumulativeSec: number
+  totalSec: number
+}
+
+function QueueStrip({ snapshot, chunkProgress, onCancelAll, onClear }: {
   snapshot: QueueSnapshot
+  chunkProgress: ChunkProgress | null
   onCancelAll: () => void
   onClear: () => void
 }) {
@@ -866,6 +878,9 @@ function QueueStrip({ snapshot, onCancelAll, onClear }: {
             <div className="text-xs text-muted-foreground">
               {completed} of {totalActive} ({progressPct}%)
               {snapshot.errored > 0 && <span className="text-red-600 dark:text-red-400"> · {snapshot.errored} error{snapshot.errored > 1 ? 's' : ''}</span>}
+              {chunkProgress && active && chunkProgress.fileName === active.fileName && chunkProgress.chunkTotal > 1 && (
+                <span> · chunk {chunkProgress.chunkIndex + 1} of {chunkProgress.chunkTotal}</span>
+              )}
             </div>
           </div>
         </div>
@@ -901,6 +916,7 @@ export function TranscriptsPage() {
   const [error, setError] = useState<string | null>(null)
   const [engine, setEngine] = useState<EngineStatus | null>(null)
   const [queue, setQueue] = useState<QueueSnapshot | null>(null)
+  const [chunkProgress, setChunkProgress] = useState<ChunkProgress | null>(null)
   const lastQueueTranscriptId = useRef<string | null>(null)
   const ingestQueue = useRef<string[]>([])
 
@@ -944,7 +960,22 @@ export function TranscriptsPage() {
         void load()
       }
     })
-    return () => { try { off() } catch { /* */ } }
+    // v1.4.10 — per-chunk progress for long-audio transcription. Clear
+    // when the chunk completes the final piece so the strip falls back
+    // to the file-level "X of Y" view.
+    const offChunk = window.heimdall.on('transcription:chunk_progress', (...args: unknown[]) => {
+      const ev = args[0] as ChunkProgress
+      if (!ev) return
+      if (ev.state === 'completed' && ev.chunkIndex + 1 >= ev.chunkTotal) {
+        setChunkProgress(null)
+      } else {
+        setChunkProgress(ev)
+      }
+    })
+    return () => {
+      try { off() } catch { /* */ }
+      try { offChunk() } catch { /* */ }
+    }
   }, [load])
 
   const bulkIngest = async () => {
@@ -1107,7 +1138,7 @@ export function TranscriptsPage() {
           </span>}
         </div>
         {queue && queue.total > 0 && (
-          <QueueStrip snapshot={queue} onCancelAll={cancelQueue} onClear={clearQueue} />
+          <QueueStrip snapshot={queue} chunkProgress={chunkProgress} onCancelAll={cancelQueue} onClear={clearQueue} />
         )}
       </div>
 

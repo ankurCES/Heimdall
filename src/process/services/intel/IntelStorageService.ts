@@ -96,21 +96,33 @@ export class IntelStorageService {
    * via Unicode-block heuristic (no LLM call needed for the common
    * case). Caps to 10 translations per ingest batch to avoid burning
    * the LLM token budget on a fire-hose of foreign-language content.
+   *
+   * v1.4.11 — concurrency-limited to 3 in-flight LLM calls. Each
+   * translation is a 4-7s round-trip; without the limit, ingest
+   * batches from 24+ multi-language RSS sources would back up dozens
+   * of pending fetches and starve the UI of network/CPU budget.
    */
   private async translateNewReports(reports: IntelReport[]): Promise<void> {
     const { translationService } = await import('../translation/TranslationService')
-    let queued = 0
-    for (const report of reports) {
-      if (queued >= 10) break
-      if (translationService.shouldTranslate(report.content)) {
+    const candidates = reports
+      .filter((r) => translationService.shouldTranslate(r.content))
+      .slice(0, 10)
+    if (candidates.length === 0) return
+
+    const concurrency = 3
+    let cursor = 0
+    const workers = Array.from({ length: Math.min(concurrency, candidates.length) }, async () => {
+      while (cursor < candidates.length) {
+        const idx = cursor++
+        const report = candidates[idx]
         try {
           await translationService.translateAndStore(report.id)
-          queued++
         } catch (err) {
           log.debug(`translate ${report.id}: ${err}`)
         }
       }
-    }
+    })
+    await Promise.all(workers)
   }
 
   private emitNewReports(reports: IntelReport[]): void {

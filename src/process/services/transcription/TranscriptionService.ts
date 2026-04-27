@@ -29,6 +29,7 @@ import path from 'path'
 import os from 'os'
 import crypto from 'crypto'
 import { spawn } from 'child_process'
+import { EventEmitter } from 'events'
 import log from 'electron-log'
 import { app } from 'electron'
 import { generateId } from '@common/utils/id'
@@ -36,6 +37,10 @@ import { getDatabase } from '../database'
 import { settingsService } from '../settings/SettingsService'
 import { modelDownloadManager } from '../models/ModelDownloadManager'
 import { findBinary } from '../models/BinaryLocator'
+import {
+  probeDuration, detectSilences, planChunks, extractChunk, shouldChunk,
+  type ChunkPlan
+} from './AudioChunker'
 
 export interface TranscriptSegment {
   start: number   // seconds
@@ -100,7 +105,18 @@ const MAX_TEXT_PERSIST = 2_000_000  // truncate full_text in DB
 const MAX_SEGMENTS = 5000           // cap to keep segments_json bounded
 const REPORT_AUTOCREATE_MIN_CHARS = 500
 
-export class TranscriptionService {
+export interface ChunkProgressEvent {
+  filePath: string
+  fileName: string
+  chunkIndex: number          // 0-based
+  chunkTotal: number
+  chunkDurationSec: number
+  state: 'started' | 'completed' | 'errored'
+  cumulativeSec: number       // total processed so far
+  totalSec: number
+}
+
+export class TranscriptionService extends EventEmitter {
   // Short-lived cache for the auto-detected binary path. We don't want
   // to re-`which` on every transcribe call (hundreds of times per
   // session), but we also can't permanently cache `null` — the analyst
@@ -185,7 +201,23 @@ export class TranscriptionService {
     const denoise = settingsService.get<boolean>('transcription.denoise') === true
     const audioPath = await maybeTranscodeToWav(filePath, isVideo, denoise)
 
-    const result = await this.transcribe(audioPath, opts)
+    // v1.4.10 — chunked transcription path for long audio. The chunker
+    // probes duration via ffmpeg, finds silence boundaries, splits the
+    // file, transcribes each chunk separately, and merges the results
+    // back with timestamp offsets. For shorter material we run the
+    // existing single-pass path unchanged.
+    const chunkingMode = (settingsService.get<'auto' | 'always' | 'never'>('transcription.chunking') ?? 'auto') as 'auto' | 'always' | 'never'
+    const chunkLengthMin = Math.max(2, settingsService.get<number>('transcription.chunkLengthMin') ?? 10)
+    const targetSec = chunkLengthMin * 60
+    const totalSec = await probeDuration(audioPath)
+    const useChunking = shouldChunk(totalSec, chunkingMode, targetSec)
+
+    let result: TranscribeResult
+    if (useChunking && totalSec) {
+      result = await this.transcribeChunked(audioPath, path.basename(filePath), totalSec, targetSec, opts)
+    } else {
+      result = await this.transcribe(audioPath, opts)
+    }
 
     // Clean up the temp wav if we created one
     if (audioPath !== filePath) {
@@ -273,6 +305,110 @@ export class TranscriptionService {
     )
   }
 
+  /**
+   * v1.4.10 — Chunked transcription path for long audio.
+   *
+   * Pipeline:
+   *   1. Probe duration + detect silence windows in one ffmpeg pass.
+   *   2. Plan chunk boundaries that fall inside silences when possible
+   *      (never mid-word) and obey the configured target length.
+   *   3. For each chunk: extract a temp WAV, run the engine, delete
+   *      the temp WAV, accumulate segments with timestamp offsets.
+   *   4. Emit chunk_progress events on each transition so UIs can
+   *      show "transcribing 3 of 12 chunks of meeting.mp4".
+   *
+   * Failure handling: an erroring chunk is logged and skipped — the
+   * surrounding chunks still produce useful output. We surface the
+   * error count in the final TranscribeResult.engine string.
+   */
+  private async transcribeChunked(
+    audioPath: string,
+    fileName: string,
+    totalSec: number,
+    targetSec: number,
+    opts: TranscribeOptions
+  ): Promise<TranscribeResult> {
+    log.info(`transcription: chunking ${fileName} (${totalSec.toFixed(1)}s, target ${targetSec}s/chunk)`)
+    const silences = await detectSilences(audioPath)
+    const plan: ChunkPlan[] = planChunks(totalSec, silences, targetSec)
+    if (plan.length === 0) {
+      // Defensive fallback — planChunks returned nothing usable.
+      return await this.transcribe(audioPath, opts)
+    }
+    log.info(`transcription: planned ${plan.length} chunks (${silences.length} silence windows found)`)
+
+    const allSegments: TranscriptSegment[] = []
+    const allTexts: string[] = []
+    let detectedLang: string | null = null
+    let usedModel = ''
+    let usedEngine = ''
+    let cumulative = 0
+    let chunkErrors = 0
+
+    for (const c of plan) {
+      this.emit('chunk_progress', {
+        filePath: audioPath, fileName,
+        chunkIndex: c.index, chunkTotal: plan.length,
+        chunkDurationSec: c.durationSec,
+        state: 'started',
+        cumulativeSec: cumulative, totalSec
+      } satisfies ChunkProgressEvent)
+
+      let chunkPath: string | null = null
+      try {
+        chunkPath = await extractChunk(audioPath, c.startSec, c.endSec, c.index)
+        const chunkResult = await this.transcribe(chunkPath, opts)
+        // Apply offsets to align chunk segments back into the global timeline
+        for (const s of chunkResult.segments) {
+          allSegments.push({
+            start: s.start + c.startSec,
+            end: s.end + c.startSec,
+            text: s.text
+          })
+        }
+        if (chunkResult.fullText) allTexts.push(chunkResult.fullText.trim())
+        if (!detectedLang) detectedLang = chunkResult.language
+        if (!usedModel) usedModel = chunkResult.model
+        if (!usedEngine) usedEngine = chunkResult.engine
+
+        cumulative += c.durationSec
+        this.emit('chunk_progress', {
+          filePath: audioPath, fileName,
+          chunkIndex: c.index, chunkTotal: plan.length,
+          chunkDurationSec: c.durationSec,
+          state: 'completed',
+          cumulativeSec: cumulative, totalSec
+        } satisfies ChunkProgressEvent)
+      } catch (err) {
+        chunkErrors++
+        log.warn(`transcription: chunk ${c.index + 1}/${plan.length} of ${fileName} failed: ${(err as Error).message}`)
+        cumulative += c.durationSec
+        this.emit('chunk_progress', {
+          filePath: audioPath, fileName,
+          chunkIndex: c.index, chunkTotal: plan.length,
+          chunkDurationSec: c.durationSec,
+          state: 'errored',
+          cumulativeSec: cumulative, totalSec
+        } satisfies ChunkProgressEvent)
+      } finally {
+        if (chunkPath) { try { await fs.unlink(chunkPath) } catch { /* */ } }
+      }
+    }
+
+    const fullText = allTexts.join(' ').replace(/\s+/g, ' ').trim()
+    const engineLabel = chunkErrors > 0
+      ? `${usedEngine || 'whisper-cli'} (chunked ${plan.length}, ${chunkErrors} failed)`
+      : `${usedEngine || 'whisper-cli'} (chunked ${plan.length})`
+    return {
+      fullText,
+      segments: allSegments,
+      language: detectedLang,
+      durationMs: Math.round(totalSec * 1000),
+      model: usedModel || 'unknown',
+      engine: engineLabel
+    }
+  }
+
   /** whisper.cpp via child_process. Parses JSON output for segments+language. */
   private async transcribeWhisperCpp(
     audioPath: string,
@@ -286,7 +422,11 @@ export class TranscriptionService {
     }
 
     const lang = opts.language || cfg.language || 'auto'
-    const threads = cfg.threads ?? Math.max(2, Math.min(8, os.cpus().length - 1))
+    // v1.4.11 — leave 2 cores free for the Electron main process +
+    // Chromium renderer threads. Even with the BELOW_NORMAL priority
+    // demotion, hard-capping the thread count gives the OS scheduler
+    // less work to balance and the UI stays much smoother under load.
+    const threads = cfg.threads ?? Math.max(2, Math.min(8, os.cpus().length - 2))
     // -oj writes a sidecar .json next to the audio path (whisper.cpp behavior)
     const args = [
       '-m', modelPath,
@@ -597,10 +737,32 @@ async function which(cmd: string): Promise<string | null> {
   }
 }
 
-/** Promisified spawn. Captures stdout+stderr, throws on non-zero exit. */
+/** v1.4.11 — lower the OS scheduler priority of long-running media
+ *  subprocesses so they don't starve the Electron main process.
+ *
+ *  Without this, whisper.cpp's OpenMP build saturates every CPU core,
+ *  the IPC handler thread runs late, and the renderer feels frozen
+ *  ("mouse pointer spins on click"). PRIORITY_BELOW_NORMAL maps to
+ *  nice +10 on Unix and BELOW_NORMAL_PRIORITY_CLASS on Windows; the
+ *  scheduler gives the UI ~2x more cycles even at full subprocess
+ *  load. setPriority can throw on platforms / sandboxes that disallow
+ *  it — we swallow that quietly. */
+function lowerPriority(pid: number | undefined): void {
+  if (!pid) return
+  try {
+    os.setPriority(pid, os.constants.priority.PRIORITY_BELOW_NORMAL)
+  } catch (err) {
+    log.debug(`transcription: setPriority(${pid}) skipped: ${(err as Error).message}`)
+  }
+}
+
+/** Promisified spawn. Captures stdout+stderr, throws on non-zero exit.
+ *  Long-running children (whisper-cli, ffmpeg) get their priority
+ *  lowered so they yield CPU to the Electron main process. */
 function runChild(cmd: string, args: string[], opts: { cwd?: string } = {}): Promise<string> {
   return new Promise((resolve, reject) => {
     const child = spawn(cmd, args, { cwd: opts.cwd, stdio: ['ignore', 'pipe', 'pipe'] })
+    lowerPriority(child.pid)
     let stdout = '', stderr = ''
     child.stdout?.on('data', (b: Buffer) => { stdout += b.toString() })
     child.stderr?.on('data', (b: Buffer) => { stderr += b.toString() })

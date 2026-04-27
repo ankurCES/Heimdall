@@ -19,7 +19,7 @@
 import { useEffect, useState, useCallback } from 'react'
 import {
   Mic, Cpu, Server, Volume2, Languages, Cloud, RefreshCw,
-  CheckCircle2, AlertCircle, Save, Loader2, Folder, HardDrive
+  CheckCircle2, AlertCircle, Save, Loader2, Folder, HardDrive, Scissors
 } from 'lucide-react'
 import { Button } from '@renderer/components/ui/button'
 import { Input } from '@renderer/components/ui/input'
@@ -146,6 +146,8 @@ export function TranscriptionTab() {
   const { value: language, save: saveLanguage } = useSetting<string>('transcription.language', 'auto')
   const { value: denoise, save: saveDenoise } = useSetting<boolean>('transcription.denoise', false)
   const { value: allowCloud, save: saveAllowCloud } = useSetting<boolean>('transcription.allowCloud', false)
+  const { value: chunkingMode, save: saveChunkingMode } = useSetting<string>('transcription.chunking', 'auto')
+  const { value: chunkLengthMin, save: saveChunkLengthMin } = useSetting<number>('transcription.chunkLengthMin', 10)
 
   const checkEngine = useCallback(async () => {
     setBusy(true)
@@ -275,6 +277,58 @@ export function TranscriptionTab() {
               onCheckedChange={(v) => void saveDenoise(v)}
               disabled={!!ffmpegMissing}
             />
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-base flex items-center gap-2">
+            <Scissors className="h-4 w-4" /> Long-audio chunking
+          </CardTitle>
+          <CardDescription>
+            For long recordings (depositions, hearings, podcasts) Heimdall splits the file at silence
+            boundaries before transcribing. Each chunk fits comfortably in RAM, fails independently,
+            and emits its own progress so the analyst sees movement on multi-hour ingests.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="space-y-1">
+            <Label htmlFor="transcription-chunking" className="text-sm">When to chunk</Label>
+            <select
+              id="transcription-chunking"
+              value={chunkingMode ?? 'auto'}
+              onChange={(e) => void saveChunkingMode(e.target.value)}
+              className="w-full h-9 rounded-md border border-input bg-background px-3 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
+            >
+              <option value="auto">Auto — chunk only when file exceeds the target length (recommended)</option>
+              <option value="always">Always — split every file at the configured length</option>
+              <option value="never">Never — pass every file through whole (may OOM on multi-hour audio)</option>
+            </select>
+            <p className="text-xs text-muted-foreground">
+              Requires <code className="text-[11px]">ffmpeg</code> on PATH. Without it, all files are
+              sent to whisper.cpp whole regardless of this setting.
+            </p>
+          </div>
+          <div className="space-y-1">
+            <Label htmlFor="transcription-chunk-len" className="text-sm">Target chunk length (minutes)</Label>
+            <Input
+              id="transcription-chunk-len"
+              type="number"
+              min={2}
+              max={60}
+              step={1}
+              value={chunkLengthMin ?? 10}
+              onChange={(e) => {
+                const n = Number(e.target.value)
+                if (Number.isFinite(n) && n >= 2 && n <= 60) void saveChunkLengthMin(n)
+              }}
+              className="font-mono text-sm"
+            />
+            <p className="text-xs text-muted-foreground">
+              Chunks land at silence boundaries within ±10% of this target. 10 min is a good default —
+              shorter values give faster first-chunk feedback at the cost of more boundary cuts.
+            </p>
           </div>
         </CardContent>
       </Card>

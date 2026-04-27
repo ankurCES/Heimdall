@@ -173,7 +173,7 @@ const reportsEvents = ['reports:promotion_progress']
 const alertEvents = ['alert:incoming']
 const syncEvents = ['sync:progress', 'enrichment:progress', 'watch:hits', 'markets:backfillProgress']
 const modelsEvents = ['models:status_update']
-const transcriptionEvents = ['transcription:queue_progress']
+const transcriptionEvents = ['transcription:queue_progress', 'transcription:chunk_progress']
 const allowedEvents = [...Object.values(IPC_EVENTS), ...chatEvents, ...syncEvents, ...darkwebEvents, ...telegramIntelEvents, ...workflowEvents, ...reportsEvents, ...alertEvents, ...modelsEvents, ...transcriptionEvents]
 
 const api = {

@@ -69,6 +69,12 @@ export function registerTranscriptionBridge(): void {
     transcriptionQueue.on('queue_progress', (snapshot) => {
       broadcast('transcription:queue_progress', snapshot)
     })
+    // v1.4.10 — forward per-chunk progress to all renderer windows so
+    // long-running file ingests show "transcribing 3 of 12 chunks" in
+    // the queue strip without needing to poll.
+    transcriptionService.on('chunk_progress', (event) => {
+      broadcast('transcription:chunk_progress', event)
+    })
     queueListenerWired = true
   }
 
