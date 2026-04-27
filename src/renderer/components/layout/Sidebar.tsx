@@ -6,7 +6,7 @@ import {
   Layers, RefreshCw, Sparkles, Eye, AlertOctagon, GitCompare, TrendingUp,
   Network, Users, ShieldAlert, Shield, Bug, Moon, MapPin, Image, Share2, Brain, ChevronLeft, ChevronRight, ChevronDown,
   Workflow, Library, FolderOpen, Target, Server, Inbox, ShieldCheck,
-  HeartPulse, Award, GitMerge, Mic, ScrollText
+  HeartPulse, Award, GitMerge, Mic, ScrollText, BellRing
 } from 'lucide-react'
 import { cn } from '@renderer/lib/utils'
 import heimdallLogo from '@renderer/assets/heimdall-logo.png'
@@ -82,6 +82,7 @@ const NAV_GROUPS: NavGroup[] = [
     items: [
       { to: '/library', icon: Library, label: 'Reports Library' },
       { to: '/briefings', icon: ScrollText, label: 'Daily Briefings' },
+      { to: '/watchlist', icon: BellRing, label: 'Entity Watchlist' },
       { to: '/cases', icon: FolderOpen, label: 'Case Files' },
       { to: '/indicators', icon: Target, label: 'Indicators (I&W)' },
       { to: '/reliability', icon: Server, label: 'Source Reliability' },
