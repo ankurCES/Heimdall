@@ -384,6 +384,34 @@ const FREE_SOURCES: SeedSource[] = [
       subreddits: ['worldnews', 'cybersecurity', 'netsec', 'geopolitics', 'intelligence', 'OSINT']
     }
   },
+  // v1.4.1 — Mastodon federated firehose. Public timeline + topical
+  // hashtags. mastodon.social is a stable, large instance; analyst can
+  // swap to infosec.exchange / ioc.exchange / etc. via Sources UI.
+  {
+    name: 'Mastodon: Threat-Intel Firehose',
+    discipline: 'socmint',
+    type: 'mastodon',
+    schedule: '*/15 * * * *',
+    config: {
+      instance: 'mastodon.social',
+      hashtags: ['infosec', 'threatintel', 'cybersecurity', 'opsec', 'malware'],
+      includePublic: false,
+      perTagLimit: 40
+    }
+  },
+  {
+    name: 'Mastodon: Breaking-News Firehose',
+    discipline: 'socmint',
+    type: 'mastodon',
+    schedule: '*/10 * * * *',
+    config: {
+      instance: 'mastodon.social',
+      hashtags: ['breaking', 'news', 'geopolitics', 'ukraine', 'gaza'],
+      includePublic: true,
+      publicLimit: 40,
+      perTagLimit: 40
+    }
+  },
 
   // ── RUMINT (Unverified / Chatter) ──────────────────────────────────
   {

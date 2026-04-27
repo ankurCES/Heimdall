@@ -17,6 +17,9 @@ export interface FetchOptions {
    *  out of its index, not to deny access. Audit log still records every
    *  fetch so the bypass is traceable. */
   skipRobots?: boolean
+  /** AbortSignal forwarded to the underlying fetch — lets long-running
+   *  downloads (e.g. ModelDownloadManager) cancel in-flight requests. */
+  signal?: AbortSignal
 }
 
 export class SafeFetcher {
@@ -149,7 +152,7 @@ export class SafeFetcher {
   }
 
   async fetch(url: string, options: FetchOptions = {}): Promise<Response> {
-    const { headers = {}, timeout = 30000, maxRetries = 3, skipRobots = false } = options
+    const { headers = {}, timeout = 30000, maxRetries = 3, skipRobots = false, signal: callerSignal } = options
     const domain = new URL(url).hostname
 
     // SSRF prevention — block private/loopback/link-local IP ranges.
@@ -242,13 +245,27 @@ export class SafeFetcher {
         if (domain.endsWith('.onion') && this.socks5Proxy) {
           response = await this.fetchOnionViaSocks(url, headers, timeout)
         } else {
+          // Compose timeout signal with caller's optional signal so either
+          // can abort the request (e.g. ModelDownloadManager cancel button).
+          const timeoutSignal = AbortSignal.timeout(timeout)
+          const composedSignal: AbortSignal = callerSignal
+            ? (typeof (AbortSignal as unknown as { any?: (s: AbortSignal[]) => AbortSignal }).any === 'function'
+                ? (AbortSignal as unknown as { any: (s: AbortSignal[]) => AbortSignal }).any([timeoutSignal, callerSignal])
+                : timeoutSignal)
+            : timeoutSignal
+          if (callerSignal && !composedSignal.aborted) {
+            // Polyfill for Node < 20.3 where AbortSignal.any isn't available
+            callerSignal.addEventListener('abort', () => {
+              try { (composedSignal as unknown as { dispatchEvent?: (e: Event) => void }).dispatchEvent?.(new Event('abort')) } catch { /* */ }
+            }, { once: true })
+          }
           const fetchOpts: RequestInit = {
             headers: {
               'User-Agent': USER_AGENT,
               Accept: 'application/json, text/xml, application/xml, text/html, */*',
               ...headers
             },
-            signal: AbortSignal.timeout(timeout)
+            signal: composedSignal
           }
           response = await fetch(url, fetchOpts)
         }

@@ -34,6 +34,7 @@ import { AlpacaStockCollector, AlpacaCryptoCollector } from './finint/AlpacaColl
 import { TwitterCollector } from './socmint/TwitterCollector'
 import { RedditCollector } from './socmint/RedditCollector'
 import { TelegramChannelCollector } from './socmint/TelegramChannelCollector'
+import { MastodonCollector } from './socmint/MastodonCollector'
 
 // GEOINT
 import { UsgsEarthquakeCollector } from './geoint/UsgsEarthquakeCollector'
@@ -112,10 +113,11 @@ export function registerAllCollectors(): void {
   collectorManager.registerFactory('alpaca-stock', () => new AlpacaStockCollector())
   collectorManager.registerFactory('alpaca-crypto', () => new AlpacaCryptoCollector())
 
-  // SOCMINT (3)
+  // SOCMINT (4)
   collectorManager.registerFactory('twitter', () => new TwitterCollector())
   collectorManager.registerFactory('reddit', () => new RedditCollector())
   collectorManager.registerFactory('telegram-channel', () => new TelegramChannelCollector())
+  collectorManager.registerFactory('mastodon', () => new MastodonCollector())
 
   // GEOINT (3)
   collectorManager.registerFactory('usgs-earthquake', () => new UsgsEarthquakeCollector())

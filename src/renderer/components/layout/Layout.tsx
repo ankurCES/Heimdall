@@ -4,6 +4,7 @@ import { Menu, X } from 'lucide-react'
 import { Sidebar } from './Sidebar'
 import { ErrorBoundary } from '../ErrorBoundary'
 import { ClassificationBanner, type Classification, isClassification } from '../ClassificationBanner'
+import { ModelDownloadBanner } from '../ModelDownloadBanner'
 
 export function Layout() {
   const [mobileOpen, setMobileOpen] = useState(false)
@@ -81,6 +82,10 @@ export function Layout() {
 
       {/* Bottom banner mirrors the top — SCIF convention. */}
       <ClassificationBanner level={clearance} />
+
+      {/* v1.4.4 — non-intrusive corner toast for background model downloads.
+          Renders nothing when no downloads are active or pending. */}
+      <ModelDownloadBanner />
     </div>
   )
 }

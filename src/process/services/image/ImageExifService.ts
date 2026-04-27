@@ -5,6 +5,7 @@ import exifr from 'exifr'
 import log from 'electron-log'
 import { generateId } from '@common/utils/id'
 import { getDatabase } from '../database'
+import { enrichImageMeta, type EnrichedImageMeta } from './ImageIntelEnricher'
 
 /**
  * Theme 8.1 — Image EXIF + geolocation extraction.
@@ -49,6 +50,11 @@ export interface ImageEvidence {
   gps_accuracy_m: number | null
   raw_exif: string | null
   ingested_at: number
+  // v1.4.1 deep-pipeline enrichment columns (migration 046)
+  tags_json?: string | null
+  reverse_search_json?: string | null
+  device_class?: string | null
+  software?: string | null
 }
 
 export class ImageExifService {
@@ -75,23 +81,38 @@ export class ImageExifService {
     const name = path.basename(filePath)
     const mime = this.guessMime(name, buf)
 
+    // v1.4.1 deep enrichment — derive tags + device class + reverse-image
+    // search hints from the raw EXIF (pure, deterministic, no network).
+    let enriched: EnrichedImageMeta | null = null
+    try {
+      const rawParsed = meta.raw_exif ? JSON.parse(meta.raw_exif) as Record<string, unknown> : null
+      enriched = enrichImageMeta(rawParsed as never, { fileName: name, fileSize: stat.size })
+    } catch (err) {
+      log.debug(`image-exif: enrich failed: ${err}`)
+    }
+
     db.prepare(`
       INSERT INTO image_evidence
         (id, source_path, source_kind, file_name, file_size, mime_type, sha256,
          report_id, latitude, longitude, altitude_m, captured_at,
          camera_make, camera_model, lens_model, orientation, width, height,
-         gps_accuracy_m, raw_exif, ingested_at)
-      VALUES (?, ?, 'file', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         gps_accuracy_m, raw_exif, ingested_at,
+         tags_json, reverse_search_json, device_class, software)
+      VALUES (?, ?, 'file', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       id, filePath, name, stat.size, mime, sha,
       reportId ?? null,
       meta.latitude, meta.longitude, meta.altitude_m, meta.captured_at,
       meta.camera_make, meta.camera_model, meta.lens_model,
       meta.orientation, meta.width, meta.height,
-      meta.gps_accuracy_m, meta.raw_exif, now
+      meta.gps_accuracy_m, meta.raw_exif, now,
+      enriched ? JSON.stringify(enriched.tags) : null,
+      enriched ? JSON.stringify(enriched.reverse_search_urls) : null,
+      enriched?.device_class ?? null,
+      enriched?.software ?? null
     )
 
-    log.info(`image-exif: ingested ${name} (${stat.size} B) → ${id} ${meta.latitude != null ? `geo=${meta.latitude.toFixed(4)},${meta.longitude!.toFixed(4)}` : 'no geo'}`)
+    log.info(`image-exif: ingested ${name} (${stat.size} B) → ${id}${enriched?.device_class && enriched.device_class !== 'unknown' ? ` [${enriched.device_class}]` : ''} ${meta.latitude != null ? `geo=${meta.latitude.toFixed(4)},${meta.longitude!.toFixed(4)}` : 'no geo'}${enriched?.tags.length ? ` tags=${enriched.tags.slice(0, 4).join(',')}` : ''}`)
 
     return this.get(id)!
   }
@@ -161,7 +182,8 @@ export class ImageExifService {
       SELECT id, source_path, source_kind, file_name, file_size, mime_type, sha256,
              report_id, latitude, longitude, altitude_m, captured_at,
              camera_make, camera_model, lens_model, orientation, width, height,
-             gps_accuracy_m, raw_exif, ingested_at
+             gps_accuracy_m, raw_exif, ingested_at,
+             tags_json, reverse_search_json, device_class, software
       FROM image_evidence WHERE id = ?
     `).get(id) as ImageEvidence) || null
   }
@@ -184,7 +206,8 @@ export class ImageExifService {
       SELECT id, source_path, source_kind, file_name, file_size, mime_type, sha256,
              report_id, latitude, longitude, altitude_m, captured_at,
              camera_make, camera_model, lens_model, orientation, width, height,
-             gps_accuracy_m, raw_exif, ingested_at
+             gps_accuracy_m, raw_exif, ingested_at,
+             tags_json, reverse_search_json, device_class, software
       FROM image_evidence ORDER BY ingested_at DESC LIMIT ?
     `).all(limit) as ImageEvidence[]
   }
@@ -192,6 +215,59 @@ export class ImageExifService {
   remove(id: string): void {
     const db = getDatabase()
     db.prepare('DELETE FROM image_evidence WHERE id = ?').run(id)
+  }
+
+  /** v1.4.1 — list images by coarse device class (drone, smartphone, etc.). */
+  listByDeviceClass(deviceClass: string, limit = 100): ImageEvidence[] {
+    const db = getDatabase()
+    return db.prepare(`
+      SELECT id, source_path, source_kind, file_name, file_size, mime_type, sha256,
+             report_id, latitude, longitude, altitude_m, captured_at,
+             camera_make, camera_model, lens_model, orientation, width, height,
+             gps_accuracy_m, raw_exif, ingested_at,
+             tags_json, reverse_search_json, device_class, software
+      FROM image_evidence WHERE device_class = ?
+      ORDER BY ingested_at DESC LIMIT ?
+    `).all(deviceClass, limit) as ImageEvidence[]
+  }
+
+  /**
+   * v1.4.1 — re-derive tags + reverse-search hints for already-ingested
+   * rows that pre-date migration 046. Idempotent; safe to re-run.
+   * Returns the number of rows updated.
+   */
+  backfillEnrichment(opts: { limit?: number } = {}): number {
+    const db = getDatabase()
+    const limit = opts.limit ?? 1000
+    const rows = db.prepare(`
+      SELECT id, file_name, file_size, raw_exif FROM image_evidence
+      WHERE tags_json IS NULL ORDER BY ingested_at DESC LIMIT ?
+    `).all(limit) as Array<{ id: string; file_name: string | null; file_size: number | null; raw_exif: string | null }>
+    if (!rows.length) return 0
+    const upd = db.prepare(`
+      UPDATE image_evidence
+      SET tags_json = ?, reverse_search_json = ?, device_class = ?, software = ?
+      WHERE id = ?
+    `)
+    let touched = 0
+    const tx = db.transaction((batch: typeof rows) => {
+      for (const r of batch) {
+        let parsed: Record<string, unknown> | null = null
+        try { parsed = r.raw_exif ? JSON.parse(r.raw_exif) : null } catch { /* */ }
+        const e = enrichImageMeta(parsed as never, { fileName: r.file_name, fileSize: r.file_size })
+        upd.run(
+          JSON.stringify(e.tags),
+          JSON.stringify(e.reverse_search_urls),
+          e.device_class,
+          e.software,
+          r.id
+        )
+        touched++
+      }
+    })
+    tx(rows)
+    log.info(`image-exif: backfilled enrichment for ${touched} row(s)`)
+    return touched
   }
 }
 

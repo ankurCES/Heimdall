@@ -15,7 +15,7 @@ interface ApiKeyConfig {
 }
 
 const API_KEY_CONFIGS: ApiKeyConfig[] = [
-  { service: 'openai', label: 'OpenAI API Key', description: 'For LLM analysis (GPT-4o)', category: 'LLM Providers' },
+  { service: 'openai', label: 'OpenAI API Key', description: 'For LLM analysis (GPT-4o); also reused for cloud Whisper transcription if enabled', category: 'LLM Providers' },
   { service: 'anthropic', label: 'Anthropic API Key', description: 'For LLM analysis (Claude)', category: 'LLM Providers' },
   { service: 'ollama_cloud', label: 'Ollama Cloud API Key', description: 'For LLM analysis via Ollama Cloud', category: 'LLM Providers' },
   { service: 'openrouter', label: 'OpenRouter API Key', description: 'Multi-model LLM gateway', category: 'LLM Providers' },
@@ -23,11 +23,16 @@ const API_KEY_CONFIGS: ApiKeyConfig[] = [
   { service: 'twitter', label: 'Twitter/X Bearer Token', description: 'SOCMINT — public tweet search', category: 'Social Media' },
   { service: 'reddit_client_id', label: 'Reddit Client ID', description: 'SOCMINT — subreddit monitoring', category: 'Social Media' },
   { service: 'reddit_client_secret', label: 'Reddit Client Secret', description: 'SOCMINT — OAuth2 auth', category: 'Social Media' },
+  { service: 'mastodon', label: 'Mastodon Access Token', description: 'SOCMINT — federated firehose (optional; only needed for higher rate limits or status search)', category: 'Social Media' },
   { service: 'otx', label: 'AlienVault OTX API Key', description: 'CYBINT — threat intelligence feeds', category: 'Threat Intel' },
   { service: 'abusech', label: 'abuse.ch Auth-Key', description: 'URLhaus + Feodo Tracker (free at auth.abuse.ch)', category: 'Threat Intel' },
-  { service: 'shodan', label: 'Shodan API Key', description: 'CYBINT — device/network scanning', category: 'Threat Intel' },
-  { service: 'hibp', label: 'HaveIBeenPwned API Key', description: 'CI — breach monitoring', category: 'Threat Intel' },
-  { service: 'virustotal', label: 'VirusTotal API Key', description: 'CYBINT — malware analysis', category: 'Threat Intel' },
+  { service: 'shodan', label: 'Shodan API Key', description: 'CYBINT — device/network scanning (free tier at shodan.io/register)', category: 'Threat Intel' },
+  { service: 'hibp', label: 'HaveIBeenPwned API Key', description: 'CI — breach monitoring ($3.95/mo at haveibeenpwned.com/API/Key)', category: 'Threat Intel' },
+  { service: 'virustotal', label: 'VirusTotal API Key', description: 'CYBINT — malware/URL/hash analysis (free tier at virustotal.com/gui/join-us)', category: 'Threat Intel' },
+  { service: 'greynoise', label: 'GreyNoise API Key', description: 'CYBINT — internet background-noise scanner attribution (free community tier at viz.greynoise.io/signup)', category: 'Threat Intel' },
+  { service: 'abuseipdb', label: 'AbuseIPDB API Key', description: 'CYBINT — crowdsourced IP abuse reports (free tier 1000 checks/day at abuseipdb.com/register)', category: 'Threat Intel' },
+  { service: 'urlscan', label: 'urlscan.io API Key', description: 'CYBINT — URL screenshots + DOM analysis (free tier at urlscan.io/user/signup)', category: 'Threat Intel' },
+  { service: 'ipinfo', label: 'IPinfo API Key', description: 'CYBINT — IP geolocation, ASN, carrier (free tier 50k req/mo at ipinfo.io/signup)', category: 'Threat Intel' },
   { service: 'gnews', label: 'GNews API Key', description: 'OSINT — global news search (100 req/day free)', category: 'News & Data' },
   { service: 'datagov', label: 'Data.gov API Key', description: 'FBI Crime Data Explorer (free at api.data.gov/signup)', category: 'Government Data' },
   { service: 'obsidian', label: 'Obsidian Local REST API Key', description: 'Connect to Obsidian vault for intel visualization', category: 'Integrations' },

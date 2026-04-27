@@ -128,7 +128,7 @@ export class DocumentOcrService {
     let text = ''
     let confidence = 0
     let pageCount: number | null = null
-    let engine: string
+    let engine: string = 'unknown'
 
     try {
       if (mime === 'application/pdf') {
@@ -159,14 +159,23 @@ export class DocumentOcrService {
           log.info(`document-ocr: LLM vision extracted ${text.length} chars`)
         }
         // Fallback: tesseract.js — pure JS, no network, deterministic.
+        // v1.4.3: prefer the locally-managed traineddata file from
+        // ModelDownloadManager so we never re-fetch from CDN at first
+        // OCR. Falls back to tesseract.js's bundled CDN path if the
+        // managed copy isn't installed yet.
         if (!text || text.length < 5) {
           const tesseract = await import('tesseract.js')
-          const result = await tesseract.recognize(buf, 'eng')
+          const { modelDownloadManager } = await import('../models/ModelDownloadManager')
+          const trainedPath = modelDownloadManager.path('tesseract-eng')
+          const recognizeOpts = trainedPath
+            ? { langPath: require('path').dirname(trainedPath), gzip: false }
+            : undefined
+          const result = await tesseract.recognize(buf, 'eng', recognizeOpts)
           text = result.data.text || ''
           confidence = result.data.confidence || 0
           pageCount = 1
           engine = text ? 'tesseract.js' : 'tesseract.js:empty'
-          log.info(`document-ocr: tesseract fallback extracted ${text.length} chars (conf ${confidence.toFixed(0)})`)
+          log.info(`document-ocr: tesseract fallback extracted ${text.length} chars (conf ${confidence.toFixed(0)}${trainedPath ? ', local-traineddata' : ', cdn-traineddata'})`)
         }
       } else {
         throw new Error(`Unsupported file type: ${ext || 'no extension'}`)

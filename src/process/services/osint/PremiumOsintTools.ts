@@ -23,8 +23,25 @@ interface OsintApiKeys {
   ipinfo?: string
 }
 
+// Reads keys from the flat `apikeys.<service>` slots used by ApiKeysTab
+// (each one stored individually so safeStorage can encrypt it on disk).
+// Falls back to the legacy nested `osint.apiKeys.<provider>` object so
+// existing installs keep working after the v1.4.1 schema reconciliation.
 function getKeys(): OsintApiKeys {
-  return settingsService.get<OsintApiKeys>('osint.apiKeys') || {}
+  const legacy = settingsService.get<OsintApiKeys>('osint.apiKeys') || {}
+  const pick = (svc: keyof OsintApiKeys): string | undefined => {
+    const flat = settingsService.get<string>(`apikeys.${svc}`)
+    return (flat && flat.trim()) || legacy[svc]
+  }
+  return {
+    shodan: pick('shodan'),
+    virustotal: pick('virustotal'),
+    greynoise: pick('greynoise'),
+    abuseipdb: pick('abuseipdb'),
+    hibp: pick('hibp'),
+    urlscan: pick('urlscan'),
+    ipinfo: pick('ipinfo')
+  }
 }
 
 function noKeyResult(provider: string, signupUrl: string): ToolResult {

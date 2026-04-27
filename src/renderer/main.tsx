@@ -30,6 +30,7 @@ import { OvernightPage } from './pages/overnight/OvernightPage'
 import { GeofencesPage } from './pages/geofences/GeofencesPage'
 import { AnomaliesPage } from './pages/anomalies/AnomaliesPage'
 import { ImagesPage } from './pages/images/ImagesPage'
+import { TranscriptsPage } from './pages/transcripts/TranscriptsPage'
 import { StixPage } from './pages/stix/StixPage'
 import { MemoryPage } from './pages/memory/MemoryPage'
 import { DarkWebPage } from './pages/darkweb/DarkWebPage'
@@ -92,6 +93,7 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
           <Route path="/geofences" element={<GeofencesPage />} />
           <Route path="/anomalies" element={<AnomaliesPage />} />
           <Route path="/images" element={<ImagesPage />} />
+          <Route path="/transcripts" element={<TranscriptsPage />} />
           <Route path="/stix" element={<StixPage />} />
           <Route path="/memory" element={<MemoryPage />} />
           <Route path="/darkweb" element={<DarkWebPage />} />

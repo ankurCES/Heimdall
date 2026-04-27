@@ -22,6 +22,13 @@ import { consolidationService } from './services/memory/ConsolidationService'
 import { disinfoService, insiderThreatService } from './services/counterintel/DisinfoService'
 import { conflictService } from './services/forecast/ForecastService'
 import { taxiiServer } from './services/taxii/TaxiiServer'
+import { registerMediaSchemeAsPrivileged, registerMediaProtocolHandler } from './services/media/MediaProtocolService'
+
+// v1.4.6 — register the heimdall-media:// scheme as privileged BEFORE
+// app.whenReady() resolves. The protocol handler itself is wired later
+// in initializeDeferred() once the DB is up so transcript/image lookups
+// can succeed. This split is mandated by Electron's protocol API.
+registerMediaSchemeAsPrivileged()
 // Kuzu graph DB removed — buggy native module, dormant for entire history,
 // SQLite handled every graph query in practice. See migration 012.
 
@@ -166,6 +173,23 @@ async function initializeDeferred(): Promise<void> {
     const { registerPremiumOsintTools } = await import('./services/osint/PremiumOsintTools')
     registerPremiumOsintTools()
   } catch (err) { log.warn(`Premium OSINT tools registration failed: ${err}`) }
+
+  // v1.4.3 — seamless local-model bootstrap. Load the registry, then
+  // background-fetch any required asset that's missing (Whisper base
+  // model, Tesseract data). Non-blocking; UI keeps loading in
+  // parallel. Renderer subscribes to models:status_update for the
+  // download-progress chrome.
+  try {
+    const { modelDownloadManager } = await import('./services/models/ModelDownloadManager')
+    await modelDownloadManager.start()
+    setImmediate(() => modelDownloadManager.ensureRequired())
+  } catch (err) { log.warn(`Model download manager init failed: ${err}`) }
+
+  // v1.4.6 — wire the heimdall-media:// handler now that the DB is
+  // ready (so transcript/image ID → path lookups can succeed).
+  try {
+    registerMediaProtocolHandler()
+  } catch (err) { log.warn(`Media protocol handler init failed: ${err}`) }
 
   // Load enabled sources from DB and schedule them
   await collectorManager.loadFromDatabase()

@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer } from 'electron'
+import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import { IPC_CHANNELS, IPC_EVENTS } from '@common/adapter/ipcBridge'
 
 const testChannels = [
@@ -66,6 +66,11 @@ const testChannels = [
   'anomaly:detect', 'anomaly:recent', 'anomaly:latest', 'anomaly:signals',
   'iw:suggest_indicators',
   'image:ingest_file', 'image:ingest_pick', 'image:list', 'image:get', 'image:delete',
+  'transcription:ingest_file', 'transcription:ingest_pick', 'transcription:list',
+  'transcription:get', 'transcription:delete', 'transcription:test_engine',
+  'transcription:translate', 'transcription:save_blob',
+  'models:list', 'models:status', 'models:ensure_required', 'models:download_one',
+  'models:reinstall', 'models:cancel', 'models:locate_binary', 'models:install_via_brew',
   'stix:export', 'stix:import', 'stix:import_pick', 'stix:runs',
   'memory:consolidate', 'memory:latest_run', 'memory:recent_runs',
   'tradecraft:adjust_credibility', 'tradecraft:source_trust',
@@ -164,7 +169,8 @@ const workflowEvents = ['workflow:node_progress', 'workflow:run_complete']
 const reportsEvents = ['reports:promotion_progress']
 const alertEvents = ['alert:incoming']
 const syncEvents = ['sync:progress', 'enrichment:progress', 'watch:hits', 'markets:backfillProgress']
-const allowedEvents = [...Object.values(IPC_EVENTS), ...chatEvents, ...syncEvents, ...darkwebEvents, ...telegramIntelEvents, ...workflowEvents, ...reportsEvents, ...alertEvents]
+const modelsEvents = ['models:status_update']
+const allowedEvents = [...Object.values(IPC_EVENTS), ...chatEvents, ...syncEvents, ...darkwebEvents, ...telegramIntelEvents, ...workflowEvents, ...reportsEvents, ...alertEvents, ...modelsEvents]
 
 const api = {
   invoke: (channel: string, ...args: unknown[]): Promise<unknown> => {
@@ -188,6 +194,14 @@ const api = {
       throw new Error(`IPC event not allowed: ${event}`)
     }
     ipcRenderer.once(event, (_event, ...args) => callback(...args))
+  },
+
+  // Resolve the absolute filesystem path of a File dropped onto the
+  // renderer. Electron 32+ removed the legacy `File.path` property so
+  // contextBridge'd `webUtils.getPathForFile` is the supported route.
+  // Used by drag-and-drop ingest UIs (Transcripts, Images, Documents).
+  getPathForFile: (file: File): string => {
+    try { return webUtils.getPathForFile(file) } catch { return '' }
   }
 }
 

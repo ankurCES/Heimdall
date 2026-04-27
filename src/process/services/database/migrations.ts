@@ -2773,6 +2773,133 @@ const migrations: Migration[] = [
       `)
       log.info('Migration 045: v1.3 calibration + hardening tables created (forecast_claims, forecast_outcomes, audit_chain_anchors, opsec_config)')
     }
+  },
+  {
+    version: '046',
+    name: 'v1_4_image_intel_deep',
+    up: (db) => {
+      // v1.4.1 — Image-intel deep pipeline.
+      //
+      // Extends image_evidence with auto-derived classification +
+      // reverse-image-search hints so the IMINT analyst doesn't have to
+      // re-derive these on every drilldown. Tags are stored as a JSON
+      // array (e.g. ["geo_tagged","drone","dji"]); reverse_search_json
+      // holds a map of {provider: url} for one-click handoff to
+      // Google Lens / TinEye / Yandex.
+      //
+      // device_class is a coarse bucket (smartphone | dslr | drone |
+      // surveillance | unknown) so analytics queries can group cleanly.
+      const cols = (db.prepare(`PRAGMA table_info(image_evidence)`).all() as Array<{ name: string }>)
+        .map(c => c.name)
+      const add = (sql: string) => { try { db.exec(sql) } catch (err) { log.debug(`migration 046 add column: ${err}`) } }
+      if (!cols.includes('tags_json')) add(`ALTER TABLE image_evidence ADD COLUMN tags_json TEXT`)
+      if (!cols.includes('reverse_search_json')) add(`ALTER TABLE image_evidence ADD COLUMN reverse_search_json TEXT`)
+      if (!cols.includes('device_class')) add(`ALTER TABLE image_evidence ADD COLUMN device_class TEXT`)
+      if (!cols.includes('software')) add(`ALTER TABLE image_evidence ADD COLUMN software TEXT`)
+      db.exec(`CREATE INDEX IF NOT EXISTS idx_image_device ON image_evidence(device_class)`)
+      log.info('Migration 046: image_evidence extended with tags_json, reverse_search_json, device_class, software')
+    }
+  },
+  {
+    version: '047',
+    name: 'v1_4_2_transcripts',
+    up: (db) => {
+      // v1.4.2 — Local-first audio/video transcription.
+      //
+      // One row per ingested media file. Engine is whisper.cpp by
+      // default (analyst configures the binary path); falls back to a
+      // user-supplied OpenAI-compatible /v1/audio/transcriptions
+      // endpoint if explicitly enabled. Cloud OpenAI is opt-in, never
+      // used unless settings.transcription.allowCloud is true.
+      //
+      // segments_json stores the timestamped segments array
+      // ([{start, end, text}, ...]) so the renderer can scrub through
+      // long recordings; full_text is the joined plain text for FTS.
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS transcripts (
+          id TEXT PRIMARY KEY,
+          source_path TEXT NOT NULL,
+          source_kind TEXT NOT NULL,
+          file_name TEXT,
+          file_size INTEGER,
+          mime_type TEXT,
+          sha256 TEXT,
+          duration_ms INTEGER,
+          language TEXT,
+          model TEXT,
+          engine TEXT,
+          full_text TEXT,
+          segments_json TEXT,
+          report_id TEXT,
+          ingested_at INTEGER NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_transcript_sha ON transcripts(sha256);
+        CREATE INDEX IF NOT EXISTS idx_transcript_report ON transcripts(report_id);
+        CREATE INDEX IF NOT EXISTS idx_transcript_ingested ON transcripts(ingested_at DESC);
+      `)
+      log.info('Migration 047: transcripts table created (v1.4.2)')
+    }
+  },
+  {
+    version: '048',
+    name: 'v1_4_6_transcript_translation',
+    up: (db) => {
+      // v1.4.6 — Persist English translation alongside the original
+      // transcript so analysts can toggle between source-language and
+      // English without re-paying the LLM cost on every drilldown.
+      // The original `full_text` and `segments_json` stay untouched
+      // (chain-of-custody); translation is purely additive.
+      const cols = (db.prepare(`PRAGMA table_info(transcripts)`).all() as Array<{ name: string }>)
+        .map(c => c.name)
+      const add = (sql: string) => { try { db.exec(sql) } catch (err) { log.debug(`migration 048 add column: ${err}`) } }
+      if (!cols.includes('translated_text')) add(`ALTER TABLE transcripts ADD COLUMN translated_text TEXT`)
+      if (!cols.includes('translated_lang')) add(`ALTER TABLE transcripts ADD COLUMN translated_lang TEXT`)
+      if (!cols.includes('translated_at')) add(`ALTER TABLE transcripts ADD COLUMN translated_at INTEGER`)
+      log.info('Migration 048: transcripts extended with translation columns (v1.4.6)')
+    }
+  },
+  {
+    version: '049',
+    name: 'v1_4_7_translated_segments',
+    up: (db) => {
+      // v1.4.7 — Persist segment-level translations so the analyst can
+      // jump to a timestamp in the translation view the same way they
+      // can in the original. Schema: a JSON array of {start, end, text}
+      // mirroring segments_json, where text is the translated string.
+      const cols = (db.prepare(`PRAGMA table_info(transcripts)`).all() as Array<{ name: string }>)
+        .map(c => c.name)
+      if (!cols.includes('translated_segments_json')) {
+        try { db.exec(`ALTER TABLE transcripts ADD COLUMN translated_segments_json TEXT`) }
+        catch (err) { log.debug(`migration 049 add column: ${err}`) }
+      }
+      log.info('Migration 049: transcripts.translated_segments_json added (v1.4.7)')
+    }
+  },
+  {
+    version: '050',
+    name: 'v1_4_7_intel_reports_metadata_json',
+    up: (db) => {
+      // v1.4.7 hotfix — TranslationService.translateAndStore() (added in
+      // v1.4) reads/writes intel_reports.metadata_json, but the column
+      // was never added to the schema. Existing installs were spamming
+      // "SqliteError: no such column: metadata_json" on every fresh
+      // ingest. Add it idempotently.
+      const cols = (db.prepare(`PRAGMA table_info(intel_reports)`).all() as Array<{ name: string }>)
+        .map(c => c.name)
+      if (!cols.includes('metadata_json')) {
+        try { db.exec(`ALTER TABLE intel_reports ADD COLUMN metadata_json TEXT`) }
+        catch (err) { log.debug(`migration 050 add column: ${err}`) }
+      }
+      if (!cols.includes('original_lang')) {
+        try { db.exec(`ALTER TABLE intel_reports ADD COLUMN original_lang TEXT`) }
+        catch (err) { log.debug(`migration 050 original_lang: ${err}`) }
+      }
+      if (!cols.includes('original_content')) {
+        try { db.exec(`ALTER TABLE intel_reports ADD COLUMN original_content TEXT`) }
+        catch (err) { log.debug(`migration 050 original_content: ${err}`) }
+      }
+      log.info('Migration 050: intel_reports.{metadata_json,original_lang,original_content} added (v1.4.7 hotfix)')
+    }
   }
 ]
 

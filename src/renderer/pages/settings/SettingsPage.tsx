@@ -16,7 +16,8 @@ import {
   Globe2,
   GraduationCap,
   Stamp,
-  Shield
+  Shield,
+  HardDrive
 } from 'lucide-react'
 import { cn } from '@renderer/lib/utils'
 import { ApiKeysTab } from './tabs/ApiKeysTab'
@@ -35,6 +36,7 @@ import { DarkWebTab } from './tabs/DarkWebTab'
 import { TrainingDataTab } from './tabs/TrainingDataTab'
 import { LetterheadTab } from './tabs/LetterheadTab'
 import { OpSecTab } from './tabs/OpSecTab'
+import { ModelsTab } from './tabs/ModelsTab'
 
 const tabs = [
   { id: 'sources', label: 'Sources', icon: Database, component: SourcesTab },
@@ -44,6 +46,7 @@ const tabs = [
   { id: 'meshtastic', label: 'Meshtastic', icon: Radio, component: MeshtasticTab },
   { id: 'obsidian', label: 'Obsidian', icon: BookOpen, component: ObsidianTab },
   { id: 'llm', label: 'LLM', icon: Brain, component: LlmTab },
+  { id: 'models', label: 'Local Models', icon: HardDrive, component: ModelsTab },
   { id: 'safety', label: 'Safety', icon: ShieldCheck, component: SafetyTab },
   { id: 'compartments', label: 'Compartments', icon: Lock, component: CompartmentsTab },
   { id: 'profile', label: 'Analyst Profile', icon: User, component: AnalystProfileTab },
@@ -56,7 +59,18 @@ const tabs = [
 ]
 
 export function SettingsPage() {
-  const [activeTab, setActiveTab] = useState('sources')
+  // Honor a one-shot deep-link hint set by other parts of the app
+  // (e.g. ModelDownloadBanner's "Manage models" link). Cleared after read.
+  const [activeTab, setActiveTab] = useState(() => {
+    if (typeof sessionStorage !== 'undefined') {
+      const hint = sessionStorage.getItem('settings:initialTab')
+      if (hint) {
+        sessionStorage.removeItem('settings:initialTab')
+        return hint
+      }
+    }
+    return 'sources'
+  })
 
   const ActiveComponent = tabs.find((t) => t.id === activeTab)?.component ?? SourcesTab
 
