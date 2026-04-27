@@ -3,6 +3,7 @@ import log from 'electron-log'
 import { entityResolutionService } from '../services/entity/EntityResolutionService'
 import { patternOfLifeService } from '../services/entity/PatternOfLifeService'
 import { entityTimelineService } from '../services/entity/EntityTimelineService'
+import { entityCoMentionService } from '../services/entity/EntityCoMentionService'
 
 /**
  * Theme 4.6 — entity resolution IPC.
@@ -42,6 +43,13 @@ export function registerEntityBridge(): void {
   // + HUMINT + documents + briefings + images, sorted by timestamp.
   ipcMain.handle('entity:timeline', (_evt, args: { id: string; limitPerCorpus?: number }) => {
     return entityTimelineService.getTimeline(args.id, args.limitPerCorpus ?? 50)
+  })
+
+  // v1.7.1 — co-mention link analysis. Returns the top-N other
+  // canonical entities that share at least one intel_report with the
+  // source entity, ranked by shared-report count.
+  ipcMain.handle('entity:co_mentions', (_evt, args: { id: string; limit?: number }) => {
+    return entityCoMentionService.getCoMentions(args.id, args.limit ?? 25)
   })
 
   log.info('entity bridge registered')

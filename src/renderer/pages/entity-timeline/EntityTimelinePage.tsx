@@ -18,7 +18,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { useParams, useNavigate, Link } from 'react-router-dom'
 import {
   Clock, FileText, Mic, Users, FileScan, ScrollText, Image as ImageIcon,
-  ArrowLeft, Loader2, AlertCircle, GitMerge
+  ArrowLeft, Loader2, AlertCircle, GitMerge, Network
 } from 'lucide-react'
 import { Button } from '@renderer/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@renderer/components/ui/card'
@@ -57,6 +57,25 @@ interface TimelineSummary {
 interface Timeline {
   summary: TimelineSummary
   events: TimelineEvent[]
+}
+
+// v1.7.1 — co-mention graph anchored on this entity. Built from
+// intel_entities (the only layer with explicitly-canonicalised
+// links), so edges are deterministic.
+interface CoMention {
+  canonical_id: string
+  canonical_value: string
+  entity_type: string
+  shared_reports: number
+  co_mention_count: number
+  last_co_mentioned_at: number
+}
+interface CoMentionGraph {
+  source_canonical_id: string
+  source_canonical_value: string
+  source_entity_type: string
+  source_report_count: number
+  edges: CoMention[]
 }
 
 const KIND_META: Record<Kind, { label: string; icon: typeof FileText; color: string }> = {
@@ -105,13 +124,16 @@ export function EntityTimelinePage() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
   const [timeline, setTimeline] = useState<Timeline | null>(null)
+  const [coMentions, setCoMentions] = useState<CoMentionGraph | null>(null)
   const [loading, setLoading] = useState(true)
+  const [coMentionsLoading, setCoMentionsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [activeKinds, setActiveKinds] = useState<Set<Kind>>(new Set(['intel', 'transcript', 'humint', 'document', 'briefing', 'image']))
 
   useEffect(() => {
     if (!id) return
     setLoading(true); setError(null)
+    setCoMentions(null)
     void (async () => {
       try {
         const r = await window.heimdall.invoke('entity:timeline', { id, limitPerCorpus: 50 }) as Timeline | null
@@ -120,6 +142,16 @@ export function EntityTimelinePage() {
       } catch (err) {
         setError(String(err).replace(/^Error:\s*/, ''))
       } finally { setLoading(false) }
+    })()
+    // Co-mentions fetch in parallel; failure is non-fatal — timeline
+    // stays usable when the link analysis call errors out.
+    setCoMentionsLoading(true)
+    void (async () => {
+      try {
+        const r = await window.heimdall.invoke('entity:co_mentions', { id, limit: 25 }) as CoMentionGraph | null
+        setCoMentions(r ?? null)
+      } catch { setCoMentions(null) }
+      finally { setCoMentionsLoading(false) }
     })()
   }, [id])
 
@@ -205,7 +237,8 @@ export function EntityTimelinePage() {
         )}
       </div>
 
-      <div className="flex-1 overflow-auto px-6 py-4">
+      <div className="flex flex-1 overflow-hidden">
+        <div className="flex-1 overflow-auto px-6 py-4">
         {loading && (
           <div className="flex items-center gap-2 text-sm text-muted-foreground">
             <Loader2 className="h-4 w-4 animate-spin" /> Building timeline…
@@ -283,6 +316,66 @@ export function EntityTimelinePage() {
           Cross-corpus timeline assembled from {timeline?.summary.mention_count ?? '—'} canonical mentions across 6 corpora.
           {' '}<Link to="/entities" className="text-primary hover:underline">Browse all entities</Link>
         </div>
+        </div>
+
+        {/* v1.7.1 — Co-mention link analysis sidebar. Click any row to
+            navigate to that entity's own timeline (recursive
+            exploration across the entity graph). */}
+        <aside className="w-72 border-l border-border overflow-auto p-4 space-y-3 bg-muted/10">
+          <div className="flex items-center gap-2">
+            <Network className="h-4 w-4 text-primary" />
+            <h2 className="text-sm font-semibold">Co-mentions</h2>
+          </div>
+          <p className="text-[11px] text-muted-foreground">
+            Other canonical entities that share at least one intel report with this one. Click to pivot.
+          </p>
+          {coMentionsLoading && (
+            <div className="text-xs text-muted-foreground flex items-center gap-2">
+              <Loader2 className="h-3 w-3 animate-spin" /> Loading…
+            </div>
+          )}
+          {!coMentionsLoading && coMentions && coMentions.edges.length === 0 && (
+            <div className="text-xs text-muted-foreground italic">
+              No co-mentions yet. Run the entity resolver (Entities → Resolve) so canonical links exist, or wait for more reports.
+            </div>
+          )}
+          {!coMentionsLoading && coMentions && coMentions.edges.length > 0 && (
+            <>
+              <div className="text-[11px] text-muted-foreground border-b border-border pb-2">
+                {coMentions.edges.length} of top-25 partners across <strong className="text-foreground">{coMentions.source_report_count}</strong> shared report{coMentions.source_report_count !== 1 ? 's' : ''}
+              </div>
+              <ul className="space-y-1">
+                {coMentions.edges.map((edge) => {
+                  // Pixel-bar width relative to the strongest partner —
+                  // gives the analyst a quick visual ranking.
+                  const top = coMentions.edges[0]?.shared_reports || 1
+                  const pct = Math.max(8, Math.round((edge.shared_reports / top) * 100))
+                  return (
+                    <li key={edge.canonical_id}>
+                      <button
+                        onClick={() => navigate(`/entity/${encodeURIComponent(edge.canonical_id)}`)}
+                        className="w-full text-left rounded-md p-2 hover:bg-accent/50 transition-colors border border-transparent hover:border-border"
+                      >
+                        <div className="flex items-center gap-2">
+                          <Badge variant="outline" className="text-[9px] uppercase shrink-0 font-mono">{edge.entity_type}</Badge>
+                          <span className="text-xs font-medium truncate flex-1">{edge.canonical_value}</span>
+                          <span className="text-[11px] font-mono text-muted-foreground shrink-0">{edge.shared_reports}</span>
+                        </div>
+                        <div className="mt-1.5 h-1 w-full bg-muted rounded-full overflow-hidden">
+                          <div className="h-full bg-primary/70" style={{ width: `${pct}%` }} />
+                        </div>
+                        <div className="mt-1 text-[10px] text-muted-foreground">
+                          {edge.co_mention_count} mention{edge.co_mention_count !== 1 ? 's' : ''} ·
+                          last seen {new Date(edge.last_co_mentioned_at).toLocaleDateString()}
+                        </div>
+                      </button>
+                    </li>
+                  )
+                })}
+              </ul>
+            </>
+          )}
+        </aside>
       </div>
     </div>
   )
