@@ -11,11 +11,11 @@
 
 import { useEffect, useState, useRef, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Search, FileText, Mic, X as XIcon, Loader2, Star, Bookmark, Play, Trash2, Bell, BellOff, Users, FileScan, Image as ImageIcon } from 'lucide-react'
+import { Search, FileText, Mic, X as XIcon, Loader2, Star, Bookmark, Play, Trash2, Bell, BellOff, Users, FileScan, Image as ImageIcon, ScrollText } from 'lucide-react'
 import { toast } from 'sonner'
 import { cn } from '@renderer/lib/utils'
 
-type Kind = 'intel' | 'transcript' | 'humint' | 'document' | 'image'
+type Kind = 'intel' | 'transcript' | 'humint' | 'document' | 'image' | 'briefing'
 
 interface SearchHit {
   kind: Kind
@@ -36,6 +36,8 @@ interface SearchHit {
     pageCount?: number | null
     cameraMake?: string | null
     cameraModel?: string | null
+    classification?: string
+    intelCount?: number
   }
   createdAt: number
 }
@@ -94,6 +96,7 @@ export function UniversalSearchOverlay() {
         : a.hit_kind === 'humint' ? 'HUMINT'
         : a.hit_kind === 'document' ? 'Document'
         : a.hit_kind === 'image' ? 'Image'
+        : a.hit_kind === 'briefing' ? 'Briefing'
         : 'Intel'
       toast.message(`🔔 ${a.saved_search_name}: new hit`, {
         description: `${kindLabel} — ${a.hit_title}`,
@@ -112,6 +115,10 @@ export function UniversalSearchOverlay() {
               case 'image':
                 sessionStorage.setItem('images:focusId', a.hit_id)
                 navigate('/images')
+                break
+              case 'briefing':
+                sessionStorage.setItem('briefings:focusId', a.hit_id)
+                navigate('/briefings')
                 break
               default:
                 navigate('/browse')
@@ -246,6 +253,10 @@ export function UniversalSearchOverlay() {
         sessionStorage.setItem('images:focusId', hit.id)
         navigate('/images')
         break
+      case 'briefing':
+        sessionStorage.setItem('briefings:focusId', hit.id)
+        navigate('/briefings')
+        break
     }
   }, [navigate])
 
@@ -289,7 +300,7 @@ export function UniversalSearchOverlay() {
         </div>
 
         <div className="flex items-center gap-1 px-3 py-1.5 border-b border-border bg-muted/20">
-          {(['all', 'intel', 'transcript', 'humint', 'document', 'image'] as const).map((k) => (
+          {(['all', 'intel', 'transcript', 'humint', 'document', 'image', 'briefing'] as const).map((k) => (
             <button
               key={k}
               onClick={() => setFilter(k)}
@@ -305,7 +316,8 @@ export function UniversalSearchOverlay() {
                 : k === 'transcript' ? 'Transcripts'
                 : k === 'humint' ? 'HUMINT'
                 : k === 'document' ? 'Documents'
-                : 'Images'}
+                : k === 'image' ? 'Images'
+                : 'Briefings'}
             </button>
           ))}
           <button
@@ -440,6 +452,7 @@ export function UniversalSearchOverlay() {
                 {hit.kind === 'humint' && <Users className="h-3.5 w-3.5 text-purple-600 dark:text-purple-400" />}
                 {hit.kind === 'document' && <FileScan className="h-3.5 w-3.5 text-orange-600 dark:text-orange-400" />}
                 {hit.kind === 'image' && <ImageIcon className="h-3.5 w-3.5 text-pink-600 dark:text-pink-400" />}
+                {hit.kind === 'briefing' && <ScrollText className="h-3.5 w-3.5 text-cyan-600 dark:text-cyan-400" />}
               </div>
               <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-2 text-sm">
@@ -466,6 +479,7 @@ export function UniversalSearchOverlay() {
                       : hit.kind === 'humint' ? `session ${hit.meta.sessionId?.slice(0, 8) ?? '—'}`
                       : hit.kind === 'document' ? (hit.meta.pageCount ? `${hit.meta.pageCount}p` : 'document')
                       : hit.kind === 'image' ? `${hit.meta.cameraMake ?? '—'} ${hit.meta.cameraModel ?? ''}`.trim()
+                      : hit.kind === 'briefing' ? `${hit.meta.classification ?? 'UNCLASSIFIED'} · ${hit.meta.intelCount ?? 0} intel`
                       : '—'}
                   </span>
                   <span>·</span>

@@ -3162,6 +3162,65 @@ const migrations: Migration[] = [
       `)
       log.info('Migration 055: daily_briefings table created (v1.6.0)')
     }
+  },
+  {
+    version: '056',
+    name: 'daily_briefings_fts5',
+    up: (db) => {
+      // v1.6.4 — extend Cmd-K to the briefings corpus. Mirrors the
+      // intel_reports_fts / transcripts_fts pattern: external-content
+      // virtual table + sync triggers. Indexed columns: body_md
+      // (the LLM-synthesised content) and classification (so analysts
+      // can filter UNCLASSIFIED briefings or find a specific
+      // compartment quickly).
+      try {
+        db.exec(`
+          CREATE VIRTUAL TABLE IF NOT EXISTS daily_briefings_fts USING fts5(
+            body_md,
+            classification,
+            content='daily_briefings',
+            content_rowid='rowid',
+            tokenize='porter unicode61 remove_diacritics 2'
+          );
+        `)
+      } catch (err) {
+        log.warn(`Migration 056: FTS5 create failed (${err}); skipping`)
+        return
+      }
+
+      const total = (db.prepare('SELECT COUNT(*) AS c FROM daily_briefings').get() as { c: number }).c
+      const ftsTotal = (db.prepare('SELECT COUNT(*) AS c FROM daily_briefings_fts').get() as { c: number }).c
+      if (ftsTotal < total) {
+        db.exec(`
+          INSERT INTO daily_briefings_fts(rowid, body_md, classification)
+          SELECT rowid, COALESCE(body_md, ''), COALESCE(classification, '')
+          FROM daily_briefings
+          WHERE rowid NOT IN (SELECT rowid FROM daily_briefings_fts);
+        `)
+        log.info(`Migration 056: backfilled ${total - ftsTotal} briefing(s)`)
+      }
+
+      db.exec(`
+        CREATE TRIGGER IF NOT EXISTS daily_briefings_fts_ai
+        AFTER INSERT ON daily_briefings BEGIN
+          INSERT INTO daily_briefings_fts(rowid, body_md, classification)
+          VALUES (new.rowid, COALESCE(new.body_md, ''), COALESCE(new.classification, ''));
+        END;
+        CREATE TRIGGER IF NOT EXISTS daily_briefings_fts_ad
+        AFTER DELETE ON daily_briefings BEGIN
+          INSERT INTO daily_briefings_fts(daily_briefings_fts, rowid, body_md, classification)
+          VALUES ('delete', old.rowid, COALESCE(old.body_md, ''), COALESCE(old.classification, ''));
+        END;
+        CREATE TRIGGER IF NOT EXISTS daily_briefings_fts_au
+        AFTER UPDATE ON daily_briefings BEGIN
+          INSERT INTO daily_briefings_fts(daily_briefings_fts, rowid, body_md, classification)
+          VALUES ('delete', old.rowid, COALESCE(old.body_md, ''), COALESCE(old.classification, ''));
+          INSERT INTO daily_briefings_fts(rowid, body_md, classification)
+          VALUES (new.rowid, COALESCE(new.body_md, ''), COALESCE(new.classification, ''));
+        END;
+      `)
+      log.info('Migration 056: daily_briefings_fts + sync triggers installed (v1.6.4)')
+    }
   }
 ]
 

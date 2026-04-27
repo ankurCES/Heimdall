@@ -294,9 +294,24 @@ export function BriefingsPage() {
   }, [])
 
   useEffect(() => {
-    void load()
-    // Poll every 5s while there's a generating briefing — cheap, only
-    // active during LLM calls.
+    void (async () => {
+      await load()
+      // v1.6.4 — honour the Cmd-K spotlight focus hint so a briefing
+      // hit clicked in the overlay opens directly in the detail pane.
+      if (typeof sessionStorage !== 'undefined') {
+        const focus = sessionStorage.getItem('briefings:focusId')
+        if (focus) {
+          sessionStorage.removeItem('briefings:focusId')
+          // Re-fetch list state from the closure-fresh setter so we don't
+          // race with the load() promise above.
+          setList((cur) => {
+            const target = cur.find((b) => b.id === focus)
+            if (target) setSelected(target)
+            return cur
+          })
+        }
+      }
+    })()
     const id = setInterval(() => {
       if (list.some((b) => b.status === 'generating')) void load()
     }, 5000)

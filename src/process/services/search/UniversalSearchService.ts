@@ -15,7 +15,7 @@
 import log from 'electron-log'
 import { getDatabase } from '../database'
 
-export type SearchKind = 'intel' | 'transcript' | 'humint' | 'document' | 'image'
+export type SearchKind = 'intel' | 'transcript' | 'humint' | 'document' | 'image' | 'briefing'
 
 export interface SearchHit {
   kind: SearchKind
@@ -37,6 +37,8 @@ export interface SearchHit {
     pageCount?: number | null    // document only
     cameraMake?: string | null   // image only
     cameraModel?: string | null  // image only
+    classification?: string      // briefing only
+    intelCount?: number          // briefing only
   }
   createdAt: number
 }
@@ -81,6 +83,11 @@ export class UniversalSearchService {
     if (wantImage) {
       try { out.push(...this.searchImages(query, PER_CORPUS_LIMIT)) }
       catch (err) { log.debug(`search: image FTS failed: ${(err as Error).message}`) }
+    }
+    const wantBriefing = !opts.kinds || opts.kinds.includes('briefing')
+    if (wantBriefing) {
+      try { out.push(...this.searchBriefings(query, PER_CORPUS_LIMIT)) }
+      catch (err) { log.debug(`search: briefing FTS failed: ${(err as Error).message}`) }
     }
     // Merge: lower bm25 = stronger match. Cross-corpus ranking is
     // intentionally simple — bm25 across SQL stmts isn't directly
@@ -221,6 +228,38 @@ export class UniversalSearchService {
       matchedColumn: 'document',
       meta: { pageCount: r.page_count, reportId: r.report_id },
       createdAt: r.ingested_at
+    }))
+  }
+
+  private searchBriefings(matchQuery: string, limit: number): SearchHit[] {
+    const db = getDatabase()
+    const rows = db.prepare(`
+      SELECT b.id              AS id,
+             b.classification  AS classification,
+             b.intel_count     AS intel_count,
+             b.period_end      AS period_end,
+             b.generated_at    AS generated_at,
+             snippet(daily_briefings_fts, -1, '<mark>', '</mark>', '…', 12) AS snippet,
+             bm25(daily_briefings_fts) AS score
+      FROM daily_briefings_fts
+      JOIN daily_briefings b ON b.rowid = daily_briefings_fts.rowid
+      WHERE daily_briefings_fts MATCH ?
+        AND b.status = 'ready'
+      ORDER BY score
+      LIMIT ?
+    `).all(matchQuery, limit) as Array<{
+      id: string; classification: string; intel_count: number
+      period_end: number; generated_at: number; snippet: string; score: number
+    }>
+    return rows.map((r) => ({
+      kind: 'briefing' as const,
+      id: r.id,
+      title: `Daily briefing — ${new Date(r.period_end).toLocaleDateString()}`,
+      snippet: r.snippet || '',
+      score: r.score,
+      matchedColumn: 'briefing',
+      meta: { classification: r.classification, intelCount: r.intel_count },
+      createdAt: r.generated_at
     }))
   }
 
