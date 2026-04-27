@@ -77,7 +77,7 @@ const testChannels = [
   'search:saved_list', 'search:saved_create', 'search:saved_update',
   'search:saved_delete', 'search:saved_run', 'search:alerts_run_now',
   'briefing:daily_list', 'briefing:daily_get', 'briefing:daily_generate_now',
-  'briefing:daily_delete',
+  'briefing:daily_delete', 'briefing:daily_export', 'briefing:daily_email',
   'models:list', 'models:status', 'models:ensure_required', 'models:download_one',
   'models:reinstall', 'models:cancel', 'models:locate_binary', 'models:install_via_brew',
   'stix:export', 'stix:import', 'stix:import_pick', 'stix:runs',

@@ -9,8 +9,13 @@
 import { useEffect, useMemo, useState, useCallback } from 'react'
 import {
   FileText, RefreshCw, Loader2, AlertCircle, CheckCircle2, Clock as ClockIcon,
-  ScrollText, Trash2, Settings as SettingsIcon, Play
+  ScrollText, Trash2, Settings as SettingsIcon, Play, Download, ChevronDown, Mail
 } from 'lucide-react'
+import {
+  DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem,
+  DropdownMenuLabel, DropdownMenuSeparator
+} from '@renderer/components/ui/dropdown-menu'
+import { toast } from 'sonner'
 import { Link } from 'react-router-dom'
 import { Button } from '@renderer/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@renderer/components/ui/card'
@@ -56,10 +61,12 @@ function StatusPill({ status }: { status: DailyBriefing['status'] }) {
   return <span className="px-2 py-0.5 rounded text-[10px] font-medium bg-red-500/15 text-red-600 dark:text-red-400 inline-flex items-center gap-1"><AlertCircle className="h-3 w-3" /> Error</span>
 }
 
-function BriefingDetail({ briefing, onDelete, onRegenerate, busy }: {
+function BriefingDetail({ briefing, onDelete, onRegenerate, onExport, onEmail, busy }: {
   briefing: DailyBriefing
   onDelete: () => void
   onRegenerate: () => void
+  onExport: (format: 'pdf' | 'docx') => void
+  onEmail: () => void
   busy: boolean
 }) {
   const sources = useMemo(() => {
@@ -97,6 +104,35 @@ function BriefingDetail({ briefing, onDelete, onRegenerate, busy }: {
             </div>
           </div>
           <div className="flex items-center gap-1 shrink-0">
+            {briefing.status === 'ready' && (
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button size="sm" variant="outline" className="h-8">
+                    <Download className="h-3.5 w-3.5 mr-1" /> Export
+                    <ChevronDown className="h-3 w-3 ml-1" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-56">
+                  <DropdownMenuLabel className="text-[11px] text-muted-foreground font-normal">
+                    With letterhead applied
+                  </DropdownMenuLabel>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem onSelect={() => onExport('pdf')}>
+                    <FileText className="h-3.5 w-3.5 mr-2" /> PDF
+                    <span className="ml-auto text-[10px] text-muted-foreground">letterhead</span>
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onSelect={() => onExport('docx')}>
+                    <FileText className="h-3.5 w-3.5 mr-2" /> Word (.docx)
+                    <span className="ml-auto text-[10px] text-muted-foreground">editable</span>
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem onSelect={onEmail}>
+                    <Mail className="h-3.5 w-3.5 mr-2" /> Email PDF…
+                    <span className="ml-auto text-[10px] text-muted-foreground">SMTP</span>
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            )}
             <Button size="sm" variant="ghost" onClick={onRegenerate} disabled={busy} className="h-8">
               <RefreshCw className={cn('h-3.5 w-3.5 mr-1', busy && 'animate-spin')} /> Regenerate
             </Button>
@@ -181,6 +217,54 @@ export function BriefingsPage() {
       setSelected(null)
       await load()
     } catch (err) { setError(String(err).replace(/^Error:\s*/, '')) }
+  }
+
+  const exportBriefingAs = async (format: 'pdf' | 'docx') => {
+    if (!selected) return
+    setError(null)
+    try {
+      const r = await window.heimdall.invoke('briefing:daily_export', {
+        id: selected.id,
+        format,
+        save: true
+      }) as { ok: boolean; cancelled?: boolean; path?: string; bytes?: number; filename?: string }
+      if (r.cancelled) return
+      if (r.ok && r.path) {
+        toast.success(`${format.toUpperCase()} saved`, {
+          description: r.path,
+          duration: 5000
+        })
+      }
+    } catch (err) {
+      setError(String(err).replace(/^Error:\s*/, ''))
+    }
+  }
+
+  const emailBriefing = async () => {
+    if (!selected) return
+    setError(null)
+    const recipientsRaw = prompt(
+      `Email this briefing as PDF.\n\n` +
+      `Recipients (comma-separated). Leave blank to use SMTP defaults.`,
+      ''
+    )
+    if (recipientsRaw === null) return
+    const recipients = recipientsRaw.split(',').map((s) => s.trim()).filter(Boolean)
+    try {
+      const r = await window.heimdall.invoke('briefing:daily_email', {
+        id: selected.id,
+        recipients,
+        format: 'pdf'
+      }) as { ok: true; recipients: string[] }
+      toast.success(`Sent to ${r.recipients.length} recipient${r.recipients.length !== 1 ? 's' : ''}`, {
+        description: r.recipients.join(', '),
+        duration: 6000
+      })
+    } catch (err) {
+      const msg = String(err).replace(/^Error:\s*/, '')
+      setError(msg)
+      toast.error('Email failed', { description: msg, duration: 8000 })
+    }
   }
 
   const regenerate = async () => {
@@ -305,6 +389,8 @@ export function BriefingsPage() {
               briefing={selected}
               onDelete={removeOne}
               onRegenerate={regenerate}
+              onExport={exportBriefingAs}
+              onEmail={emailBriefing}
               busy={busy}
             />
           ) : (
