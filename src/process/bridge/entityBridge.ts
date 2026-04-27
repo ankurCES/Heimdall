@@ -2,6 +2,7 @@ import { ipcMain } from 'electron'
 import log from 'electron-log'
 import { entityResolutionService } from '../services/entity/EntityResolutionService'
 import { patternOfLifeService } from '../services/entity/PatternOfLifeService'
+import { entityTimelineService } from '../services/entity/EntityTimelineService'
 
 /**
  * Theme 4.6 — entity resolution IPC.
@@ -34,6 +35,13 @@ export function registerEntityBridge(): void {
 
   ipcMain.handle('entity:pol', (_evt, args: { id: string; window_days?: number }) => {
     return patternOfLifeService.forEntity(args.id, args.window_days ?? 90)
+  })
+
+  // v1.7.0 — cross-corpus entity timeline. Returns every mention of
+  // the canonical entity (and its aliases) across intel + transcripts
+  // + HUMINT + documents + briefings + images, sorted by timestamp.
+  ipcMain.handle('entity:timeline', (_evt, args: { id: string; limitPerCorpus?: number }) => {
+    return entityTimelineService.getTimeline(args.id, args.limitPerCorpus ?? 50)
   })
 
   log.info('entity bridge registered')

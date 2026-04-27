@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
-import { Users, RefreshCw, Loader2, Tag, FileText, ChevronRight, Clock } from 'lucide-react'
+import { Link } from 'react-router-dom'
+import { Users, RefreshCw, Loader2, Tag, FileText, ChevronRight, Clock, GitMerge } from 'lucide-react'
 import { Button } from '@renderer/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@renderer/components/ui/card'
 import { Badge } from '@renderer/components/ui/badge'
@@ -271,6 +272,11 @@ export function EntitiesPage() {
                   <div className="flex items-center gap-2 flex-wrap">
                     <Badge variant="outline" className="font-mono">{selected.entity_type}</Badge>
                     <h2 className="text-lg font-semibold">{selected.canonical_value}</h2>
+                    <Link to={`/entity/${encodeURIComponent(selected.id)}`} className="ml-auto">
+                      <Button size="sm" variant="default" className="h-7">
+                        <GitMerge className="h-3.5 w-3.5 mr-1" /> Timeline
+                      </Button>
+                    </Link>
                   </div>
                   <p className="text-xs text-muted-foreground mt-1">
                     Normalised: <code className="font-mono">{selected.normalized_value}</code>

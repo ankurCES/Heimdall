@@ -48,7 +48,7 @@ const testChannels = [
   'network:refresh', 'network:latest', 'network:top',
   'network:communities', 'network:node', 'network:search', 'network:predict',
   'entity:resolve', 'entity:latest', 'entity:top', 'entity:types',
-  'entity:aliases', 'entity:reports', 'entity:pol',
+  'entity:aliases', 'entity:reports', 'entity:pol', 'entity:timeline',
   'ci:analyze', 'ci:latest', 'ci:top', 'ci:for_report',
   'ci:state_media', 'ci:bias_list',
   'cybint:tactics', 'cybint:techniques', 'cybint:tag_techniques',
