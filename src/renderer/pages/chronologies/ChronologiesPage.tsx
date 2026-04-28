@@ -9,9 +9,10 @@
 // chronology via promptDialog → chronology:add_event.
 
 import { useEffect, useState, useCallback } from 'react'
+import { useNavigate } from 'react-router-dom'
 import {
   History, Plus, Loader2, AlertCircle, Trash2, Edit3,
-  ChevronUp, ChevronDown, Download, FileText, Mic, StickyNote
+  ChevronUp, ChevronDown, Download, FileText, Mic, StickyNote, ShieldOff
 } from 'lucide-react'
 import { Button } from '@renderer/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@renderer/components/ui/card'
@@ -61,6 +62,7 @@ export function ChronologiesPage() {
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const navigate = useNavigate()
 
   const loadList = useCallback(async () => {
     setLoading(true); setError(null)
@@ -357,6 +359,19 @@ export function ChronologiesPage() {
                     </Button>
                     <Button size="sm" variant="ghost" onClick={() => handleExport(selected)} disabled={busy} title="Export Markdown to clipboard">
                       <Download className="h-4 w-4" />
+                    </Button>
+                    <Button size="sm" variant="ghost"
+                      onClick={async () => {
+                        try {
+                          await window.heimdall.invoke('critique:create_for_parent', { parent_kind: 'chronology', parent_id: selected.id })
+                          toast.success('Critique submitted', { description: 'Opening Critiques page.' })
+                          navigate('/critiques')
+                        } catch (err) { toast.error('Critique failed', { description: String(err).replace(/^Error:\s*/, '') }) }
+                      }}
+                      disabled={busy || selected.event_count === 0}
+                      title="Red-team critique (LLM argues against this chronology's narrative)"
+                      className="text-amber-600 dark:text-amber-400">
+                      <ShieldOff className="h-4 w-4" />
                     </Button>
                     <Button size="sm" variant="ghost" onClick={() => handleDelete(selected.id)} disabled={busy} title="Delete">
                       <Trash2 className="h-4 w-4 text-red-600 dark:text-red-400" />

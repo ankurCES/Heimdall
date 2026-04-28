@@ -6,6 +6,7 @@ import log from 'electron-log'
 import { comparativeAnalysisService, type EntitySubject, type TimeWindowSubject } from '../services/analysis/ComparativeAnalysisService'
 import { hypothesisService, type Verdict } from '../services/analysis/HypothesisService'
 import { chronologyService, type ChronologyEvent } from '../services/analysis/ChronologyService'
+import { critiqueService, type CritiqueParentKind } from '../services/analysis/CritiqueService'
 
 export function registerComparisonBridge(): void {
   ipcMain.handle('comparison:list', (_evt, args?: { limit?: number }) =>
@@ -73,6 +74,24 @@ export function registerComparisonBridge(): void {
   )
   ipcMain.handle('chronology:export_markdown', (_evt, id: string) =>
     chronologyService.exportMarkdown(id)
+  )
+
+  // v1.9.3 — red-team critique IPC.
+  ipcMain.handle('critique:list', (_evt, args?: { limit?: number }) =>
+    critiqueService.list(args?.limit ?? 100)
+  )
+  ipcMain.handle('critique:list_for_parent', (_evt, args: { parent_kind: CritiqueParentKind; parent_id: string }) =>
+    critiqueService.listForParent(args.parent_kind, args.parent_id)
+  )
+  ipcMain.handle('critique:get', (_evt, id: string) => critiqueService.get(id))
+  ipcMain.handle('critique:delete', (_evt, id: string) => {
+    critiqueService.remove(id); return { ok: true }
+  })
+  ipcMain.handle('critique:create_for_parent', async (_evt, args: { parent_kind: Exclude<CritiqueParentKind, 'free'>; parent_id: string }) =>
+    await critiqueService.createForParent(args)
+  )
+  ipcMain.handle('critique:create_freeform', async (_evt, args: { topic: string; label?: string }) =>
+    await critiqueService.createFreeform(args)
   )
 
   log.info('comparison bridge registered')

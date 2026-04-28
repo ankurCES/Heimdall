@@ -92,6 +92,8 @@ const testChannels = [
   'chronology:list', 'chronology:get', 'chronology:create', 'chronology:update',
   'chronology:delete', 'chronology:add_event', 'chronology:update_event',
   'chronology:remove_event', 'chronology:replace_events', 'chronology:export_markdown',
+  'critique:list', 'critique:list_for_parent', 'critique:get', 'critique:delete',
+  'critique:create_for_parent', 'critique:create_freeform',
   'models:list', 'models:status', 'models:ensure_required', 'models:download_one',
   'models:reinstall', 'models:cancel', 'models:locate_binary', 'models:install_via_brew',
   'stix:export', 'stix:import', 'stix:import_pick', 'stix:runs',

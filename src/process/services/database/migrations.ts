@@ -3407,6 +3407,45 @@ const migrations: Migration[] = [
       `)
       log.info('Migration 061: chronologies table created (v1.9.2)')
     }
+  },
+  {
+    version: '062',
+    name: 'critiques',
+    up: (db) => {
+      // v1.9.3 — Phase 10 red-team / devil's-advocate critique surface.
+      //
+      // A critique is an LLM-generated structured rebuttal of an
+      // existing analytical artifact (a hypothesis, a comparison, a
+      // chronology, a briefing) — or of a free-form analyst-supplied
+      // topic. The purpose is to operationalise the "deliberately
+      // argue the opposite" tradecraft step that catches anchoring,
+      // confirmation bias, and unstated assumptions.
+      //
+      // parent_kind ∈ ('hypothesis','comparison','chronology','briefing','free')
+      // parent_id   = FK-ish into the named table; NULL for 'free'.
+      // topic_md    = either the rendered context that was fed to the
+      //               LLM (for non-free), or the analyst's free-form
+      //               topic statement.
+      // status      = 'generating' → 'ready' | 'error', polled by the UI.
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS critiques (
+          id TEXT PRIMARY KEY,
+          parent_kind TEXT NOT NULL,
+          parent_id TEXT,
+          parent_label TEXT,
+          topic_md TEXT,
+          critique_md TEXT,
+          status TEXT NOT NULL DEFAULT 'generating',
+          error_text TEXT,
+          model TEXT,
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_critiques_parent ON critiques(parent_kind, parent_id);
+        CREATE INDEX IF NOT EXISTS idx_critiques_updated ON critiques(updated_at DESC);
+      `)
+      log.info('Migration 062: critiques table created (v1.9.3)')
+    }
   }
 ]
 

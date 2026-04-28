@@ -11,7 +11,7 @@ import { useNavigate } from 'react-router-dom'
 import {
   ListChecks, Plus, RefreshCw, Loader2, AlertCircle, Trash2,
   ThumbsUp, ThumbsDown, Minus, HelpCircle, Sparkles, Pause, Play,
-  Edit3, Archive
+  Edit3, Archive, ShieldOff
 } from 'lucide-react'
 import { Button } from '@renderer/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@renderer/components/ui/card'
@@ -177,6 +177,25 @@ export function HypothesesPage() {
     } catch (err) { toast.error('Delete failed', { description: String(err).replace(/^Error:\s*/, '') }) }
   }
 
+  // v1.9.3 — kick off a red-team critique against the selected
+  // hypothesis. The LLM runs async; we navigate to /critiques so the
+  // analyst can watch the row land.
+  const runCritique = async () => {
+    if (!selected) return
+    try {
+      await window.heimdall.invoke('critique:create_for_parent', {
+        parent_kind: 'hypothesis', parent_id: selected.id
+      })
+      toast.success('Critique submitted', {
+        description: 'Red-teaming in progress — opening Critiques page.',
+        action: { label: 'Open', onClick: () => navigate('/critiques') }
+      })
+      navigate('/critiques')
+    } catch (err) {
+      toast.error('Critique failed', { description: String(err).replace(/^Error:\s*/, '') })
+    }
+  }
+
   const overrideVerdict = async (evidenceId: string, verdict: Verdict | null) => {
     try {
       await window.heimdall.invoke('hypothesis:set_override', { evidenceId, verdict })
@@ -308,6 +327,9 @@ export function HypothesesPage() {
                   <div className="flex items-center gap-1 shrink-0">
                     <Button size="sm" variant="ghost" onClick={editStatement} className="h-8" title="Edit statement">
                       <Edit3 className="h-3.5 w-3.5" />
+                    </Button>
+                    <Button size="sm" variant="ghost" onClick={runCritique} className="h-8 text-amber-600 dark:text-amber-400" title="Red-team critique (LLM argues against this hypothesis)">
+                      <ShieldOff className="h-3.5 w-3.5" />
                     </Button>
                     {selected.status === 'active' ? (
                       <Button size="sm" variant="ghost" onClick={() => setStatus('paused')} className="h-8 text-amber-600 dark:text-amber-400" title="Pause auto-evaluation">

@@ -9,10 +9,10 @@
 // generating mirror the BriefingsPage pattern.
 
 import { useEffect, useState, useMemo, useCallback } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import {
   Scale, Loader2, AlertCircle, CheckCircle2, RefreshCw, Trash2,
-  Users as UsersIcon, Clock as ClockIcon, FileText, Plus
+  Users as UsersIcon, Clock as ClockIcon, FileText, Plus, ShieldOff
 } from 'lucide-react'
 import { Button } from '@renderer/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@renderer/components/ui/card'
@@ -62,6 +62,7 @@ export function ComparisonsPage() {
   const [selected, setSelected] = useState<ComparativeAnalysis | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const navigate = useNavigate()
 
   const load = useCallback(async () => {
     try {
@@ -257,6 +258,16 @@ export function ComparisonsPage() {
                     </div>
                   </div>
                   <div className="flex items-center gap-1 shrink-0">
+                    <Button size="sm" variant="ghost" onClick={async () => {
+                      if (!selected) return
+                      try {
+                        await window.heimdall.invoke('critique:create_for_parent', { parent_kind: 'comparison', parent_id: selected.id })
+                        toast.success('Critique submitted', { description: 'Opening Critiques page.' })
+                        navigate('/critiques')
+                      } catch (err) { toast.error('Critique failed', { description: String(err).replace(/^Error:\s*/, '') }) }
+                    }} className="h-8 text-amber-600 dark:text-amber-400" title="Red-team critique (LLM argues against this analysis)" disabled={selected.status !== 'ready'}>
+                      <ShieldOff className="h-3.5 w-3.5" />
+                    </Button>
                     <Button size="sm" variant="ghost" onClick={removeOne} className="h-8 text-red-600 dark:text-red-400 hover:bg-red-500/10">
                       <Trash2 className="h-3.5 w-3.5" />
                     </Button>
