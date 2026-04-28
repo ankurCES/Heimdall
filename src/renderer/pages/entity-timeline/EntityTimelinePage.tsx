@@ -19,7 +19,7 @@ import { useParams, useNavigate, Link } from 'react-router-dom'
 import {
   Clock, FileText, Mic, Users, FileScan, ScrollText, Image as ImageIcon,
   ArrowLeft, Loader2, AlertCircle, GitMerge, Network, MapPin, List, Combine,
-  Bell, BellOff, Flame, Scale
+  Bell, BellOff, Flame, Scale, History
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { MapContainer, TileLayer, CircleMarker, Popup } from 'react-leaflet'
@@ -269,6 +269,56 @@ export function EntityTimelinePage() {
     } catch (err) {
       const msg = String(err).replace(/^Error:\s*/, '')
       toast.error('Comparison failed', { description: msg })
+    }
+  }
+
+  // v1.9.2 — drop a timeline event into a chronology. Lists existing
+  // chronologies, lets the analyst pick one (or create a new one
+  // inline), then calls chronology:add_event with the event's natural
+  // metadata (ts, title, source kind+id).
+  const addToChronology = async (ev: TimelineEvent) => {
+    try {
+      const list = await window.heimdall.invoke('chronology:list') as Array<{ id: string; name: string; event_count: number }>
+      const options = list.map((c, i) => `${i + 1}. ${c.name} (${c.event_count})`).join('\n')
+      const prompt = list.length
+        ? `Pick a chronology by number, or type a new name to create one:\n\n${options}`
+        : 'No chronologies yet. Type a name to create the first one.'
+      const choice = await promptDialog({
+        label: 'Add to chronology',
+        description: prompt,
+        placeholder: list.length ? '1' : 'My investigation',
+        validate: (v) => v.trim().length === 0 ? 'Required' : null
+      })
+      if (!choice) return
+      const trimmed = choice.trim()
+      const numeric = parseInt(trimmed, 10)
+      let chronologyId: string
+      if (Number.isFinite(numeric) && numeric >= 1 && numeric <= list.length) {
+        chronologyId = list[numeric - 1].id
+      } else {
+        const created = await window.heimdall.invoke('chronology:create', { name: trimmed }) as { id: string }
+        chronologyId = created.id
+      }
+      // Map TimelineEvent.kind to ChronologyEvent source_kind. Most
+      // kinds collapse to 'intel'; transcript stays itself.
+      const source_kind: 'intel' | 'transcript' | 'note' =
+        ev.kind === 'transcript' ? 'transcript' : 'intel'
+      await window.heimdall.invoke('chronology:add_event', {
+        id: chronologyId,
+        event: {
+          ts: ev.ts,
+          title: ev.title,
+          description: (ev.snippet || '').replace(/<[^>]+>/g, '').slice(0, 500) || null,
+          source_kind,
+          source_id: ev.id
+        }
+      })
+      toast.success('Added to chronology', {
+        description: 'Open the Chronologies page to view, annotate, or reorder.',
+        action: { label: 'Open', onClick: () => navigate('/chronologies') }
+      })
+    } catch (err) {
+      toast.error('Add failed', { description: String(err).replace(/^Error:\s*/, '') })
     }
   }
 
@@ -632,12 +682,15 @@ export function EntityTimelinePage() {
                       const m = KIND_META[ev.kind]
                       const Icon = m.icon
                       return (
-                        <button
+                        <div
                           key={`${ev.kind}-${ev.id}-${i}`}
+                          role="button"
+                          tabIndex={0}
                           onClick={() => navigateForEvent(navigate, ev)}
-                          className="w-full text-left border border-border rounded-md p-3 hover:bg-accent/50 transition-colors"
+                          onKeyDown={(e) => { if (e.key === 'Enter') navigateForEvent(navigate, ev) }}
+                          className="group relative w-full text-left border border-border rounded-md p-3 hover:bg-accent/50 transition-colors cursor-pointer"
                         >
-                          <div className="flex items-center gap-2 flex-wrap">
+                          <div className="flex items-center gap-2 flex-wrap pr-8">
                             <Icon className={cn('h-3.5 w-3.5 shrink-0', m.color)} />
                             <span className="text-sm font-medium truncate">{ev.title}</span>
                             {ev.meta.severity && (
@@ -663,7 +716,14 @@ export function EntityTimelinePage() {
                             {ev.meta.sourceName && <span>{ev.meta.sourceName}</span>}
                             {ev.meta.language && <span>· {ev.meta.language}</span>}
                           </div>
-                        </button>
+                          <button
+                            onClick={(e) => { e.stopPropagation(); void addToChronology(ev) }}
+                            title="Add to chronology"
+                            className="absolute top-2 right-2 p-1 rounded text-muted-foreground/70 hover:bg-primary/10 hover:text-primary opacity-0 group-hover:opacity-100 transition-opacity"
+                          >
+                            <History className="h-3.5 w-3.5" />
+                          </button>
+                        </div>
                       )
                     })}
                   </div>

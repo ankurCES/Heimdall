@@ -5,6 +5,7 @@ import { ipcMain } from 'electron'
 import log from 'electron-log'
 import { comparativeAnalysisService, type EntitySubject, type TimeWindowSubject } from '../services/analysis/ComparativeAnalysisService'
 import { hypothesisService, type Verdict } from '../services/analysis/HypothesisService'
+import { chronologyService, type ChronologyEvent } from '../services/analysis/ChronologyService'
 
 export function registerComparisonBridge(): void {
   ipcMain.handle('comparison:list', (_evt, args?: { limit?: number }) =>
@@ -45,6 +46,34 @@ export function registerComparisonBridge(): void {
     await hypothesisService.evaluatePair(args)
   )
   ipcMain.handle('hypothesis:run_now', async () => await hypothesisService.runOnce())
+
+  // v1.9.2 — chronology builder IPC.
+  ipcMain.handle('chronology:list', () => chronologyService.list())
+  ipcMain.handle('chronology:get', (_evt, id: string) => chronologyService.get(id))
+  ipcMain.handle('chronology:create', (_evt, args: { name: string; description?: string | null }) =>
+    chronologyService.create(args)
+  )
+  ipcMain.handle('chronology:update', (_evt, args: { id: string; patch: { name?: string; description?: string | null } }) =>
+    chronologyService.update(args.id, args.patch)
+  )
+  ipcMain.handle('chronology:delete', (_evt, id: string) => {
+    chronologyService.remove(id); return { ok: true }
+  })
+  ipcMain.handle('chronology:add_event', (_evt, args: { id: string; event: Omit<ChronologyEvent, 'id'> & { id?: string } }) =>
+    chronologyService.addEvent(args.id, args.event)
+  )
+  ipcMain.handle('chronology:update_event', (_evt, args: { id: string; eventId: string; patch: Partial<Omit<ChronologyEvent, 'id'>> }) =>
+    chronologyService.updateEvent(args.id, args.eventId, args.patch)
+  )
+  ipcMain.handle('chronology:remove_event', (_evt, args: { id: string; eventId: string }) =>
+    chronologyService.removeEvent(args.id, args.eventId)
+  )
+  ipcMain.handle('chronology:replace_events', (_evt, args: { id: string; events: ChronologyEvent[] }) =>
+    chronologyService.replaceEvents(args.id, args.events)
+  )
+  ipcMain.handle('chronology:export_markdown', (_evt, id: string) =>
+    chronologyService.exportMarkdown(id)
+  )
 
   log.info('comparison bridge registered')
 }

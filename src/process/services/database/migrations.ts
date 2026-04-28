@@ -3370,6 +3370,43 @@ const migrations: Migration[] = [
       `)
       log.info('Migration 060: hypotheses + hypothesis_evidence tables created (v1.9.1)')
     }
+  },
+  {
+    version: '061',
+    name: 'chronologies',
+    up: (db) => {
+      // v1.9.2 — Phase 10 chronology builder (analyst-curated timeline).
+      //
+      // Where the auto entity-timeline shows every mention an entity has
+      // ever appeared in, a chronology lets the analyst hand-pick events
+      // and weave them into a story.  Events are stored as a JSON blob
+      // (events_json) on the chronology row — events are essentially
+      // value objects with no independent identity, and the JSON model
+      // keeps reorder/edit operations atomic without an O(N) row dance.
+      //
+      // Each event in the JSON array shape:
+      //   {
+      //     id: string,                    // local uuid for keying
+      //     ts: number,                    // event timestamp (epoch ms)
+      //     title: string,                 // analyst-authored headline
+      //     description?: string,          // free-form annotation
+      //     source_kind?: 'intel'|'transcript'|'note'|null,
+      //     source_id?: string|null,       // FK-ish into intel_reports / transcripts
+      //     tags?: string[]
+      //   }
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS chronologies (
+          id TEXT PRIMARY KEY,
+          name TEXT NOT NULL,
+          description TEXT,
+          events_json TEXT NOT NULL DEFAULT '[]',
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_chronologies_updated ON chronologies(updated_at DESC);
+      `)
+      log.info('Migration 061: chronologies table created (v1.9.2)')
+    }
   }
 ]
 
