@@ -6,6 +6,7 @@ import { ErrorBoundary } from '../ErrorBoundary'
 import { ClassificationBanner, type Classification, isClassification } from '../ClassificationBanner'
 import { ModelDownloadBanner } from '../ModelDownloadBanner'
 import { UniversalSearchOverlay } from '../UniversalSearchOverlay'
+import { WhatsNewModal } from '../WhatsNewModal'
 
 export function Layout() {
   const [mobileOpen, setMobileOpen] = useState(false)
@@ -91,6 +92,10 @@ export function Layout() {
       {/* v1.5.1 — Cmd/Ctrl+K spotlight search across intel + transcripts.
           Listens for the keystroke globally; renders nothing until opened. */}
       <UniversalSearchOverlay />
+
+      {/* v2.0.0 — first-launch what's-new splash. Self-gates on
+          localStorage so it only fires once per major version. */}
+      <WhatsNewModal />
     </div>
   )
 }

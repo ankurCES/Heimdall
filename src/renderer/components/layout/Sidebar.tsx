@@ -220,12 +220,31 @@ export function Sidebar() {
       </nav>
 
       {/* Footer */}
-      <div className={cn('border-t border-border py-2', collapsed ? 'px-1 text-center' : 'px-4')}>
-        <p className="text-[10px] text-muted-foreground/70">
-          {collapsed ? 'v0.5' : 'v0.5.0 · Public Safety Monitor'}
-        </p>
-      </div>
+      <SidebarFooter collapsed={collapsed} />
     </aside>
+  )
+}
+
+function SidebarFooter({ collapsed }: { collapsed: boolean }) {
+  const [version, setVersion] = useState<string>('')
+  useEffect(() => {
+    let cancelled = false
+    void (async () => {
+      try {
+        const v = await window.heimdall.invoke('app:getVersion') as string
+        if (!cancelled) setVersion(v || '')
+      } catch { /* leave blank */ }
+    })()
+    return () => { cancelled = true }
+  }, [])
+  return (
+    <div className={cn('border-t border-border py-2', collapsed ? 'px-1 text-center' : 'px-4')}>
+      <p className="text-[10px] text-muted-foreground/70">
+        {collapsed
+          ? (version ? `v${version}` : '')
+          : (version ? `v${version} · Public Safety Monitor` : 'Public Safety Monitor')}
+      </p>
+    </div>
   )
 }
 
