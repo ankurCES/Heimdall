@@ -3494,6 +3494,55 @@ const migrations: Migration[] = [
       `)
       log.info('Migration 063: assumption_checks + assumption_check_items tables created (v1.9.4)')
     }
+  },
+  {
+    version: '064',
+    name: 'estimates',
+    up: (db) => {
+      // v1.9.5 — Estimative Probability tracker (analyst calibration).
+      //
+      // Every analytic judgment carries an ICD-203 estimative
+      // probability ("likely", "almost certain"). This table makes
+      // those judgments first-class: each estimate has a deadline +
+      // resolution criteria, lets the analyst record the outcome, and
+      // computes a running calibration score (Brier-style).
+      //
+      // wep enum (with implied probability):
+      //   almost_certain   ≈ 0.95
+      //   very_likely      ≈ 0.85
+      //   likely           ≈ 0.65
+      //   even_chance      ≈ 0.50
+      //   unlikely         ≈ 0.35
+      //   very_unlikely    ≈ 0.15
+      //   almost_no_chance ≈ 0.05
+      //
+      // status: open → resolved_correct | resolved_partial |
+      //                resolved_wrong   | resolved_unknowable
+      // resolved_unknowable rows are excluded from the Brier score.
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS estimates (
+          id TEXT PRIMARY KEY,
+          statement TEXT NOT NULL,
+          wep TEXT NOT NULL,
+          confidence_band TEXT NOT NULL DEFAULT 'moderate',
+          deadline_at INTEGER,
+          resolution_criteria TEXT,
+          parent_kind TEXT,
+          parent_id TEXT,
+          parent_label TEXT,
+          status TEXT NOT NULL DEFAULT 'open',
+          resolved_at INTEGER,
+          resolution_note TEXT,
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_estimates_status ON estimates(status);
+        CREATE INDEX IF NOT EXISTS idx_estimates_deadline ON estimates(deadline_at);
+        CREATE INDEX IF NOT EXISTS idx_estimates_updated ON estimates(updated_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_estimates_parent ON estimates(parent_kind, parent_id);
+      `)
+      log.info('Migration 064: estimates table created (v1.9.5)')
+    }
   }
 ]
 

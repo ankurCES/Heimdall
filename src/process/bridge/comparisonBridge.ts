@@ -8,6 +8,7 @@ import { hypothesisService, type Verdict } from '../services/analysis/Hypothesis
 import { chronologyService, type ChronologyEvent } from '../services/analysis/ChronologyService'
 import { critiqueService, type CritiqueParentKind } from '../services/analysis/CritiqueService'
 import { kacService, type KacParentKind, type KacItemStatus } from '../services/analysis/KacService'
+import { estimateService, type Wep, type EstimateStatus, type ConfidenceBand, type EstimateParentKind } from '../services/analysis/EstimateService'
 
 export function registerComparisonBridge(): void {
   ipcMain.handle('comparison:list', (_evt, args?: { limit?: number }) =>
@@ -121,6 +122,27 @@ export function registerComparisonBridge(): void {
   ipcMain.handle('kac:extract_from_parent', async (_evt, checkId: string) =>
     await kacService.extractFromParent(checkId)
   )
+
+  // v1.9.5 — Estimative probability tracker IPC.
+  ipcMain.handle('estimate:list', () => estimateService.list())
+  ipcMain.handle('estimate:list_for_parent', (_evt, args: { parent_kind: NonNullable<EstimateParentKind>; parent_id: string }) =>
+    estimateService.listForParent(args.parent_kind, args.parent_id)
+  )
+  ipcMain.handle('estimate:get', (_evt, id: string) => estimateService.get(id))
+  ipcMain.handle('estimate:create', (_evt, args: {
+    statement: string; wep: Wep; confidence_band?: ConfidenceBand;
+    deadline_at?: number | null; resolution_criteria?: string | null;
+    parent_kind?: EstimateParentKind; parent_id?: string | null; parent_label?: string | null
+  }) => estimateService.create(args))
+  ipcMain.handle('estimate:update', (_evt, args: { id: string; patch: Parameters<typeof estimateService.update>[1] }) =>
+    estimateService.update(args.id, args.patch)
+  )
+  ipcMain.handle('estimate:resolve', (_evt, args: { id: string; status: EstimateStatus; note?: string | null }) =>
+    estimateService.resolve(args.id, args.status, args.note ?? null)
+  )
+  ipcMain.handle('estimate:reopen', (_evt, id: string) => estimateService.reopen(id))
+  ipcMain.handle('estimate:delete', (_evt, id: string) => { estimateService.remove(id); return { ok: true } })
+  ipcMain.handle('estimate:calibration', () => estimateService.calibration())
 
   log.info('comparison bridge registered')
 }

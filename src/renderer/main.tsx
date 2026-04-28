@@ -68,6 +68,7 @@ const HypothesesPage = lazyNamed(() => import('./pages/hypotheses/HypothesesPage
 const ChronologiesPage = lazyNamed(() => import('./pages/chronologies/ChronologiesPage'), 'ChronologiesPage')
 const CritiquesPage = lazyNamed(() => import('./pages/critiques/CritiquesPage'), 'CritiquesPage')
 const AssumptionsPage = lazyNamed(() => import('./pages/assumptions/AssumptionsPage'), 'AssumptionsPage')
+const EstimatesPage = lazyNamed(() => import('./pages/estimates/EstimatesPage'), 'EstimatesPage')
 
 // Lightweight loading indicator for route transitions. Sized to match
 // the main content area and centered so swap-in feels deliberate
@@ -152,6 +153,7 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
           <Route path="/chronologies" element={<Suspense fallback={<RouteFallback />}><ChronologiesPage /></Suspense>} />
           <Route path="/critiques" element={<Suspense fallback={<RouteFallback />}><CritiquesPage /></Suspense>} />
           <Route path="/assumptions" element={<Suspense fallback={<RouteFallback />}><AssumptionsPage /></Suspense>} />
+          <Route path="/estimates" element={<Suspense fallback={<RouteFallback />}><EstimatesPage /></Suspense>} />
           <Route path="/settings" element={<Suspense fallback={<RouteFallback />}><SettingsPage /></Suspense>} />
         </Route>
       </Routes>
