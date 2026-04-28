@@ -27,6 +27,7 @@ const NAV_GROUPS: NavGroup[] = [
     label: 'Overview',
     items: [
       { to: '/', icon: LayoutDashboard, label: 'Dashboard' },
+      { to: '/workspace', icon: Brain, label: 'Workspace' },
       { to: '/feed', icon: FileText, label: 'Intel Feed' },
       { to: '/map', icon: Map, label: 'Map' },
       { to: '/geofences', icon: MapPin, label: 'Geofences' },
