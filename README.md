@@ -9,12 +9,13 @@
   <a href="https://github.com/ankurCES/Heimdall/releases"><img src="https://img.shields.io/github/v/release/ankurCES/Heimdall?style=flat-square" alt="Release" /></a>
   <a href="https://github.com/ankurCES/Heimdall/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue?style=flat-square" alt="License" /></a>
   <img src="https://img.shields.io/badge/platform-macOS%20|%20Windows%20|%20Linux-lightgrey?style=flat-square" alt="Platform" />
-  <img src="https://img.shields.io/badge/collectors-50%2B-green?style=flat-square" alt="Collectors" />
+  <img src="https://img.shields.io/badge/collectors-58%2B-green?style=flat-square" alt="Collectors" />
+  <img src="https://img.shields.io/badge/analytical%20surfaces-7-purple?style=flat-square" alt="Analytical surfaces" />
 </p>
 
 ---
 
-**Heimdall** is a desktop intelligence monitoring platform for public safety. It aggregates open-source intelligence across 10+ disciplines, enriches data with AI, and presents a unified operational picture through geospatial mapping, relationship graphs, and real-time alerting.
+**Heimdall** is a desktop intelligence monitoring platform for public safety. It aggregates open-source intelligence across 10+ disciplines, enriches data with AI, and presents a unified operational picture through geospatial mapping, relationship graphs, real-time alerting, and a full analytical workspace (ACH, KAC, red-team critique, estimative-probability calibration, chronologies, comparative analysis).
 
 Built with Electron + React + TypeScript. Runs entirely on your machine — no cloud, no subscriptions.
 
@@ -22,7 +23,7 @@ Built with Electron + React + TypeScript. Runs entirely on your machine — no c
 
 ## Screenshots
 
-The app includes 17 pages organized into 5 sidebar groups: **Overview** (Dashboard, Intel Feed, Map, Markets), **Intelligence** (Browse Intel, Enriched Data, Watch Terms, Explore), **Sources & Sync** (Sources, Sync Center, Obsidian Vault), **AI & Comms** (Chat, Alerts, Meshtastic), **System** (Token Usage, Audit Log, Settings).
+The app includes 55 pages organized into 6 sidebar groups: **Overview** (Dashboard, Workspace, Intel Feed, Map, Geofences, Markets), **Intelligence** (Browse Intel, Enriched Data, Watch Terms, I&W, ACH, Network, Entities, Counter-intel, CYBINT, Dark Web, Overnight, Anomalies, Images, Transcripts, Explore), **Sources & Sync** (Sources, Sync Center, Obsidian Vault, STIX Interop), **AI & Comms** (Chat, Workflows, Memory, Alerts, Meshtastic, Telegram Intel), **Library & Cases** (Reports Library, Daily Briefings, Entity Watchlist, Graph Canvas, Comparative Analysis, Hypothesis Tracker, Chronologies, Red-Team Critiques, Assumptions/KAC, Estimates/WEP, Case Files, Indicators, Source Reliability, Revision Inbox, Ethics Console, Memory Graph), **System** (System Health, Forecast Accountability, Token Usage, Audit Log, Quarantine, Advanced, Settings).
 
 ### Operations Center (Dashboard)
 
@@ -76,7 +77,27 @@ Virtualized list of every collected intel report with discipline / severity / so
 
 ## Features
 
-### Intelligence Collection (50+ Sources)
+### Analytical Workspace (Phase 10 — v2.0.0)
+
+The analyst-facing layer on top of ingest + enrichment. Every artifact is a first-class persisted object you can drill into, link, stress-test, and version. Every surface speaks to every other.
+
+| Surface | Route | What it does |
+|---|---|---|
+| **Workspace Home** | `/workspace` | One-glance morning view — 6-stat strip + 6 cards across hypotheses, critiques, vulnerable assumptions, due-soon estimates, comparisons, chronologies. Quick-create buttons. |
+| **Comparative Analysis** | `/comparisons` | LLM-generated structured comparisons of two entities or two time windows. BLUF + shared themes + divergences + trajectory + open questions. |
+| **Hypothesis Tracker** | `/hypotheses` | Operationalised Analysis of Competing Hypotheses (ACH). Every 15 min an auto-evaluator scores incoming intel against active hypotheses (`supports` / `refutes` / `neutral` / `undetermined` with confidence). Analyst can override any verdict; running tally honours overrides. |
+| **Chronology Builder** | `/chronologies` | Curate timelines from raw events — analyst hand-picks events, annotates, reorders. Cross-surface "Add to chronology" button on entity timelines. Markdown export. |
+| **Red-Team Critiques** | `/critiques` | LLM argues against your own analysis. Structured rebuttal: BLUF / Weak Assumptions / Alternative Explanations / Cognitive Biases / Missing Evidence / Sharpest Counter-Question. Runs against any hypothesis, comparison, chronology, briefing, or free-form topic. |
+| **Key Assumptions Check** | `/assumptions` | List the assumptions an analysis depends on; grade each as well-supported / supported with caveats / unsupported / vulnerable. LLM extraction extracts candidates from any parent artifact. |
+| **Estimative Probability Tracker** | `/estimates` | Log forecasts with ICD-203 Words of Estimative Probability ("almost certain" → "almost no chance"), deadline, resolution criteria. On resolution computes a Brier-style calibration score with per-WEP bucket comparison (your "likely" forecasts vs reality). |
+
+**Cross-linking flow.** From any analytical surface you can spawn a critique or KAC against the current artifact. Each spawn is a single-click; the spawned object remembers its parent and shows a back-jump. This makes it trivial to walk the canonical IC tradecraft pipeline:
+
+> Hypothesis → Run KAC → Extract assumptions via LLM → Grade them → Run red-team critique → Log key estimates → Resolve estimates over time → Watch calibration evolve in Workspace.
+
+**First-launch tour.** A What's New modal fires once when the app detects a fresh major version, walking the analyst through every surface with one-click jump-to-page. Self-gates on `localStorage`.
+
+### Intelligence Collection (58+ Sources)
 
 | Discipline | Sources | Examples |
 |-----------|---------|----------|
@@ -139,8 +160,10 @@ Dedicated trader-style dashboard surfacing all financial intel:
 ### AI-Powered Chat
 
 - **Multi-provider LLM** support: OpenAI, Anthropic, Ollama, OpenRouter, Groq, and any OpenAI-compatible API
-- **Agentic orchestration**: Plan -> Research -> Analyze with parallel execution
-- **10 built-in tools**: `intel_search`, `vector_search`, `entity_lookup`, `web_fetch`, `whois_lookup`, `cve_detail`, `dns_resolve`, `shell_exec`, `create_report`, `graph_query`
+- **Agentic orchestration**: Plan → Research → Analyze with parallel execution
+- **TaskClass-aware model routing**: separate models for `analysis`, `briefing`, `planner` so cheap models do bulk work and the strong models handle synthesis
+- **17+ built-in tools**: `intel_search`, `vector_search`, `entity_lookup`, `web_fetch`, `whois_lookup`, `cve_detail`, `dns_resolve`, `shell_exec`, `create_report`, `graph_query`, plus tools for darkweb / Ahmia / Tor / MCP servers
+- **MCP (Model Context Protocol) integration**: Plug in any MCP-compliant server (filesystem, memory, fetch, time, Wikipedia, arXiv, whois, DNS) and the agent picks up its tools automatically
 - **RAG** over all collected intelligence with hybrid search (vector + keyword)
 - **HUMINT generation**: Record chat sessions as Human Intelligence reports
 - **Preliminary reports**: Auto-extract recommended actions and information gaps
@@ -169,11 +192,12 @@ SOC-style overview with 4 zones, auto-refreshing every 30s:
 
 ### Sidebar & Navigation
 
-- **Grouped categories**: 5 logical groups (Overview, Intelligence, Sources & Sync, AI & Comms, System)
+- **Grouped categories**: 6 logical groups (Overview, Intelligence, Sources & Sync, AI & Comms, Library & Cases, System)
 - **Collapsible mini mode**: Toggle to 56px icon-only sidebar with hover tooltips
 - **Per-group collapse**: Each group has a chevron to fold its items
 - **State persistence**: Sidebar collapse state and per-group fold state saved to localStorage
 - **Mobile drawer**: Sidebar slides in from a hamburger button on screens < 768px
+- **Dynamic version footer**: Reads current app version via `app:getVersion` IPC (no more hard-coded strings)
 - **Heimdall logo** + "Always vigilant" tagline at top
 
 ### Enrichment Pipeline
@@ -229,7 +253,7 @@ SOC-style overview with 4 zones, auto-refreshing every 30s:
 | Framework | Electron 33 + electron-vite 5 |
 | Frontend | React 19 + TypeScript 5.7 |
 | Styling | Tailwind CSS + shadcn/ui + Radix UI |
-| Database | SQLite (better-sqlite3, WAL mode) |
+| Database | SQLCipher (`better-sqlite3-multiple-ciphers`, WAL mode, FTS5) |
 | Vector DB | Vectra (local, 384-dim TF-IDF embeddings) |
 | Graph DB | Kuzu (optional, Cypher queries) |
 | Map | Leaflet + react-leaflet |
@@ -342,7 +366,7 @@ src/
   process/          # Main process (Node.js)
     agents/         # Agent orchestrator (Lead, Analyst, Summary)
     bridge/         # IPC handlers (chat, intel, settings, enrichment, etc.)
-    collectors/     # 42+ data source collectors organized by discipline
+    collectors/     # 58+ data source collectors organized by discipline
       osint/        # RSS, GDELT, GNews, Factbook, etc.
       cybint/       # CVE, threat feeds, IOCs, internet outages
       finint/       # EDGAR, sanctions, commodities
@@ -354,41 +378,60 @@ src/
       agency/       # Interpol, FBI, Europol, UNSC, advisories
       imint/        # Traffic cameras, public webcams
     services/       # Core services
-      database/     # SQLite schema, migrations
+      analysis/     # Phase 10 — comparative, hypothesis, chronology,
+                    #            critique, KAC, estimate services
+      database/     # SQLCipher schema + 64 numbered migrations
       enrichment/   # Entity extraction, tagging, corroboration
+      entity/       # Canonicalisation, watchlist, timeline, geo, graph
       graphdb/      # Kuzu graph DB + SQLite sync
       humint/       # HUMINT report generation
-      llm/          # LLM service, agentic orchestrator, RAG, tool calling
+      llm/          # LLM service, agentic orchestrator, RAG, tool calling,
+                    # ToolCallingAgent, model router (TaskClass-aware)
+      mcp/          # McpClientService (MCP server bridge)
       obsidian/     # Obsidian REST API client
-      resource/     # ResourceManager, WindowCache
+      sentinel/     # Service supervisor + circuit breakers + DLQ
       sync/         # SyncManager (10 job types)
       vectordb/     # Vectra vector DB + ingestion pipeline
       watch/        # Watch terms service
   renderer/         # React frontend
-    pages/          # 16 app pages
-    components/     # Shared UI components (shadcn/ui)
+    pages/          # 55 app pages
+    components/     # Shared UI components (shadcn/ui), PromptDialog,
+                    # MarkdownRenderer, WhatsNewModal
 ```
 
 ---
 
 ## Database
 
-Heimdall uses SQLite (WAL mode) with 20+ tables:
+Heimdall uses **SQLite with SQLCipher encryption** (`better-sqlite3-multiple-ciphers`, WAL mode) and **FTS5** full-text search. 100+ tables across 64 numbered, idempotent migrations:
 
+**Core intelligence**
 - `intel_reports` — Core intelligence data (7000+ reports typical)
-- `sources` — 46+ configured data sources with cron schedules
-- `intel_tags`, `intel_entities`, `intel_links` — Enrichment data
+- `sources` — 58+ configured data sources with cron schedules
+- `intel_tags`, `intel_entities`, `intel_links`, `canonical_entities` — Enrichment + entity-resolution data
+- `humint_reports`, `transcripts`, `transcript_segments` — Human + voice intelligence
+
+**Analytical workspace (Phase 10)**
+- `comparative_analyses` — Entity & time-window comparisons
+- `hypotheses`, `hypothesis_evidence` — ACH tracker with 15-min auto-evaluator
+- `chronologies` — Curated event timelines (events_json blob)
+- `critiques` — Red-team rebuttals against any analytical artifact
+- `assumption_checks`, `assumption_check_items` — KAC workspace
+- `estimates` — ICD-203 forecasts with WEP, deadline, resolution criteria, calibration
+
+**Operations & audit**
 - `chat_sessions`, `chat_messages` — LLM conversation history
 - `preliminary_reports`, `intel_gaps`, `recommended_actions` — Analysis products
-- `humint_reports` — Human intelligence from chat sessions
-- `watch_terms` — Targeted collection terms
-- `tool_call_logs` — Agent tool execution audit trail
-- `meshtastic_nodes` — Mesh network node tracking
+- `daily_briefings`, `report_products` — Scheduled + analyst-curated reports
+- `case_files`, `case_file_items` — Cross-artifact case containers
+- `watch_terms`, `entity_watchlist` — Targeted collection
+- `tool_call_logs`, `audit_log`, `audit_chain` — Tamper-evident execution trail
+- `meshtastic_nodes`, `geofences` — SIGINT + spatial
 - `token_usage` — LLM token consumption tracking
-- `audit_log` — System audit trail
-- `analytics_reports` — Saved custom analytics dashboards (layouts, widgets, global filters as JSON)
+- `analytics_reports` — Saved custom analytics dashboards
+- `mcp_servers` — MCP server registry
 
-Versioned migrations with automatic pre-migration backups ensure zero data loss on upgrades. Current schema version is **007**.
+Versioned migrations with automatic pre-migration backups ensure zero data loss on upgrades. **Current schema version is `064`.**
 
 ---
 
@@ -396,26 +439,36 @@ Versioned migrations with automatic pre-migration backups ensure zero data loss 
 
 ```
                     Electron Main Process
-                    ┌─────────────────────────────────────┐
-                    │  CollectorManager (42+ collectors)    │
-                    │  EnrichmentOrchestrator (15s poll)    │
-                    │  IntelPipeline (vector ingestion)     │
-                    │  ResourceManager (5min cleanup)       │
-                    │  CronService (job scheduling)         │
-                    │  AlertEngine (3 dispatchers)          │
-                    │  KuzuService (graph DB)               │
-                    │  SyncManager (10 sync jobs)           │
-                    │                                       │
-                    │  SQLite ←→ Vectra ←→ Kuzu             │
-                    └────────────┬────────────────────────┘
-                                 │ IPC Bridge (60+ channels)
-                    ┌────────────┴────────────────────────┐
-                    │        Electron Renderer             │
-                    │  React 19 + Tailwind + shadcn/ui     │
-                    │  16 Pages + Leaflet Map              │
-                    │  Chart.js + Force Graph              │
-                    │  SSE Streaming Chat                   │
-                    └─────────────────────────────────────┘
+                    ┌──────────────────────────────────────────┐
+                    │  CollectorManager (58+ collectors)         │
+                    │  EnrichmentOrchestrator (15s poll)         │
+                    │  IntelPipeline (vector ingestion)          │
+                    │  ResourceManager + Sentinel supervisor     │
+                    │  CronService (60+ scheduled jobs)          │
+                    │  AlertEngine (Telegram, Email, Meshtastic) │
+                    │  Phase 10 services:                        │
+                    │    - HypothesisService (15-min evaluator)  │
+                    │    - ComparativeAnalysisService            │
+                    │    - ChronologyService                     │
+                    │    - CritiqueService (LLM red-team)        │
+                    │    - KacService (assumption check)         │
+                    │    - EstimateService (Brier calibration)   │
+                    │  KuzuService (graph DB) + GraphCanvas      │
+                    │  McpClientService (MCP server bridge)      │
+                    │  SyncManager (10 sync jobs)                │
+                    │                                            │
+                    │  SQLCipher ←→ Vectra ←→ Kuzu               │
+                    └────────────┬───────────────────────────────┘
+                                 │ IPC Bridge (459+ channels)
+                    ┌────────────┴───────────────────────────────┐
+                    │        Electron Renderer                    │
+                    │  React 19 + Tailwind + shadcn/ui            │
+                    │  55 Pages + Leaflet Map                     │
+                    │  Chart.js + Force Graph + react-grid-layout │
+                    │  SSE Streaming Chat                          │
+                    │  PromptDialog (Electron-safe modal input)   │
+                    │  WhatsNewModal (versioned release splash)   │
+                    └────────────────────────────────────────────┘
 ```
 
 ---
