@@ -11,7 +11,7 @@ import { useNavigate } from 'react-router-dom'
 import {
   ListChecks, Plus, RefreshCw, Loader2, AlertCircle, Trash2,
   ThumbsUp, ThumbsDown, Minus, HelpCircle, Sparkles, Pause, Play,
-  Edit3, Archive, ShieldOff
+  Edit3, Archive, ShieldOff, ListTodo
 } from 'lucide-react'
 import { Button } from '@renderer/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@renderer/components/ui/card'
@@ -196,6 +196,26 @@ export function HypothesesPage() {
     }
   }
 
+  // v1.9.4 — bind a fresh KAC to this hypothesis and jump there.
+  const runKac = async () => {
+    if (!selected) return
+    try {
+      const created = await window.heimdall.invoke('kac:create', {
+        name: `KAC: ${selected.name}`,
+        parent_kind: 'hypothesis',
+        parent_id: selected.id
+      }) as { id: string }
+      toast.success('Assumption check created', {
+        description: 'Open it from the Assumptions page; click Extract to seed via LLM.',
+        action: { label: 'Open', onClick: () => navigate('/assumptions') }
+      })
+      navigate('/assumptions')
+      void created
+    } catch (err) {
+      toast.error('KAC failed', { description: String(err).replace(/^Error:\s*/, '') })
+    }
+  }
+
   const overrideVerdict = async (evidenceId: string, verdict: Verdict | null) => {
     try {
       await window.heimdall.invoke('hypothesis:set_override', { evidenceId, verdict })
@@ -330,6 +350,9 @@ export function HypothesesPage() {
                     </Button>
                     <Button size="sm" variant="ghost" onClick={runCritique} className="h-8 text-amber-600 dark:text-amber-400" title="Red-team critique (LLM argues against this hypothesis)">
                       <ShieldOff className="h-3.5 w-3.5" />
+                    </Button>
+                    <Button size="sm" variant="ghost" onClick={runKac} className="h-8 text-primary" title="Key Assumptions Check (start a stress-test of this hypothesis's assumptions)">
+                      <ListTodo className="h-3.5 w-3.5" />
                     </Button>
                     {selected.status === 'active' ? (
                       <Button size="sm" variant="ghost" onClick={() => setStatus('paused')} className="h-8 text-amber-600 dark:text-amber-400" title="Pause auto-evaluation">

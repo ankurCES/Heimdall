@@ -3446,6 +3446,54 @@ const migrations: Migration[] = [
       `)
       log.info('Migration 062: critiques table created (v1.9.3)')
     }
+  },
+  {
+    version: '063',
+    name: 'kac_assumption_checks',
+    up: (db) => {
+      // v1.9.4 — Key Assumptions Check (KAC) workspace.
+      //
+      // Standard IC structured analytic technique: list every
+      // assumption your analysis is leaning on, then test each.
+      // Where critiques are responsive (after a conclusion exists),
+      // KAC is prophylactic (run *before* publishing). Together they
+      // bookend the analytical pipeline.
+      //
+      // assumption_checks: parent container. Optionally bound to a
+      // hypothesis/comparison/chronology/briefing for cross-linking.
+      // assumption_check_items: the assumption rows. status enum
+      //   well_supported    = evidence + open-source consensus back it
+      //   supported_caveats = mostly true but with named exceptions
+      //   unsupported       = no evidence one way or the other
+      //   vulnerable        = could plausibly be inverted by new info
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS assumption_checks (
+          id TEXT PRIMARY KEY,
+          name TEXT NOT NULL,
+          context TEXT,
+          parent_kind TEXT,
+          parent_id TEXT,
+          parent_label TEXT,
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_assumption_checks_updated ON assumption_checks(updated_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_assumption_checks_parent ON assumption_checks(parent_kind, parent_id);
+
+        CREATE TABLE IF NOT EXISTS assumption_check_items (
+          id TEXT PRIMARY KEY,
+          check_id TEXT NOT NULL,
+          assumption_text TEXT NOT NULL,
+          status TEXT NOT NULL DEFAULT 'unsupported',
+          rationale TEXT,
+          sort_order INTEGER NOT NULL DEFAULT 0,
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_assumption_items_check ON assumption_check_items(check_id, sort_order);
+      `)
+      log.info('Migration 063: assumption_checks + assumption_check_items tables created (v1.9.4)')
+    }
   }
 ]
 

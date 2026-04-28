@@ -7,6 +7,7 @@ import { comparativeAnalysisService, type EntitySubject, type TimeWindowSubject 
 import { hypothesisService, type Verdict } from '../services/analysis/HypothesisService'
 import { chronologyService, type ChronologyEvent } from '../services/analysis/ChronologyService'
 import { critiqueService, type CritiqueParentKind } from '../services/analysis/CritiqueService'
+import { kacService, type KacParentKind, type KacItemStatus } from '../services/analysis/KacService'
 
 export function registerComparisonBridge(): void {
   ipcMain.handle('comparison:list', (_evt, args?: { limit?: number }) =>
@@ -92,6 +93,33 @@ export function registerComparisonBridge(): void {
   )
   ipcMain.handle('critique:create_freeform', async (_evt, args: { topic: string; label?: string }) =>
     await critiqueService.createFreeform(args)
+  )
+
+  // v1.9.4 — Key Assumptions Check IPC.
+  ipcMain.handle('kac:list', () => kacService.list())
+  ipcMain.handle('kac:list_for_parent', (_evt, args: { parent_kind: NonNullable<KacParentKind>; parent_id: string }) =>
+    kacService.listForParent(args.parent_kind, args.parent_id)
+  )
+  ipcMain.handle('kac:get', (_evt, id: string) => kacService.get(id))
+  ipcMain.handle('kac:create', (_evt, args: { name: string; context?: string | null; parent_kind?: KacParentKind; parent_id?: string | null }) =>
+    kacService.create(args)
+  )
+  ipcMain.handle('kac:update', (_evt, args: { id: string; patch: { name?: string; context?: string | null } }) =>
+    kacService.update(args.id, args.patch)
+  )
+  ipcMain.handle('kac:delete', (_evt, id: string) => { kacService.remove(id); return { ok: true } })
+  ipcMain.handle('kac:add_item', (_evt, args: { checkId: string; assumption_text: string; status?: KacItemStatus; rationale?: string | null }) =>
+    kacService.addItem(args.checkId, { assumption_text: args.assumption_text, status: args.status, rationale: args.rationale })
+  )
+  ipcMain.handle('kac:update_item', (_evt, args: { itemId: string; patch: { assumption_text?: string; status?: KacItemStatus; rationale?: string | null } }) =>
+    kacService.updateItem(args.itemId, args.patch)
+  )
+  ipcMain.handle('kac:remove_item', (_evt, itemId: string) => { kacService.removeItem(itemId); return { ok: true } })
+  ipcMain.handle('kac:reorder_items', (_evt, args: { checkId: string; orderedIds: string[] }) => {
+    kacService.reorderItems(args.checkId, args.orderedIds); return { ok: true }
+  })
+  ipcMain.handle('kac:extract_from_parent', async (_evt, checkId: string) =>
+    await kacService.extractFromParent(checkId)
   )
 
   log.info('comparison bridge registered')
