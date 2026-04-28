@@ -227,6 +227,16 @@ async function initializeDeferred(): Promise<void> {
     entityWatchlist.start()
   } catch (err) { log.warn(`Entity watchlist init failed: ${err}`) }
 
+  // v1.9.1 — hypothesis auto-evaluator. 15-minute cron walks each
+  // active hypothesis + recent intel, scores new (hypothesis, intel)
+  // pairs via the LLM with strict JSON output. Idempotent on the
+  // pair via UNIQUE(hypothesis_id, intel_id). Per-tick cap prevents
+  // budget blowups.
+  try {
+    const { hypothesisService } = await import('./services/analysis/HypothesisService')
+    hypothesisService.start()
+  } catch (err) { log.warn(`Hypothesis evaluator init failed: ${err}`) }
+
   // Load enabled sources from DB and schedule them
   await collectorManager.loadFromDatabase()
 

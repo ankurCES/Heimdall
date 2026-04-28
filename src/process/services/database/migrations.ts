@@ -3310,6 +3310,66 @@ const migrations: Migration[] = [
       `)
       log.info('Migration 059: comparative_analyses table created (v1.9.0)')
     }
+  },
+  {
+    version: '060',
+    name: 'hypotheses_and_evidence',
+    up: (db) => {
+      // v1.9.1 — Phase 10 hypothesis tracker (operationalised ACH).
+      //
+      // hypotheses: analyst-defined statements that the system tracks
+      // evidence against.  status='active' means the auto-evaluator
+      // cron will score new intel against it; 'paused' parks the
+      // hypothesis without deleting; 'closed' freezes the row +
+      // evidence as a historical record.
+      //
+      // hypothesis_evidence: one row per (hypothesis, intel_report)
+      // pair that has been evaluated by the LLM. UNIQUE constraint
+      // prevents double-evaluation of the same pair. verdict is
+      // 'supports' | 'refutes' | 'neutral' | 'undetermined'; the
+      // confidence + reasoning come straight from the LLM output.
+      // analyst_override + analyst_override_at let the analyst flip
+      // the verdict (the running tally always uses the override
+      // when present).
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS hypotheses (
+          id TEXT PRIMARY KEY,
+          name TEXT NOT NULL,
+          statement TEXT NOT NULL,
+          status TEXT NOT NULL DEFAULT 'active',
+          /* When set, the cron only evaluates intel mentioning this
+             canonical entity (deterministic intel_entities join).
+             NULL means "all incoming intel". */
+          anchor_canonical_id TEXT,
+          /* Free-text scope hint included in the LLM prompt — e.g.
+             "limit to last 30 days", "focus on financial sector". */
+          scope_hint TEXT,
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL,
+          last_evaluated_at INTEGER
+        );
+        CREATE INDEX IF NOT EXISTS idx_hypotheses_status ON hypotheses(status);
+        CREATE INDEX IF NOT EXISTS idx_hypotheses_anchor ON hypotheses(anchor_canonical_id);
+
+        CREATE TABLE IF NOT EXISTS hypothesis_evidence (
+          id TEXT PRIMARY KEY,
+          hypothesis_id TEXT NOT NULL,
+          intel_id TEXT NOT NULL,
+          verdict TEXT NOT NULL,
+          confidence REAL NOT NULL,
+          reasoning TEXT,
+          model TEXT,
+          evaluated_at INTEGER NOT NULL,
+          analyst_override TEXT,
+          analyst_override_at INTEGER,
+          UNIQUE(hypothesis_id, intel_id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_hypothesis_evidence_h ON hypothesis_evidence(hypothesis_id);
+        CREATE INDEX IF NOT EXISTS idx_hypothesis_evidence_i ON hypothesis_evidence(intel_id);
+        CREATE INDEX IF NOT EXISTS idx_hypothesis_evidence_at ON hypothesis_evidence(evaluated_at DESC);
+      `)
+      log.info('Migration 060: hypotheses + hypothesis_evidence tables created (v1.9.1)')
+    }
   }
 ]
 
